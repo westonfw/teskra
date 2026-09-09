@@ -1,0 +1,3 @@
+-- 001_init — placeholder. TASK-090 fills in the real DDL from plan §139.1
+-- (the single schema authority). This file exists so the TASK-006 migration
+-- mechanism has its canonical 001–005 chain; do not add schema here.
