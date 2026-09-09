@@ -1,8 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'node:path'
 
-import { IPC_CHANNELS } from '@teskra/contracts'
-
+import { registerIpcRouter } from './ipc/router'
 import { getLogger } from './logger'
 import { composeTeskraRuntime } from './runtime/compose'
 import type { TeskraRuntime } from './runtime/facade'
@@ -32,9 +31,8 @@ function createWindow(): void {
   }
 }
 
-ipcMain.handle(IPC_CHANNELS.ping, () => 'pong')
-
 let runtime: TeskraRuntime | undefined
+const ipcRouter = registerIpcRouter(ipcMain, () => runtime)
 
 app.whenReady().then(async () => {
   // TASK-081: all non-Electron services are built at the single composition
@@ -59,6 +57,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('before-quit', () => {
+  ipcRouter.dispose()
   const disposed = runtime?.dispose()
   if (disposed !== undefined && !disposed.ok) {
     getLogger('app').error({ err: disposed.error }, 'Failed to dispose Teskra Runtime cleanly.')

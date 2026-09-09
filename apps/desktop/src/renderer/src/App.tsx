@@ -10,7 +10,7 @@ function App(): JSX.Element {
       .ping()
       .then((result) => {
         if (!cancelled) {
-          setPong(result)
+          setPong(result.ok ? result.data : null)
         }
       })
       .catch(() => {

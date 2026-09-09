@@ -54,7 +54,24 @@ describe('ipc contracts', () => {
     expect(IPC_CHANNELS.ping).toBe('teskra:ping')
     expect(pingChannel.channel).toBe('teskra:ping')
     expect(ipcChannelDefinitions.ping).toBe(pingChannel)
-    expect(pingResponseSchema.safeParse('pong').success).toBe(true)
+    expect(pingResponseSchema.safeParse({ ok: true, data: 'pong' }).success).toBe(true)
     expect(() => pingChannel.request.parse(undefined)).not.toThrow()
+  })
+
+  it('registers a request and IpcResult response schema for every IPC channel', () => {
+    expect(Object.values(ipcChannelDefinitions)).toHaveLength(Object.keys(IPC_CHANNELS).length)
+    for (const definition of Object.values(ipcChannelDefinitions)) {
+      expect(definition.request).toBeDefined()
+      expect(
+        definition.response.safeParse({
+          ok: false,
+          error: {
+            code: 'UNKNOWN',
+            message: 'safe',
+            retryable: false,
+          },
+        }).success,
+      ).toBe(true)
+    }
   })
 })
