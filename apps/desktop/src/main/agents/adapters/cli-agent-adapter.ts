@@ -3,6 +3,7 @@ import type {
   AgentResumeRequest,
   AgentStartRequest,
   IpcResult,
+  ProviderSessionRef,
   WorkspaceRuntimeRef,
 } from '@teskra/contracts'
 
@@ -18,6 +19,7 @@ import type {
 export interface CliAgentLaunch {
   readonly args: readonly string[]
   readonly env?: Readonly<Record<string, string>>
+  readonly providerSession?: ProviderSessionRef
 }
 
 export interface CliAgentAdapterOptions {
@@ -84,6 +86,9 @@ export function createCliAgentAdapter(options: CliAgentAdapterOptions): CodingAg
         processId: started.data.id,
         pid: started.data.pid,
         startedAt: started.data.startedAt,
+        ...(launch.providerSession === undefined
+          ? {}
+          : { providerSession: launch.providerSession }),
       },
     }
   }

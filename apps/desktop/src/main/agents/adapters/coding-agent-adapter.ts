@@ -4,6 +4,7 @@ import type {
   AgentResumeRequest,
   AgentStartRequest,
   IpcResult,
+  ProviderSessionRef,
   WorkspaceRuntimeRef,
 } from '@teskra/contracts'
 
@@ -12,6 +13,7 @@ export interface AgentProcessHandle {
   readonly processId: string
   readonly pid: number
   readonly startedAt: string
+  readonly providerSession?: ProviderSessionRef
 }
 
 export interface AgentAdapterDetectionRequest {
