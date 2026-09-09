@@ -1,0 +1,5 @@
+{
+  "stdout": ["Fake Agent started"],
+  "stderr": ["Fake Agent failed as requested"],
+  "exitCode": 1
+}

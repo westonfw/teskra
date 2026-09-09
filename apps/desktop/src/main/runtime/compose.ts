@@ -32,7 +32,7 @@ import { createWorkspaceRuntime, type WslEnvironmentInfo } from '../workspace/ru
 import { createWorkspaceManager } from '../workspace/workspace-manager'
 import { createWslManager } from '../workspace/wsl-manager'
 import type { TeskraRuntime } from './facade'
-import { createBuiltInAgentRegistry } from '../agents/agent-registry'
+import { createDefaultAgentRegistry } from '../agents/agent-registry'
 
 export interface ComposeRuntimeOptions {
   readonly paths?: TeskraPaths
@@ -49,6 +49,8 @@ export interface ComposeRuntimeOptions {
   readonly openPath?: (path: string) => Promise<string>
   /** Electron directory dialog adapter, injected by main/index.ts. */
   readonly selectDirectory?: () => Promise<string | null>
+  /** Explicit packaging boundary: Fake Agent is available only in development/tests. */
+  readonly includeDevelopmentAgents?: boolean
 }
 
 function createRepositories(connection: TeskraDatabase['connection']) {
@@ -109,7 +111,7 @@ export async function composeTeskraRuntime(
     return resolvedConfig
   }
 
-  const registeredAgents = createBuiltInAgentRegistry()
+  const registeredAgents = createDefaultAgentRegistry(options.includeDevelopmentAgents === true)
   if (!registeredAgents.ok) {
     database.close()
     return registeredAgents

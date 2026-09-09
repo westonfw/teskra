@@ -1,0 +1,4 @@
+{
+  "stdout": ["Fake Agent is hanging as requested"],
+  "hang": true
+}

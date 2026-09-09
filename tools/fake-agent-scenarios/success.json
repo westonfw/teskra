@@ -1,0 +1,12 @@
+{
+  "stdout": ["Fake Agent started", "Applying deterministic change", "Fake Agent completed"],
+  "handoff": {
+    "type": "implementation",
+    "summary": "Fake Agent completed the requested work.",
+    "filesChanged": [],
+    "commandsRun": [{ "command": "fake-agent --scenario success", "exitCode": 0 }],
+    "tests": [{ "name": "fake deterministic check", "passed": true }],
+    "suggestedNextAction": "Review the deterministic Fake Agent result."
+  },
+  "exitCode": 0
+}

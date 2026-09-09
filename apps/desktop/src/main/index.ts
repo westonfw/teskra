@@ -16,6 +16,7 @@ app.whenReady().then(async () => {
   // root. A structured startup failure leaves the secure shell operational.
   const composed = await composeTeskraRuntime({
     appVersion: app.getVersion(),
+    includeDevelopmentAgents: !app.isPackaged,
     openPath: (path) => shell.openPath(path),
     selectDirectory: async () => {
       const selected = await dialog.showOpenDialog({ properties: ['openDirectory'] })

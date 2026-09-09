@@ -1,0 +1,5 @@
+{
+  "stdout": ["Fake Agent is writing a malformed handoff"],
+  "rawHandoff": "{ definitely-not-valid-json",
+  "exitCode": 0
+}

@@ -65,6 +65,22 @@ export default tseslint.config(
     },
   },
   {
+    files: ['tools/**/*.js'],
+    languageOptions: {
+      globals: {
+        __dirname: 'readonly',
+        Buffer: 'readonly',
+        console: 'readonly',
+        process: 'readonly',
+        require: 'readonly',
+        setInterval: 'readonly',
+      },
+    },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
+  {
     // TASK-012: CommandRunner is the only module allowed to spawn one-shot
     // module allowed to spawn one-shot commands; every other module injects
     // commands. TASK-014: ProcessManager is the only module allowed to spawn

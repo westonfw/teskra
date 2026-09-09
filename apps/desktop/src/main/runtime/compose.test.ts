@@ -59,6 +59,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       appVersion: '9.8.7',
       runtimeVersion: '22.test',
       initializeLogs: false,
+      includeDevelopmentAgents: true,
     })
     expect(composed.ok).toBe(true)
     if (!composed.ok) return
@@ -76,7 +77,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     expect(runtime.terminal.list()).toEqual({ ok: true, data: [] })
     expect(runtime.agent.listDefinitions()).toMatchObject({
       ok: true,
-      data: [{ id: 'codex' }, { id: 'claude' }],
+      data: [{ id: 'codex' }, { id: 'claude' }, { id: 'fake' }],
     })
     expect(runtime.system.info()).toEqual({
       ok: true,

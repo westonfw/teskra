@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest'
 
 import type { AgentDefinition } from '@teskra/contracts'
 
-import { createAgentRegistry, createBuiltInAgentRegistry } from './agent-registry'
+import {
+  createAgentRegistry,
+  createBuiltInAgentRegistry,
+  createDefaultAgentRegistry,
+} from './agent-registry'
 
 const FAKE: AgentDefinition = {
   id: 'fake',
@@ -36,6 +40,15 @@ describe('AgentRegistry', () => {
     expect(created.data.register(FAKE)).toEqual({ ok: true, data: FAKE })
     expect(created.data.get('fake')).toEqual(FAKE)
     expect(created.data.has('fake')).toBe(true)
+  })
+
+  it('registers Fake only for development and test composition', () => {
+    const development = createDefaultAgentRegistry(true)
+    const production = createDefaultAgentRegistry(false)
+    if (!development.ok || !production.ok) throw new Error('expected registries')
+
+    expect(development.data.list().map(({ id }) => id)).toEqual(['codex', 'claude', 'fake'])
+    expect(production.data.list().map(({ id }) => id)).toEqual(['codex', 'claude'])
   })
 
   it('rejects malformed and duplicate definitions', () => {

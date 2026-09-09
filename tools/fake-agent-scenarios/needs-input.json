@@ -1,0 +1,6 @@
+{
+  "prompt": "Fake Agent is waiting for input",
+  "waitForInput": true,
+  "responsePrefix": "Fake Agent received: ",
+  "exitCode": 0
+}

@@ -1,0 +1,6 @@
+{
+  "stdout": ["Fake Agent is modifying the worktree without committing"],
+  "writeFile": "fake-agent-dirty.txt",
+  "writeContents": "uncommitted Fake Agent change\n",
+  "exitCode": 0
+}
