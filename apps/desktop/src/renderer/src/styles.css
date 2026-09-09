@@ -189,6 +189,21 @@ body {
   left: 0;
 }
 
+.readonly-terminal-log {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  color: #d9e2ef;
+  font:
+    13px/1.35 'Cascadia Mono',
+    Consolas,
+    monospace;
+  white-space: pre-wrap;
+  background: #090d14;
+}
+
 .terminal-keep-alive {
   display: none;
   width: 100%;

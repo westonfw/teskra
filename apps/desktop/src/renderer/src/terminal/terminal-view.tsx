@@ -1,10 +1,9 @@
-import { FitAddon } from '@xterm/addon-fit'
-import { Terminal } from '@xterm/xterm'
 import { Alert } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 
 import type { TerminalSession } from '@teskra/contracts'
 
+import { terminalRenderers, type TerminalInstance } from './renderers'
 import { bindTerminalSession } from './terminal-session-binding'
 
 interface TerminalViewProps {
@@ -14,6 +13,7 @@ interface TerminalViewProps {
   readonly readOnly?: boolean
   readonly className?: string
   readonly onClosed?: () => void
+  readonly rendererName?: string
 }
 
 /** Interactive ANSI/TTY surface for a live TerminalManager session (TASK-018). */
@@ -24,10 +24,10 @@ export function TerminalView({
   readOnly = false,
   className,
   onClosed,
+  rendererName,
 }: TerminalViewProps) {
   const hostRef = useRef<HTMLDivElement>(null)
-  const fitRef = useRef<FitAddon | null>(null)
-  const terminalRef = useRef<Terminal | null>(null)
+  const terminalRef = useRef<TerminalInstance | null>(null)
   const initialDataRef = useRef(initialData)
   const onClosedRef = useRef(onClosed)
   const [error, setError] = useState<string>()
@@ -37,28 +37,10 @@ export function TerminalView({
     const host = hostRef.current
     if (host === null) return
 
-    const terminal = new Terminal({
-      cursorBlink: true,
-      cursorStyle: 'bar',
-      fontFamily: '"Cascadia Mono", "SFMono-Regular", Consolas, monospace',
-      fontSize: 13,
-      lineHeight: 1.18,
-      scrollback: 10_000,
-      allowProposedApi: false,
-      disableStdin: readOnly,
-      theme: {
-        background: '#090d14',
-        foreground: '#d9e2ef',
-        cursor: '#70ddd1',
-        cursorAccent: '#090d14',
-        selectionBackground: '#2d5e6d99',
-      },
+    const terminal = terminalRenderers.get(rendererName).mount(host, {
+      initialData: initialDataRef.current,
+      readOnly,
     })
-    const fit = new FitAddon()
-    terminal.loadAddon(fit)
-    terminal.open(host)
-    if (initialDataRef.current !== undefined) terminal.write(initialDataRef.current)
-    fitRef.current = fit
     terminalRef.current = terminal
 
     const cleanupBinding = readOnly
@@ -86,7 +68,7 @@ export function TerminalView({
         )
 
     const fitNow = (): void => {
-      if (host.clientWidth > 0 && host.clientHeight > 0) fit.fit()
+      if (host.clientWidth > 0 && host.clientHeight > 0) terminal.fit()
     }
     const frame = window.requestAnimationFrame(fitNow)
     const observer = new ResizeObserver(fitNow)
@@ -96,21 +78,20 @@ export function TerminalView({
       window.cancelAnimationFrame(frame)
       observer.disconnect()
       cleanupBinding?.()
-      fitRef.current = null
       terminalRef.current = null
       terminal.dispose()
       // The PTY deliberately remains owned by TerminalManager. Unmounting a
       // Renderer surface must never imply terminal.close() (TASK-019).
     }
-  }, [session.id])
+  }, [rendererName, session.id])
 
   useEffect(() => {
-    if (terminalRef.current !== null) terminalRef.current.options.disableStdin = readOnly
+    terminalRef.current?.setReadOnly(readOnly)
   }, [readOnly])
 
   useEffect(() => {
     if (!visible) return
-    const frame = window.requestAnimationFrame(() => fitRef.current?.fit())
+    const frame = window.requestAnimationFrame(() => terminalRef.current?.fit())
     return () => window.cancelAnimationFrame(frame)
   }, [visible])
 
