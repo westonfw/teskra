@@ -7,6 +7,22 @@ import type { PublicAppError } from './error'
  * IPC boundary when needed.
  */
 export interface WorkbenchEvents {
+  'process.started': {
+    processId: string
+    pid: number
+    workspaceId?: string
+    agentRunId?: string
+  }
+  'process.output': {
+    processId: string
+    data: string
+  }
+  'process.exited': {
+    processId: string
+    exitCode: number
+    signal?: number
+  }
+
   'workspace.opened': {
     workspaceId: string
   }
