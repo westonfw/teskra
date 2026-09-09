@@ -125,12 +125,14 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
   it('mounts Settings config writes and the injected folder opener', async () => {
     const home = makeHome()
     const openPath = vi.fn(async () => '')
+    const selectDirectory = vi.fn(async () => '/selected/repo')
     const composed = await composeTeskraRuntime({
       paths: createTeskraPaths({ TESKRA_HOME: home }),
       commands: wslCommands(),
       hostPlatform: 'linux',
       initializeLogs: false,
       openPath,
+      selectDirectory,
     })
     if (!composed.ok) throw new Error('expected runtime')
 
@@ -165,6 +167,10 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     })
     expect(openPath).toHaveBeenNthCalledWith(1, home)
     expect(openPath).toHaveBeenNthCalledWith(2, join(home, 'logs'))
+    expect(await composed.data.workspace.selectDirectory({ runtime: { kind: 'windows' } })).toEqual(
+      { ok: true, data: '/selected/repo' },
+    )
+    expect(selectDirectory).toHaveBeenCalledOnce()
     composed.data.dispose()
   })
 

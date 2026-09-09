@@ -46,6 +46,8 @@ export interface ComposeRuntimeOptions {
   readonly initializeLogs?: boolean
   /** Electron shell adapter, injected by main/index.ts to keep Runtime Electron-free. */
   readonly openPath?: (path: string) => Promise<string>
+  /** Electron directory dialog adapter, injected by main/index.ts. */
+  readonly selectDirectory?: () => Promise<string | null>
 }
 
 function createRepositories(connection: TeskraDatabase['connection']) {
@@ -148,6 +150,31 @@ export async function composeTeskraRuntime(
       remove: ({ id }) => workspaceManager.remove(id),
       listRecent: (request = {}) => workspaceManager.listRecent(request.limit),
       validate: (request) => workspaceManager.validate(request),
+      selectDirectory: async () => {
+        if (options.selectDirectory === undefined) {
+          return {
+            ok: false,
+            error: {
+              code: 'CAPABILITY_NOT_AVAILABLE',
+              message: 'The folder picker is unavailable in this environment.',
+              retryable: false,
+            },
+          }
+        }
+        try {
+          return { ok: true, data: await options.selectDirectory() }
+        } catch (cause) {
+          getLogger('app').error({ cause }, 'Failed to open the workspace folder picker.')
+          return {
+            ok: false,
+            error: {
+              code: 'UNKNOWN',
+              message: 'The folder picker could not be opened.',
+              retryable: true,
+            },
+          }
+        }
+      },
     },
     terminal: {
       create: (request) => terminalManager.create(request),

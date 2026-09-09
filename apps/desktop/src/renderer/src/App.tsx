@@ -4,7 +4,7 @@ import type { JSX } from 'react'
 
 import { registerBuiltInSettings } from './settings/builtin-sections'
 import { createSettingsSectionRegistry } from './settings/registry'
-import { SettingsPage } from './settings/settings-page'
+import { AppShell } from './shell/app-shell'
 import { useTerminalStore } from './stores/terminal-store'
 
 const settingsRegistry = createSettingsSectionRegistry()
@@ -27,7 +27,7 @@ function App(): JSX.Element {
       }}
     >
       <AntApp>
-        <SettingsPage registry={settingsRegistry} />
+        <AppShell settingsRegistry={settingsRegistry} />
       </AntApp>
     </ConfigProvider>
   )

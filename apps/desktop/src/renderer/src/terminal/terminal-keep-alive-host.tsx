@@ -1,9 +1,10 @@
 import { CloseOutlined, PlusOutlined } from '@ant-design/icons'
-import { Alert, Button, Empty, Select, Spin, Tabs } from 'antd'
+import { Button, Empty, Select, Spin, Tabs } from 'antd'
 import { useEffect, useState } from 'react'
 
 import type { TerminalShell, Workspace } from '@teskra/contracts'
 
+import { AppErrorAlert } from '../components/app-error-alert'
 import { useTerminalStore } from '../stores/terminal-store'
 import { TerminalView } from './terminal-view'
 
@@ -58,9 +59,7 @@ export function TerminalKeepAliveHost({ workspace, visible }: TerminalKeepAliveH
           New terminal
         </Button>
       </div>
-      {error !== undefined && (
-        <Alert banner closable type="error" message={error.message} onClose={clearError} />
-      )}
+      {error !== undefined && <AppErrorAlert error={error} onClose={clearError} />}
       <Spin spinning={loading}>
         {workspaceTabs.length === 0 ? (
           <Empty

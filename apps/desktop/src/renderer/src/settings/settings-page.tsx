@@ -3,6 +3,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 
 import type { WritableConfigLayer } from '@teskra/contracts'
 
+import { AppErrorAlert } from '../components/app-error-alert'
 import type { SettingsSectionRegistry } from './registry'
 import { useSettingsStore } from './settings-store'
 
@@ -86,12 +87,9 @@ export function SettingsPage({ registry, workspaceId: selectedWorkspaceId }: Set
           />
         )}
         {error !== undefined && (
-          <Alert
+          <AppErrorAlert
             className="settings-notice"
-            type="error"
-            showIcon
-            closable
-            message={error.message}
+            error={error}
             onClose={clearError}
           />
         )}

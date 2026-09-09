@@ -9,6 +9,7 @@ import type {
   OpenSystemDirectoryRequest,
   ResolveConfigRequest,
   ResolvedConfig,
+  SelectWorkspaceDirectoryRequest,
   SystemHealth,
   SystemInfo,
   SystemPaths,
@@ -33,6 +34,7 @@ export interface WorkspacePort {
   remove(request: WorkspaceIdRequest): IpcResult<boolean>
   listRecent(request?: ListRecentWorkspacesRequest): IpcResult<Workspace[]>
   validate(request: OpenWorkspaceRequest): IpcResult<WorkspaceValidationResult>
+  selectDirectory(request: SelectWorkspaceDirectoryRequest): Promise<IpcResult<string | null>>
 }
 
 export interface TerminalPort {

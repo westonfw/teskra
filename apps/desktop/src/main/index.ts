@@ -1,4 +1,4 @@
-import { app, ipcMain, shell } from 'electron'
+import { app, dialog, ipcMain, shell } from 'electron'
 import { join } from 'node:path'
 
 import { createRendererEventBridge, type RendererEventBridge } from './events/renderer-event-bridge'
@@ -17,6 +17,10 @@ app.whenReady().then(async () => {
   const composed = await composeTeskraRuntime({
     appVersion: app.getVersion(),
     openPath: (path) => shell.openPath(path),
+    selectDirectory: async () => {
+      const selected = await dialog.showOpenDialog({ properties: ['openDirectory'] })
+      return selected.canceled ? null : (selected.filePaths[0] ?? null)
+    },
   })
   if (composed.ok) {
     runtime = composed.data

@@ -44,12 +44,14 @@ import {
   createWorkspaceRequestSchema,
   listRecentWorkspacesRequestSchema,
   openWorkspaceRequestSchema,
+  selectWorkspaceDirectoryRequestSchema,
   workspaceIdRequestSchema,
   workspaceSchema,
   workspaceValidationSchema,
   type CreateWorkspaceRequest,
   type ListRecentWorkspacesRequest,
   type OpenWorkspaceRequest,
+  type SelectWorkspaceDirectoryRequest,
   type Workspace,
   type WorkspaceIdRequest,
   type WorkspaceValidationResult,
@@ -68,6 +70,7 @@ export const IPC_CHANNELS = {
   workspaceRemove: 'teskra:workspace:remove',
   workspaceListRecent: 'teskra:workspace:list-recent',
   workspaceValidate: 'teskra:workspace:validate',
+  workspaceSelectDirectory: 'teskra:workspace:select-directory',
   terminalCreate: 'teskra:terminal:create',
   terminalWrite: 'teskra:terminal:write',
   terminalResize: 'teskra:terminal:resize',
@@ -136,6 +139,11 @@ export const workspaceValidateChannel = channel(
   IPC_CHANNELS.workspaceValidate,
   openWorkspaceRequestSchema,
   workspaceValidationSchema,
+)
+export const workspaceSelectDirectoryChannel = channel(
+  IPC_CHANNELS.workspaceSelectDirectory,
+  selectWorkspaceDirectoryRequestSchema,
+  z.string().nullable(),
 )
 export const terminalCreateChannel = channel(
   IPC_CHANNELS.terminalCreate,
@@ -230,6 +238,7 @@ export const ipcChannelDefinitions = {
   workspaceRemove: workspaceRemoveChannel,
   workspaceListRecent: workspaceListRecentChannel,
   workspaceValidate: workspaceValidateChannel,
+  workspaceSelectDirectory: workspaceSelectDirectoryChannel,
   terminalCreate: terminalCreateChannel,
   terminalWrite: terminalWriteChannel,
   terminalResize: terminalResizeChannel,
@@ -259,6 +268,7 @@ export interface TeskraBridge {
     remove(request: WorkspaceIdRequest): Promise<IpcResult<boolean>>
     listRecent(request?: ListRecentWorkspacesRequest): Promise<IpcResult<Workspace[]>>
     validate(request: OpenWorkspaceRequest): Promise<IpcResult<WorkspaceValidationResult>>
+    selectDirectory(request: SelectWorkspaceDirectoryRequest): Promise<IpcResult<string | null>>
   }
   readonly terminal: {
     create(request: CreateTerminalRequest): Promise<IpcResult<TerminalSession>>

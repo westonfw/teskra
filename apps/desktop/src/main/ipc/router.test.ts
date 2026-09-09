@@ -52,6 +52,7 @@ function fakeRuntime(): TeskraRuntime {
       remove: vi.fn(() => ok(true)),
       listRecent: vi.fn(() => ok([WORKSPACE])),
       validate: vi.fn(() => ok({ exists: true })),
+      selectDirectory: vi.fn(async () => ok('/repo')),
     },
     terminal: {
       create: vi.fn(() =>

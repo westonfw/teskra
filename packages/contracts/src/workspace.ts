@@ -60,5 +60,10 @@ export const listRecentWorkspacesRequestSchema = z.strictObject({
 })
 export type ListRecentWorkspacesRequest = z.infer<typeof listRecentWorkspacesRequestSchema>
 
+export const selectWorkspaceDirectoryRequestSchema = z.strictObject({
+  runtime: workspaceRuntimeRefSchema,
+})
+export type SelectWorkspaceDirectoryRequest = z.infer<typeof selectWorkspaceDirectoryRequestSchema>
+
 export const workspaceValidationSchema = z.strictObject({ exists: z.boolean().nullable() })
 export type WorkspaceValidationResult = z.infer<typeof workspaceValidationSchema>
