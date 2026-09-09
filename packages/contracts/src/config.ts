@@ -48,10 +48,22 @@ export const watchdogConfigSchema = z.strictObject({
 })
 export type WatchdogConfig = z.infer<typeof watchdogConfigSchema>
 
+/**
+ * TASK-011: host environment preferences. `defaultDistro` is the WSL distro
+ * Teskra uses when a workspace does not name one; null = fall back to the
+ * Windows-side WSL default. Written by the Settings Environment section
+ * (mounted by TASK-093); persisted in the global layer.
+ */
+export const environmentConfigSchema = z.strictObject({
+  defaultDistro: z.string().min(1).nullable(),
+})
+export type EnvironmentConfig = z.infer<typeof environmentConfigSchema>
+
 export const teskraConfigSchema = z.strictObject({
   logging: loggingConfigSchema,
   concurrency: concurrencyConfigSchema,
   watchdog: watchdogConfigSchema,
+  environment: environmentConfigSchema,
 })
 export type TeskraConfig = z.infer<typeof teskraConfigSchema>
 
@@ -64,6 +76,7 @@ export const teskraConfigLayerSchema = z.strictObject({
   logging: loggingConfigSchema.partial().optional(),
   concurrency: concurrencyConfigSchema.partial().optional(),
   watchdog: watchdogConfigSchema.partial().optional(),
+  environment: environmentConfigSchema.partial().optional(),
 })
 export type TeskraConfigLayer = z.infer<typeof teskraConfigLayerSchema>
 
@@ -72,6 +85,7 @@ export const DEFAULT_CONFIG: TeskraConfig = {
   logging: { level: 'info' },
   concurrency: { maxGlobalRuns: 4, maxRunsPerWorkspace: 3, maxRunsPerAgent: 2 },
   watchdog: { stalledThresholdMs: 10 * 60 * 1000 },
+  environment: { defaultDistro: null },
 }
 
 /**

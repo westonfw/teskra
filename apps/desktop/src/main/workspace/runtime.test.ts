@@ -144,6 +144,42 @@ describe('WslRuntime (Windows host)', () => {
     }
   })
 
+  it('uses the detected default when the workspace omits a distro', () => {
+    const result = createWorkspaceRuntime(
+      { kind: 'wsl' },
+      deps({
+        wsl: {
+          available: true,
+          version: '2.4.11.0',
+          defaultDistro: 'Debian',
+          distributions: ['Ubuntu-24.04', 'Debian'],
+        },
+      }),
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.resolveCommand('git', ['status'], '/repo').args).toEqual([
+      '-d',
+      'Debian',
+      '--cd',
+      '/repo',
+      'git',
+      'status',
+    ])
+  })
+
+  it('rejects a configured workspace distro that is not installed', () => {
+    const result = createWorkspaceRuntime(
+      { kind: 'wsl', distro: 'Arch' },
+      deps({ wsl: { available: true, distributions: ['Ubuntu-24.04', 'Debian'] } }),
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const status = result.data.validate()
+    expect(status.ok).toBe(false)
+    if (!status.ok) expect(status.error.code).toBe('WSL_DISTRO_NOT_FOUND')
+  })
+
   it('resolves the data root on the WSL side, never as a C:\\ path', () => {
     const detected = createWorkspaceRuntime(
       ref,

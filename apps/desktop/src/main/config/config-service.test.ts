@@ -111,6 +111,7 @@ describe('ConfigService.resolve — layer order', () => {
         maxRunsPerAgent: 2,
       },
       watchdog: { stalledThresholdMs: 60_000 }, // run override beats all
+      environment: { defaultDistro: null },
     })
     expect(sources).toEqual({
       'logging.level': 'global',
@@ -118,6 +119,7 @@ describe('ConfigService.resolve — layer order', () => {
       'concurrency.maxRunsPerWorkspace': 'default',
       'concurrency.maxRunsPerAgent': 'default',
       'watchdog.stalledThresholdMs': 'override',
+      'environment.defaultDistro': 'default',
     })
   })
 
@@ -274,5 +276,35 @@ describe('ConfigService — real filesystem smoke test', () => {
     const resolved = service.resolve()
     expect(resolved.ok && resolved.data.config.logging.level).toBe('warn')
     expect(resolved.ok && resolved.data.sources['logging.level']).toBe('global')
+  })
+
+  it('atomically creates and updates the global layer without flattening defaults', async () => {
+    const { createTeskraPaths } = await import('../paths')
+    const { readFileSync } = await import('node:fs')
+    const paths = createTeskraPaths()
+    const service = createConfigService({ paths })
+
+    const first = service.updateGlobal({ environment: { defaultDistro: 'Ubuntu-24.04' } })
+    expect(first.ok && first.data.config.environment.defaultDistro).toBe('Ubuntu-24.04')
+    const second = service.updateGlobal({ logging: { level: 'debug' } })
+    expect(second.ok && second.data.config.environment.defaultDistro).toBe('Ubuntu-24.04')
+
+    expect(JSON.parse(readFileSync(paths.config(), 'utf8'))).toEqual({
+      environment: { defaultDistro: 'Ubuntu-24.04' },
+      logging: { level: 'debug' },
+    })
+  })
+
+  it('does not overwrite an invalid existing global config', async () => {
+    const { createTeskraPaths } = await import('../paths')
+    const { readFileSync, writeFileSync } = await import('node:fs')
+    const paths = createTeskraPaths()
+    writeFileSync(paths.config(), '{ broken')
+    const service = createConfigService({ paths })
+
+    const result = service.updateGlobal({ environment: { defaultDistro: 'Ubuntu' } })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION_FAILED')
+    expect(readFileSync(paths.config(), 'utf8')).toBe('{ broken')
   })
 })

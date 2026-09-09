@@ -11,6 +11,7 @@ export * from './handoff'
 export * from './event'
 export * from './ipc'
 export * from './config'
+export * from './wsl'
 
 /**
  * Bridge API exposed to the Renderer as `window.teskra` via contextBridge.

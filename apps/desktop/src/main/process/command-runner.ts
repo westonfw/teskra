@@ -83,7 +83,10 @@ export interface CommandRunnerDeps {
 export const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024
 
 /** Decodes buffered output; exported so detection code and tests share it. */
-export function decodeCommandOutput(chunks: readonly Buffer[], encoding: CommandOutputEncoding): string {
+export function decodeCommandOutput(
+  chunks: readonly Buffer[],
+  encoding: CommandOutputEncoding,
+): string {
   return Buffer.concat(chunks).toString(encoding)
 }
 
@@ -126,7 +129,7 @@ function killProcessTree(child: ChildProcess, hostPlatform: string): void {
 }
 
 interface ActiveChild {
-  readonly child: ChildProcess
+  child: ChildProcess
   settle(outcome: IpcResult<CommandResult>): void
 }
 
@@ -252,11 +255,11 @@ export function createCommandRunner(deps: CommandRunnerDeps = {}): CommandRunner
             })
           }
         }
-        child.stdout.on('data', (chunk: Buffer) => {
+        child.stdout?.on('data', (chunk: Buffer) => {
           stdoutChunks.push(chunk)
           onChunk(chunk)
         })
-        child.stderr.on('data', (chunk: Buffer) => {
+        child.stderr?.on('data', (chunk: Buffer) => {
           stderrChunks.push(chunk)
           onChunk(chunk)
         })

@@ -21,6 +21,7 @@ describe('config contracts (TASK-080)', () => {
       maxRunsPerAgent: 2,
     })
     expect(DEFAULT_CONFIG.watchdog.stalledThresholdMs).toBe(600_000)
+    expect(DEFAULT_CONFIG.environment.defaultDistro).toBeNull()
   })
 
   it('layer schema accepts deep-partial layers and rejects unknown keys', () => {
@@ -28,5 +29,8 @@ describe('config contracts (TASK-080)', () => {
     expect(teskraConfigLayerSchema.safeParse({}).success).toBe(true)
     expect(teskraConfigLayerSchema.safeParse({ bogus: true }).success).toBe(false)
     expect(teskraConfigLayerSchema.safeParse({ logging: { level: 'loud' } }).success).toBe(false)
+    expect(
+      teskraConfigLayerSchema.safeParse({ environment: { defaultDistro: 'Ubuntu-24.04' } }).success,
+    ).toBe(true)
   })
 })

@@ -43,6 +43,10 @@ export interface WslEnvironmentInfo {
   readonly version?: string
   /** Home directory inside the distro (e.g. "/home/user"), if detected. */
   readonly homeDir?: string
+  /** Effective Teskra/system default distro, when detected. */
+  readonly defaultDistro?: string
+  /** Installed distro names; enables synchronous runtime validation. */
+  readonly distributions?: readonly string[]
 }
 
 export type WslCommandStrategy = 'cd-flag' | 'bash-lc'
@@ -170,7 +174,9 @@ function createWslRuntime(
   // WSL version; explicit unavailability surfaces in validate().
   const strategy: WslCommandStrategy =
     wsl !== undefined && supportsCdFlag(wsl.version) ? 'cd-flag' : 'bash-lc'
-  const distro = ref.distro ?? ''
+  const distro = ref.distro ?? wsl?.defaultDistro
+
+  const distroArgs = (): string[] => (distro === undefined ? [] : ['-d', distro])
 
   return {
     ref,
@@ -179,7 +185,7 @@ function createWslRuntime(
     hostNative: false,
     resolveCommand(command, args = [], cwd) {
       if (strategy === 'cd-flag') {
-        const wslArgs = ['-d', distro]
+        const wslArgs = distroArgs()
         if (cwd !== undefined) {
           wslArgs.push('--cd', cwd)
         }
@@ -189,7 +195,7 @@ function createWslRuntime(
       const script =
         (cwd !== undefined ? `cd ${quoteShellArg(cwd)} && ` : '') +
         `exec ${[command, ...args].map(quoteShellArg).join(' ')}`
-      return { executable: WSL_EXE, args: ['-d', distro, 'bash', '-lc', script] }
+      return { executable: WSL_EXE, args: [...distroArgs(), 'bash', '-lc', script] }
     },
     resolveCwd(path) {
       return posix.normalize(path)
@@ -212,6 +218,29 @@ function createWslRuntime(
           retryable: false,
           detail: `wsl.exe not detected on the host; distro ${JSON.stringify(distro)} unreachable`,
         })
+      }
+      if (wsl?.distributions !== undefined) {
+        if (wsl.distributions.length === 0) {
+          return fail({
+            code: 'WSL_DISTRO_NOT_FOUND',
+            message: 'No WSL distributions are installed.',
+            retryable: false,
+            detail: 'WSL detection returned an empty distribution list',
+          })
+        }
+        if (
+          distro !== undefined &&
+          !wsl.distributions.some(
+            (candidate) => candidate.toLocaleLowerCase() === distro.toLocaleLowerCase(),
+          )
+        ) {
+          return fail({
+            code: 'WSL_DISTRO_NOT_FOUND',
+            message: `WSL distribution "${distro}" is not installed.`,
+            retryable: false,
+            detail: `installed distributions: ${wsl.distributions.join(', ')}`,
+          })
+        }
       }
       return { ok: true, data: { kind: 'wsl', hostNative: false, wslCommandStrategy: strategy } }
     },

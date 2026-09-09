@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
 
 import {
   DEFAULT_CONFIG,
@@ -63,6 +64,8 @@ export interface ResolveConfigOptions {
 
 export interface ConfigService {
   resolve(options?: ResolveConfigOptions): IpcResult<ResolvedConfig>
+  /** Deep-merges a validated patch into the private global config layer. */
+  updateGlobal(patch: unknown): IpcResult<ResolvedConfig>
 }
 
 export interface ConfigServiceDeps {
@@ -71,6 +74,20 @@ export interface ConfigServiceDeps {
   readonly workspaces?: Pick<WorkspaceRepository, 'getById'>
   /** File read seam for tests; defaults to node:fs (utf-8, throws ENOENT). */
   readonly readFile?: (path: string) => string
+  /** Atomic file-write seam for tests. The default creates the data root. */
+  readonly writeFile?: (path: string, contents: string) => void
+}
+
+function atomicWriteFile(path: string, contents: string): void {
+  mkdirSync(dirname(path), { recursive: true })
+  const temporaryPath = `${path}.${String(process.pid)}.tmp`
+  try {
+    writeFileSync(temporaryPath, contents, { encoding: 'utf8', mode: 0o600 })
+    renameSync(temporaryPath, path)
+  } catch (cause) {
+    rmSync(temporaryPath, { force: true })
+    throw cause
+  }
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -170,6 +187,7 @@ function stripSecrets(layer: Record<string, unknown>): {
 
 export function createConfigService(deps: ConfigServiceDeps): ConfigService {
   const readFile = deps.readFile ?? ((path: string) => readFileSync(path, 'utf8'))
+  const writeFile = deps.writeFile ?? atomicWriteFile
 
   const report = (
     warnings: ConfigWarning[],
@@ -245,7 +263,7 @@ export function createConfigService(deps: ConfigServiceDeps): ConfigService {
     return parsed.data
   }
 
-  return {
+  const service: ConfigService = {
     resolve(options = {}) {
       const warnings: ConfigWarning[] = []
       const sources: ConfigSources = {}
@@ -326,5 +344,92 @@ export function createConfigService(deps: ConfigServiceDeps): ConfigService {
 
       return { ok: true, data: { config: final.data, sources, warnings } }
     },
+
+    updateGlobal(patch) {
+      const parsedPatch = teskraConfigLayerSchema.safeParse(patch)
+      if (!parsedPatch.success) {
+        return {
+          ok: false,
+          error: toPublicError({
+            code: 'VALIDATION_FAILED',
+            message: 'Invalid global config update.',
+            retryable: false,
+            detail: `global patch: ${JSON.stringify(parsedPatch.error.issues)}`,
+          }),
+        }
+      }
+
+      const path = deps.paths.config()
+      let current: TeskraConfigLayer = {}
+      try {
+        const raw = readFile(path)
+        const json: unknown = JSON.parse(raw)
+        const parsedCurrent = teskraConfigLayerSchema.safeParse(json)
+        if (!parsedCurrent.success) {
+          return {
+            ok: false,
+            error: toPublicError({
+              code: 'VALIDATION_FAILED',
+              message: 'The existing global config is invalid and was not overwritten.',
+              retryable: false,
+              detail: `global config ${path}: ${JSON.stringify(parsedCurrent.error.issues)}`,
+            }),
+          }
+        }
+        current = parsedCurrent.data
+      } catch (cause) {
+        const code = (cause as NodeJS.ErrnoException).code
+        if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+          return {
+            ok: false,
+            error: toPublicError({
+              code: code === undefined ? 'VALIDATION_FAILED' : 'UNKNOWN',
+              message:
+                code === undefined
+                  ? 'The existing global config is not valid JSON and was not overwritten.'
+                  : 'Failed to read the global config before updating it.',
+              retryable: false,
+              detail: `global config ${path}`,
+              cause,
+            }),
+          }
+        }
+      }
+
+      const merged = deepMerge(
+        current as Record<string, unknown>,
+        parsedPatch.data as Record<string, unknown>,
+      )
+      const validated = teskraConfigLayerSchema.safeParse(merged)
+      if (!validated.success) {
+        return {
+          ok: false,
+          error: toPublicError({
+            code: 'VALIDATION_FAILED',
+            message: 'The merged global config is invalid.',
+            retryable: false,
+            detail: `merged global config: ${JSON.stringify(validated.error.issues)}`,
+          }),
+        }
+      }
+
+      try {
+        writeFile(path, `${JSON.stringify(validated.data, null, 2)}\n`)
+      } catch (cause) {
+        return {
+          ok: false,
+          error: toPublicError({
+            code: 'UNKNOWN',
+            message: 'Failed to save the global config.',
+            retryable: true,
+            detail: `write global config ${path}`,
+            cause,
+          }),
+        }
+      }
+      return service.resolve()
+    },
   }
+
+  return service
 }
