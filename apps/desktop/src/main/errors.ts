@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import type { ErrorCode, PublicAppError } from '@teskra/contracts'
 
 /**
@@ -40,7 +42,9 @@ function serializeCause(cause: unknown): unknown {
 export function toPublicError(error: InternalAppError, correlationId?: string): PublicAppError {
   errorLogger?.error(
     {
-      correlationId,
+      // TASK-004: every logged error carries a correlationId; callers may
+      // supply their own to tie an error to an in-flight operation.
+      correlationId: correlationId ?? randomUUID(),
       code: error.code,
       detail: error.detail,
       cause: serializeCause(error.cause),

@@ -15,6 +15,7 @@
   "dependencies": {
     "@teskra/contracts": "0.1.0",
     "@teskra/shared": "0.1.0",
+    "pino": "10.3.1",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
