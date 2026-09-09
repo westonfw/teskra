@@ -6,7 +6,7 @@
   "description": "Teskra desktop application (Electron).",
   "main": "./out/main/index.js",
   "scripts": {
-    "postinstall": "install-electron",
+    "postinstall": "install-electron && electron-rebuild",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
@@ -15,11 +15,14 @@
   "dependencies": {
     "@teskra/contracts": "0.1.0",
     "@teskra/shared": "0.1.0",
+    "better-sqlite3": "13.0.3",
     "pino": "10.3.1",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@electron/rebuild": "4.2.0",
+    "@types/better-sqlite3": "9.6.0",
     "@types/node": "22.20.1",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.7",

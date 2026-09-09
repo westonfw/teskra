@@ -3,6 +3,7 @@ import { join } from 'node:path'
 
 import { IPC_CHANNELS } from '@teskra/contracts'
 
+import { openDatabase, type TeskraDatabase } from './db'
 import { getLogger, initializeLogging } from './logger'
 import { createTeskraPaths } from './paths'
 
@@ -42,7 +43,19 @@ function createWindow(): void {
 
 ipcMain.handle(IPC_CHANNELS.ping, () => 'pong')
 
+// TASK-005: the database opens at startup and closes on quit. An open failure
+// is logged (via toPublicError inside openDatabase) and the app continues
+// without persistence — the Renderer is never exposed to DB errors directly.
+let database: TeskraDatabase | undefined
+
 app.whenReady().then(() => {
+  const opened = openDatabase(createTeskraPaths())
+  if (opened.ok) {
+    database = opened.data
+  } else {
+    getLogger('app').error({ err: opened.error }, 'Database unavailable; continuing without it.')
+  }
+
   createWindow()
 
   app.on('activate', () => {
@@ -50,6 +63,11 @@ app.whenReady().then(() => {
       createWindow()
     }
   })
+})
+
+app.on('before-quit', () => {
+  database?.close()
+  database = undefined
 })
 
 app.on('window-all-closed', () => {
