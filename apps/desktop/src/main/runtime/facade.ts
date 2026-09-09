@@ -2,6 +2,7 @@ import type {
   AgentDefinition,
   AgentDetectionRequest,
   AgentDetectionResult,
+  AgentHealth,
   AgentExecutableOverrideRequest,
   CreateTerminalRequest,
   CreateWorkspaceRequest,
@@ -74,6 +75,8 @@ export interface AgentCatalogPort {
   listDetections(
     request: ListAgentDetectionsRequest,
   ): Promise<IpcResult<readonly AgentDetectionResult[]>>
+  checkHealth(request: AgentDetectionRequest): Promise<IpcResult<AgentHealth>>
+  listHealth(request: ListAgentDetectionsRequest): Promise<IpcResult<readonly AgentHealth[]>>
   getExecutableOverride(request: AgentExecutableOverrideRequest): IpcResult<string | null>
   setExecutableOverride(request: SetAgentExecutableOverrideRequest): IpcResult<string | null>
 }

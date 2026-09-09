@@ -34,6 +34,7 @@ import { createWslManager } from '../workspace/wsl-manager'
 import type { TeskraRuntime } from './facade'
 import { createDefaultAgentRegistry } from '../agents/agent-registry'
 import { createAgentDetector } from '../agents/agent-detector'
+import { createAgentHealthManager } from '../agents/agent-health-manager'
 
 export interface ComposeRuntimeOptions {
   readonly paths?: TeskraPaths
@@ -156,6 +157,10 @@ export async function composeTeskraRuntime(
     config,
     resolveRuntime: runtimeFor,
   })
+  const agentHealth = createAgentHealthManager({
+    registry: registeredAgents.data,
+    detector: agentDetector,
+  })
 
   let disposed = false
   const runtime: TeskraRuntime = {
@@ -164,6 +169,8 @@ export async function composeTeskraRuntime(
       listDefinitions: () => ({ ok: true, data: registeredAgents.data.list() }),
       detect: (request) => agentDetector.detect(request),
       listDetections: (request) => agentDetector.list(request),
+      checkHealth: (request) => agentHealth.check(request),
+      listHealth: (request) => agentHealth.list(request),
       getExecutableOverride: (request) => agentDetector.getExecutableOverride(request),
       setExecutableOverride: (request) => agentDetector.setExecutableOverride(request),
     },

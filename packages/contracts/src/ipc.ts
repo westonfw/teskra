@@ -4,12 +4,14 @@ import {
   agentDefinitionSchema,
   agentDetectionRequestSchema,
   agentDetectionResultSchema,
+  agentHealthSchema,
   agentExecutableOverrideRequestSchema,
   listAgentDetectionsRequestSchema,
   setAgentExecutableOverrideRequestSchema,
   type AgentDefinition,
   type AgentDetectionRequest,
   type AgentDetectionResult,
+  type AgentHealth,
   type AgentExecutableOverrideRequest,
   type ListAgentDetectionsRequest,
   type SetAgentExecutableOverrideRequest,
@@ -88,6 +90,8 @@ export const IPC_CHANNELS = {
   agentListDefinitions: 'teskra:agent:list-definitions',
   agentDetect: 'teskra:agent:detect',
   agentListDetections: 'teskra:agent:list-detections',
+  agentCheckHealth: 'teskra:agent:health:check',
+  agentListHealth: 'teskra:agent:health:list',
   agentGetPathOverride: 'teskra:agent:path-override:get',
   agentSetPathOverride: 'teskra:agent:path-override:set',
   terminalCreate: 'teskra:terminal:create',
@@ -178,6 +182,16 @@ export const agentListDetectionsChannel = channel(
   IPC_CHANNELS.agentListDetections,
   listAgentDetectionsRequestSchema,
   z.array(agentDetectionResultSchema),
+)
+export const agentCheckHealthChannel = channel(
+  IPC_CHANNELS.agentCheckHealth,
+  agentDetectionRequestSchema,
+  agentHealthSchema,
+)
+export const agentListHealthChannel = channel(
+  IPC_CHANNELS.agentListHealth,
+  listAgentDetectionsRequestSchema,
+  z.array(agentHealthSchema),
 )
 export const agentGetExecutableOverrideChannel = channel(
   IPC_CHANNELS.agentGetPathOverride,
@@ -286,6 +300,8 @@ export const ipcChannelDefinitions = {
   agentListDefinitions: agentListDefinitionsChannel,
   agentDetect: agentDetectChannel,
   agentListDetections: agentListDetectionsChannel,
+  agentCheckHealth: agentCheckHealthChannel,
+  agentListHealth: agentListHealthChannel,
   agentGetExecutableOverride: agentGetExecutableOverrideChannel,
   agentSetExecutableOverride: agentSetExecutableOverrideChannel,
   terminalCreate: terminalCreateChannel,
@@ -331,6 +347,8 @@ export interface TeskraBridge {
     listDefinitions(): Promise<IpcResult<AgentDefinition[]>>
     detect(request: AgentDetectionRequest): Promise<IpcResult<AgentDetectionResult>>
     listDetections(request: ListAgentDetectionsRequest): Promise<IpcResult<AgentDetectionResult[]>>
+    checkHealth(request: AgentDetectionRequest): Promise<IpcResult<AgentHealth>>
+    listHealth(request: ListAgentDetectionsRequest): Promise<IpcResult<AgentHealth[]>>
     getExecutableOverride(
       request: AgentExecutableOverrideRequest,
     ): Promise<IpcResult<string | null>>

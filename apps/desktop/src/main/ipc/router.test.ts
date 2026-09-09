@@ -84,6 +84,16 @@ function fakeRuntime(): TeskraRuntime {
         }),
       ),
       listDetections: vi.fn(async () => ok([])),
+      checkHealth: vi.fn(async () =>
+        ok({
+          agentId: 'codex',
+          runtime: { kind: 'windows' as const },
+          installed: false,
+          available: false,
+          checkedAt: '2026-09-10T00:00:00.000Z',
+        }),
+      ),
+      listHealth: vi.fn(async () => ok([])),
       getExecutableOverride: vi.fn(() => ok<string | null>(null)),
       setExecutableOverride: vi.fn(() => ok<string | null>(null)),
     },

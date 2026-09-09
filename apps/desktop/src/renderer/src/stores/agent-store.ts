@@ -1,6 +1,7 @@
 import type {
   AgentDefinition,
   AgentDetectionResult,
+  AgentHealth,
   IpcResult,
   PublicAppError,
   WorkspaceRuntimeRef,
@@ -15,6 +16,10 @@ export interface AgentStoreBridge {
       runtime: WorkspaceRuntimeRef
       refresh?: boolean
     }): Promise<IpcResult<AgentDetectionResult>>
+    listHealth(request: {
+      runtime: WorkspaceRuntimeRef
+      refresh?: boolean
+    }): Promise<IpcResult<AgentHealth[]>>
     getExecutableOverride(request: {
       agentId: string
       runtime: WorkspaceRuntimeRef
@@ -30,11 +35,13 @@ export interface AgentStoreBridge {
 interface AgentState {
   readonly definitions: readonly AgentDefinition[]
   readonly detections: Readonly<Record<string, AgentDetectionResult | undefined>>
+  readonly health: Readonly<Record<string, AgentHealth | undefined>>
   readonly executableOverrides: Readonly<Record<string, string | null | undefined>>
   readonly loading: boolean
   readonly error?: PublicAppError
   loadDefinitions(): Promise<void>
   detect(agentId: string, runtime: WorkspaceRuntimeRef): Promise<void>
+  loadHealth(runtime: WorkspaceRuntimeRef): Promise<void>
   loadExecutableOverride(agentId: string, runtime: WorkspaceRuntimeRef): Promise<void>
   setExecutableOverride(
     agentId: string,
@@ -54,6 +61,7 @@ export function createAgentStore(getBridge: () => AgentStoreBridge) {
   return create<AgentState>((set) => ({
     definitions: [],
     detections: {},
+    health: {},
     executableOverrides: {},
     loading: false,
 
@@ -81,6 +89,28 @@ export function createAgentStore(getBridge: () => AgentStoreBridge) {
         }
         set((state) => ({
           detections: { ...state.detections, [agentRuntimeKey(agentId, runtime)]: result.data },
+        }))
+      } catch {
+        set({ error: transportError })
+      }
+    },
+
+    async loadHealth(runtime) {
+      set({ error: undefined })
+      try {
+        const result = await getBridge().agent.listHealth({ runtime, refresh: true })
+        if (!result.ok) {
+          set({ error: result.error })
+          return
+        }
+        set((state) => ({
+          health: result.data.reduce<Record<string, AgentHealth | undefined>>(
+            (health, item) => ({
+              ...health,
+              [agentRuntimeKey(item.agentId, item.runtime)]: item,
+            }),
+            { ...state.health },
+          ),
         }))
       } catch {
         set({ error: transportError })

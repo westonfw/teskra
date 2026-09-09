@@ -131,6 +131,29 @@ export const agentDetectionResultSchema = z.strictObject({
 })
 export type AgentDetectionResult = z.infer<typeof agentDetectionResultSchema>
 
+export const agentQuotaSchema = z.strictObject({
+  remaining: z.number().nonnegative().optional(),
+  limit: z.number().positive().optional(),
+  resetAt: z.string().datetime().optional(),
+  source: z.string().min(1).optional(),
+})
+export type AgentQuota = z.infer<typeof agentQuotaSchema>
+
+export const agentHealthSchema = z.strictObject({
+  agentId: z.string().min(1),
+  runtime: workspaceRuntimeRefSchema,
+  installed: z.boolean(),
+  authenticated: z.boolean().optional(),
+  available: z.boolean(),
+  rateLimited: z.boolean().optional(),
+  quota: agentQuotaSchema.optional(),
+  executable: z.string().min(1).optional(),
+  version: z.string().min(1).optional(),
+  error: z.string().min(1).optional(),
+  checkedAt: z.string().datetime(),
+})
+export type AgentHealth = z.infer<typeof agentHealthSchema>
+
 export const agentExecutableOverrideRequestSchema = z.strictObject({
   agentId: z.string().min(1),
   runtime: workspaceRuntimeRefSchema,

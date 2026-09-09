@@ -39,6 +39,7 @@ describe('Agent store', () => {
             checkedAt: '2026-09-10T00:00:00.000Z',
           },
         })),
+        listHealth: vi.fn(async () => ({ ok: true as const, data: [] })),
         getExecutableOverride: vi.fn(async () => ({ ok: true as const, data: null })),
         setExecutableOverride: vi.fn(async ({ path }) => ({ ok: true as const, data: path })),
       },
@@ -67,6 +68,16 @@ describe('Agent store', () => {
             checkedAt: '2026-09-10T00:00:00.000Z',
           },
         })),
+        listHealth: vi.fn(async ({ runtime }) => ({
+          ok: true as const,
+          data: definitions.map(({ id }) => ({
+            agentId: id,
+            runtime,
+            installed: true,
+            available: true,
+            checkedAt: '2026-09-10T00:00:00.000Z',
+          })),
+        })),
         getExecutableOverride: vi.fn(async () => ({ ok: true as const, data: null })),
         setExecutableOverride: vi.fn(async ({ path }) => ({ ok: true as const, data: path })),
       },
@@ -79,8 +90,10 @@ describe('Agent store', () => {
       true,
     )
     await store.getState().detect('alpha', runtime)
+    await store.getState().loadHealth(runtime)
 
     expect(Object.values(store.getState().executableOverrides)).toContain('/custom/agent')
     expect(Object.values(store.getState().detections)[0]).toMatchObject({ installed: true })
+    expect(Object.values(store.getState().health)).toHaveLength(3)
   })
 })
