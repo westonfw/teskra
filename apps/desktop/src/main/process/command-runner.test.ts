@@ -40,10 +40,7 @@ describe('CommandRunner (TASK-012)', () => {
   const runner = createCommandRunner()
 
   it('captures stdout/stderr/exitCode on success', async () => {
-    const result = await run(
-      runner,
-      'process.stdout.write("out"); process.stderr.write("err");',
-    )
+    const result = await run(runner, 'process.stdout.write("out"); process.stderr.write("err");')
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.data).toEqual({ stdout: 'out', stderr: 'err', exitCode: 0 })
@@ -187,9 +184,12 @@ describe('CommandRunner (TASK-012)', () => {
       hostNative: false,
       resolveCommand: (command, args = [], cwd) => ({
         executable: NODE,
-        args: nodeArgs(`process.stdout.write(${JSON.stringify('wrapped:' + command + ':' + (args[0] ?? ''))})`),
+        args: nodeArgs(
+          `process.stdout.write(${JSON.stringify('wrapped:' + command + ':' + (args[0] ?? ''))})`,
+        ),
         ...(cwd !== undefined ? { cwd } : {}),
       }),
+      resolveTerminal: () => ({ ok: true, data: { command: 'bash', args: ['-l'] } }),
       resolveCwd: (p) => p,
       resolveDataRoot: () => '/unused',
       validate: () => ({ ok: true, data: { kind: 'wsl', hostNative: false } }),

@@ -88,6 +88,7 @@ const runtime: WorkspaceRuntime = {
     executable: 'wsl.exe',
     args: ['-d', 'Ubuntu', ...(cwd === undefined ? [] : ['--cd', cwd]), command, ...args],
   }),
+  resolveTerminal: () => ({ ok: true, data: { command: 'bash', args: ['-l'] } }),
   resolveCwd: (path) => path,
   resolveDataRoot: () => '/home/test/.teskra',
   validate: () => ({ ok: true, data: { kind: 'wsl', hostNative: false } }),

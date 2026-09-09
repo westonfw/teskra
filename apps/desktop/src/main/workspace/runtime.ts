@@ -1,6 +1,6 @@
 import { posix, win32 } from 'node:path'
 
-import type { IpcResult, WorkspaceRuntimeRef } from '@teskra/contracts'
+import type { IpcResult, TerminalShell, WorkspaceRuntimeRef } from '@teskra/contracts'
 
 import { type InternalAppError, toPublicError } from '../errors'
 import { createTeskraPaths, TESKRA_DATA_DIR, type TeskraPaths } from '../paths'
@@ -35,6 +35,11 @@ export interface ShellExecutionContext {
   readonly cwd?: string
 }
 
+export interface TerminalLaunchSpec {
+  readonly command: string
+  readonly args: readonly string[]
+}
+
 /** TASK-011 detection result; injected, never probed here. */
 export interface WslEnvironmentInfo {
   /** Whether wsl.exe is present on the host. */
@@ -65,6 +70,8 @@ export interface WorkspaceRuntime {
   readonly hostNative: boolean
   /** Wraps a command + args for execution inside this runtime. */
   resolveCommand(command: string, args?: readonly string[], cwd?: string): ShellExecutionContext
+  /** Maps a user-facing shell choice to a logical command for this runtime. */
+  resolveTerminal(shell: TerminalShell): IpcResult<TerminalLaunchSpec>
   /** Normalizes a runtime-side path into the cwd form resolveCommand expects. */
   resolveCwd(path: string): string
   /**
@@ -109,6 +116,18 @@ function fail(error: InternalAppError): { ok: false; error: ReturnType<typeof to
   return { ok: false, error: toPublicError(error) }
 }
 
+function unsupportedShell(
+  runtime: WorkspaceRuntimeRef['kind'],
+  shell: TerminalShell,
+): IpcResult<TerminalLaunchSpec> {
+  return fail({
+    code: 'CAPABILITY_NOT_AVAILABLE',
+    message: `Shell "${shell}" is not available in a ${runtime} workspace.`,
+    retryable: false,
+    detail: `runtime ${runtime} cannot resolve terminal shell ${shell}`,
+  })
+}
+
 function createWindowsRuntime(
   ref: WorkspaceRuntimeRef,
   hostPlatform: string,
@@ -120,6 +139,16 @@ function createWindowsRuntime(
     hostNative,
     resolveCommand(command, args = [], cwd) {
       return { executable: command, args, ...(cwd !== undefined ? { cwd } : {}) }
+    },
+    resolveTerminal(shell) {
+      switch (shell) {
+        case 'powershell':
+          return { ok: true, data: { command: 'powershell.exe', args: ['-NoLogo'] } }
+        case 'cmd':
+          return { ok: true, data: { command: 'cmd.exe', args: ['/Q'] } }
+        default:
+          return unsupportedShell(ref.kind, shell)
+      }
     },
     resolveCwd(path) {
       return win32.normalize(path)
@@ -152,6 +181,11 @@ function createNativePosixRuntime(ref: WorkspaceRuntimeRef, paths: TeskraPaths):
     hostNative: true,
     resolveCommand(command, args = [], cwd) {
       return { executable: command, args, ...(cwd !== undefined ? { cwd } : {}) }
+    },
+    resolveTerminal(shell) {
+      return shell === 'bash' || shell === 'wsl'
+        ? { ok: true, data: { command: 'bash', args: ['-l'] } }
+        : unsupportedShell(ref.kind, shell)
     },
     resolveCwd(path) {
       return posix.normalize(path)
@@ -196,6 +230,11 @@ function createWslRuntime(
         (cwd !== undefined ? `cd ${quoteShellArg(cwd)} && ` : '') +
         `exec ${[command, ...args].map(quoteShellArg).join(' ')}`
       return { executable: WSL_EXE, args: [...distroArgs(), 'bash', '-lc', script] }
+    },
+    resolveTerminal(shell) {
+      return shell === 'bash' || shell === 'wsl'
+        ? { ok: true, data: { command: 'bash', args: ['-l'] } }
+        : unsupportedShell(ref.kind, shell)
     },
     resolveCwd(path) {
       return posix.normalize(path)
