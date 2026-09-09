@@ -1,6 +1,19 @@
 import { z } from 'zod'
 
-import { agentDefinitionSchema, type AgentDefinition } from './agent'
+import {
+  agentDefinitionSchema,
+  agentDetectionRequestSchema,
+  agentDetectionResultSchema,
+  agentExecutableOverrideRequestSchema,
+  listAgentDetectionsRequestSchema,
+  setAgentExecutableOverrideRequestSchema,
+  type AgentDefinition,
+  type AgentDetectionRequest,
+  type AgentDetectionResult,
+  type AgentExecutableOverrideRequest,
+  type ListAgentDetectionsRequest,
+  type SetAgentExecutableOverrideRequest,
+} from './agent'
 import { ipcResultSchema, type IpcResult } from './error'
 import type { WorkbenchEventName, WorkbenchEvents } from './event'
 import {
@@ -73,6 +86,10 @@ export const IPC_CHANNELS = {
   workspaceValidate: 'teskra:workspace:validate',
   workspaceSelectDirectory: 'teskra:workspace:select-directory',
   agentListDefinitions: 'teskra:agent:list-definitions',
+  agentDetect: 'teskra:agent:detect',
+  agentListDetections: 'teskra:agent:list-detections',
+  agentGetPathOverride: 'teskra:agent:path-override:get',
+  agentSetPathOverride: 'teskra:agent:path-override:set',
   terminalCreate: 'teskra:terminal:create',
   terminalWrite: 'teskra:terminal:write',
   terminalResize: 'teskra:terminal:resize',
@@ -151,6 +168,26 @@ export const agentListDefinitionsChannel = channel(
   IPC_CHANNELS.agentListDefinitions,
   noRequestSchema,
   z.array(agentDefinitionSchema),
+)
+export const agentDetectChannel = channel(
+  IPC_CHANNELS.agentDetect,
+  agentDetectionRequestSchema,
+  agentDetectionResultSchema,
+)
+export const agentListDetectionsChannel = channel(
+  IPC_CHANNELS.agentListDetections,
+  listAgentDetectionsRequestSchema,
+  z.array(agentDetectionResultSchema),
+)
+export const agentGetExecutableOverrideChannel = channel(
+  IPC_CHANNELS.agentGetPathOverride,
+  agentExecutableOverrideRequestSchema,
+  z.string().nullable(),
+)
+export const agentSetExecutableOverrideChannel = channel(
+  IPC_CHANNELS.agentSetPathOverride,
+  setAgentExecutableOverrideRequestSchema,
+  z.string().nullable(),
 )
 export const terminalCreateChannel = channel(
   IPC_CHANNELS.terminalCreate,
@@ -247,6 +284,10 @@ export const ipcChannelDefinitions = {
   workspaceValidate: workspaceValidateChannel,
   workspaceSelectDirectory: workspaceSelectDirectoryChannel,
   agentListDefinitions: agentListDefinitionsChannel,
+  agentDetect: agentDetectChannel,
+  agentListDetections: agentListDetectionsChannel,
+  agentGetExecutableOverride: agentGetExecutableOverrideChannel,
+  agentSetExecutableOverride: agentSetExecutableOverrideChannel,
   terminalCreate: terminalCreateChannel,
   terminalWrite: terminalWriteChannel,
   terminalResize: terminalResizeChannel,
@@ -288,6 +329,14 @@ export interface TeskraBridge {
   }
   readonly agent: {
     listDefinitions(): Promise<IpcResult<AgentDefinition[]>>
+    detect(request: AgentDetectionRequest): Promise<IpcResult<AgentDetectionResult>>
+    listDetections(request: ListAgentDetectionsRequest): Promise<IpcResult<AgentDetectionResult[]>>
+    getExecutableOverride(
+      request: AgentExecutableOverrideRequest,
+    ): Promise<IpcResult<string | null>>
+    setExecutableOverride(
+      request: SetAgentExecutableOverrideRequest,
+    ): Promise<IpcResult<string | null>>
   }
   readonly runtime: {
     info(): Promise<IpcResult<SystemInfo>>

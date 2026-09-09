@@ -59,11 +59,18 @@ export const environmentConfigSchema = z.strictObject({
 })
 export type EnvironmentConfig = z.infer<typeof environmentConfigSchema>
 
+/** TASK-023: machine-specific Agent executable paths, keyed by Agent + runtime target. */
+export const agentsConfigSchema = z.strictObject({
+  executableOverrides: z.record(z.string().min(1), z.string().min(1).nullable()),
+})
+export type AgentsConfig = z.infer<typeof agentsConfigSchema>
+
 export const teskraConfigSchema = z.strictObject({
   logging: loggingConfigSchema,
   concurrency: concurrencyConfigSchema,
   watchdog: watchdogConfigSchema,
   environment: environmentConfigSchema,
+  agents: agentsConfigSchema,
 })
 export type TeskraConfig = z.infer<typeof teskraConfigSchema>
 
@@ -77,6 +84,7 @@ export const teskraConfigLayerSchema = z.strictObject({
   concurrency: concurrencyConfigSchema.partial().optional(),
   watchdog: watchdogConfigSchema.partial().optional(),
   environment: environmentConfigSchema.partial().optional(),
+  agents: agentsConfigSchema.partial().optional(),
 })
 export type TeskraConfigLayer = z.infer<typeof teskraConfigLayerSchema>
 
@@ -86,6 +94,7 @@ export const DEFAULT_CONFIG: TeskraConfig = {
   concurrency: { maxGlobalRuns: 4, maxRunsPerWorkspace: 3, maxRunsPerAgent: 2 },
   watchdog: { stalledThresholdMs: 10 * 60 * 1000 },
   environment: { defaultDistro: null },
+  agents: { executableOverrides: {} },
 }
 
 /**

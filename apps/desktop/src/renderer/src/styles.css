@@ -424,3 +424,23 @@ body {
   border-color: rgba(101, 207, 197, 0.72);
   box-shadow: 0 12px 34px rgba(36, 130, 128, 0.14);
 }
+
+.agent-runtime-control {
+  width: 100%;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.agent-runtime-control-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.agent-detection-path {
+  display: block;
+  margin-top: 7px;
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  overflow-wrap: anywhere;
+}

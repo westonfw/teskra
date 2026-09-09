@@ -44,6 +44,10 @@ const bridge: TeskraBridge = {
   },
   agent: {
     listDefinitions: () => invoke(IPC_CHANNELS.agentListDefinitions),
+    detect: (request) => invoke(IPC_CHANNELS.agentDetect, request),
+    listDetections: (request) => invoke(IPC_CHANNELS.agentListDetections, request),
+    getExecutableOverride: (request) => invoke(IPC_CHANNELS.agentGetPathOverride, request),
+    setExecutableOverride: (request) => invoke(IPC_CHANNELS.agentSetPathOverride, request),
   },
   runtime: {
     info: () => invoke(IPC_CHANNELS.runtimeInfo),

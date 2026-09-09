@@ -4,6 +4,7 @@ import type { TeskraPaths } from '../paths'
 import {
   createWorkspaceRuntime,
   quoteShellArg,
+  resolveExecutableLookup,
   supportsCdFlag,
   type WorkspaceRuntimeDeps,
 } from './runtime'
@@ -54,6 +55,10 @@ describe('WindowsRuntime', () => {
       args: ['--full-auto'],
       cwd: 'C:\\dev\\demo',
     })
+    expect(resolveExecutableLookup(runtime, 'codex')).toEqual({
+      executable: 'where.exe',
+      args: ['codex'],
+    })
     expect(runtime.resolveCwd('C:/dev/demo/')).toBe('C:\\dev\\demo\\')
     expect(runtime.resolveDataRoot()).toBe(HOST_HOME)
     expect(runtime.validate()).toEqual({
@@ -88,6 +93,10 @@ describe('WslRuntime (Windows host)', () => {
     expect(runtime.resolveCommand('git', ['status'], '/home/u/demo')).toEqual({
       executable: 'wsl.exe',
       args: ['-d', 'Ubuntu-24.04', '--cd', '/home/u/demo', 'git', 'status'],
+    })
+    expect(resolveExecutableLookup(runtime, 'claude')).toEqual({
+      executable: 'wsl.exe',
+      args: ['-d', 'Ubuntu-24.04', 'which', 'claude'],
     })
     expect(runtime.validate()).toEqual({
       ok: true,
@@ -206,6 +215,10 @@ describe('NativePosixRuntime (wsl workspace on a Linux/WSL2 dev host)', () => {
       executable: 'git',
       args: ['status'],
       cwd: '/home/u/demo',
+    })
+    expect(resolveExecutableLookup(runtime, 'claude')).toEqual({
+      executable: 'which',
+      args: ['claude'],
     })
     expect(runtime.resolveDataRoot()).toBe(HOST_HOME)
     expect(runtime.validate().ok).toBe(true)

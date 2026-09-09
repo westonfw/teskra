@@ -1,16 +1,21 @@
 import type {
   AgentDefinition,
+  AgentDetectionRequest,
+  AgentDetectionResult,
+  AgentExecutableOverrideRequest,
   CreateTerminalRequest,
   CreateWorkspaceRequest,
   FutureRuntimePortName,
   IpcResult,
   ListRecentWorkspacesRequest,
+  ListAgentDetectionsRequest,
   ListTerminalsRequest,
   OpenWorkspaceRequest,
   OpenSystemDirectoryRequest,
   ResolveConfigRequest,
   ResolvedConfig,
   SelectWorkspaceDirectoryRequest,
+  SetAgentExecutableOverrideRequest,
   SystemHealth,
   SystemInfo,
   SystemPaths,
@@ -65,6 +70,12 @@ export interface SettingsPort {
 
 export interface AgentCatalogPort {
   listDefinitions(): IpcResult<readonly AgentDefinition[]>
+  detect(request: AgentDetectionRequest): Promise<IpcResult<AgentDetectionResult>>
+  listDetections(
+    request: ListAgentDetectionsRequest,
+  ): Promise<IpcResult<readonly AgentDetectionResult[]>>
+  getExecutableOverride(request: AgentExecutableOverrideRequest): IpcResult<string | null>
+  setExecutableOverride(request: SetAgentExecutableOverrideRequest): IpcResult<string | null>
 }
 
 export type FutureRuntimePort = object

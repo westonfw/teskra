@@ -83,6 +83,16 @@ export interface WorkspaceRuntime {
   validate(): IpcResult<RuntimeStatus>
 }
 
+/** TASK-023: platform lookup stays behind WorkspaceRuntime's platform boundary. */
+export function resolveExecutableLookup(
+  runtime: WorkspaceRuntime,
+  command: string,
+): ShellExecutionContext {
+  return runtime.ref.kind === 'windows'
+    ? runtime.resolveCommand('where.exe', [command])
+    : runtime.resolveCommand('which', [command])
+}
+
 export interface WorkspaceRuntimeDeps {
   /** Host platform override for tests; defaults to process.platform. */
   readonly hostPlatform?: string

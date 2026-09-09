@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 import { taskSchema } from './task'
-import { workspaceSchema } from './workspace'
+import { workspaceRuntimeRefSchema, workspaceSchema } from './workspace'
 
 /**
  * plan §17 AgentRunStatus — includes `interrupted`, the reconciliation-only
@@ -104,6 +104,45 @@ export const agentDefinitionSchema = z
     }
   })
 export type AgentDefinition = z.infer<typeof agentDefinitionSchema>
+
+export const agentDetectionRequestSchema = z.strictObject({
+  agentId: z.string().min(1),
+  runtime: workspaceRuntimeRefSchema,
+  refresh: z.boolean().optional(),
+})
+export type AgentDetectionRequest = z.infer<typeof agentDetectionRequestSchema>
+
+export const listAgentDetectionsRequestSchema = z.strictObject({
+  runtime: workspaceRuntimeRefSchema,
+  refresh: z.boolean().optional(),
+})
+export type ListAgentDetectionsRequest = z.infer<typeof listAgentDetectionsRequestSchema>
+
+export const agentDetectionResultSchema = z.strictObject({
+  agentId: z.string().min(1),
+  runtime: workspaceRuntimeRefSchema,
+  installed: z.boolean(),
+  executable: z.string().min(1).optional(),
+  version: z.string().min(1).optional(),
+  error: z.string().min(1).optional(),
+  overridden: z.boolean(),
+  fromCache: z.boolean(),
+  checkedAt: z.string().datetime(),
+})
+export type AgentDetectionResult = z.infer<typeof agentDetectionResultSchema>
+
+export const agentExecutableOverrideRequestSchema = z.strictObject({
+  agentId: z.string().min(1),
+  runtime: workspaceRuntimeRefSchema,
+})
+export type AgentExecutableOverrideRequest = z.infer<typeof agentExecutableOverrideRequestSchema>
+
+export const setAgentExecutableOverrideRequestSchema = agentExecutableOverrideRequestSchema.extend({
+  path: z.string().min(1).nullable(),
+})
+export type SetAgentExecutableOverrideRequest = z.infer<
+  typeof setAgentExecutableOverrideRequestSchema
+>
 
 /**
  * plan §13 + ADR-0004 — `handoffPath` / `artifactDir` implement the file

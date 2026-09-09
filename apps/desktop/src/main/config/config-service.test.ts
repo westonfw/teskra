@@ -112,6 +112,7 @@ describe('ConfigService.resolve — layer order', () => {
       },
       watchdog: { stalledThresholdMs: 60_000 }, // run override beats all
       environment: { defaultDistro: null },
+      agents: { executableOverrides: {} },
     })
     expect(sources).toEqual({
       'logging.level': 'global',

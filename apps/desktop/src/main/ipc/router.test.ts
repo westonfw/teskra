@@ -73,6 +73,19 @@ function fakeRuntime(): TeskraRuntime {
     },
     agent: {
       listDefinitions: vi.fn(() => ok([])),
+      detect: vi.fn(async () =>
+        ok({
+          agentId: 'codex',
+          runtime: { kind: 'windows' as const },
+          installed: false,
+          overridden: false,
+          fromCache: false,
+          checkedAt: '2026-09-10T00:00:00.000Z',
+        }),
+      ),
+      listDetections: vi.fn(async () => ok([])),
+      getExecutableOverride: vi.fn(() => ok<string | null>(null)),
+      setExecutableOverride: vi.fn(() => ok<string | null>(null)),
     },
     system: {
       info: vi.fn(() => ok({ appVersion: '0.1.0', runtimeVersion: '22.0.0' })),
@@ -97,6 +110,7 @@ function fakeRuntime(): TeskraRuntime {
             concurrency: { maxGlobalRuns: 4, maxRunsPerWorkspace: 3, maxRunsPerAgent: 2 },
             watchdog: { stalledThresholdMs: 600_000 },
             environment: { defaultDistro: null },
+            agents: { executableOverrides: {} },
           },
           sources: {
             'logging.level': 'default' as const,
@@ -116,6 +130,7 @@ function fakeRuntime(): TeskraRuntime {
             concurrency: { maxGlobalRuns: 4, maxRunsPerWorkspace: 3, maxRunsPerAgent: 2 },
             watchdog: { stalledThresholdMs: 600_000 },
             environment: { defaultDistro: null },
+            agents: { executableOverrides: {} },
           },
           sources: { 'logging.level': 'global' as const },
           warnings: [],
