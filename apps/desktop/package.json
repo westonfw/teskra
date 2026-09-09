@@ -22,6 +22,8 @@
     "@ant-design/icons": "6.3.4",
     "@teskra/contracts": "0.1.0",
     "@teskra/shared": "0.1.0",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
     "antd": "6.6.3",
     "better-sqlite3": "13.0.3",
     "node-pty": "1.1.0",
