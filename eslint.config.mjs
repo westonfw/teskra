@@ -65,6 +65,41 @@ export default tseslint.config(
     },
   },
   {
+    // TASK-012: CommandRunner (apps/desktop/src/main/process/) is the only
+    // module allowed to spawn one-shot commands; every other module injects
+    // it (AGENTS.md: 禁止各模块自己 spawn/exec). Process infrastructure —
+    // currently just CommandRunner; ProcessManager/node-pty joins here in
+    // TASK-013 — is exempt. Tests spawn via the runner, not directly.
+    //
+    // Placed BEFORE the renderer block: flat config lets only the last
+    // matching block win per rule name, and the renderer block below already
+    // bans ALL node builtins (child_process included), so it stays
+    // authoritative for renderer files.
+    files: ['apps/desktop/src/**/*.{ts,tsx}'],
+    ignores: ['apps/desktop/src/main/process/**', 'apps/desktop/src/**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'child_process',
+              message:
+                'Do not spawn processes here; inject CommandRunner (apps/desktop/src/main/process/command-runner.ts, TASK-012).',
+            },
+          ],
+          patterns: [
+            {
+              group: ['node:child_process'],
+              message:
+                'Do not spawn processes here; inject CommandRunner (apps/desktop/src/main/process/command-runner.ts, TASK-012).',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // TASK-002: the renderer must never touch Node APIs or Electron internals;
     // it talks to the main process through window.teskra (contextBridge) only.
     files: ['apps/desktop/src/renderer/**/*.{ts,tsx}'],
@@ -140,12 +175,15 @@ export default tseslint.config(
     // not scatter process.platform checks.
     //
     // Exempt: paths.ts (the path authority), runtime.ts (the platform
-    // authority), main/index.ts (the Electron app-lifecycle darwin check),
+    // authority), main/process/ (process infrastructure — CommandRunner's
+    // kill semantics branch on the host platform, TASK-012),
+    // main/index.ts (the Electron app-lifecycle darwin check),
     // and tests (which parameterize host-dependent scenarios).
     files: ['apps/desktop/src/**/*.{ts,tsx}'],
     ignores: [
       'apps/desktop/src/main/paths.ts',
       'apps/desktop/src/main/workspace/runtime.ts',
+      'apps/desktop/src/main/process/**',
       'apps/desktop/src/main/index.ts',
       'apps/desktop/src/**/*.test.{ts,tsx}',
     ],
