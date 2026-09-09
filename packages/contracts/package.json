@@ -1,0 +1,14 @@
+{
+  "name": "@teskra/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cross-process shared types and Zod schemas (the only allowed location for shared types).",
+  "type": "module",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}
