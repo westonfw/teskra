@@ -7,9 +7,16 @@ import { createEventBus } from '../events/event-bus'
 import type { WorkspaceRuntime } from '../workspace/runtime'
 import {
   createProcessManager,
+  type KillPolicy,
   type ProcessManagerDeps,
   type ProcessStartRequest,
 } from './process-manager'
+
+const FAST_KILL_POLICY: KillPolicy = {
+  interruptTimeoutMs: 5,
+  terminateTimeoutMs: 5,
+  forceKillTimeoutMs: 5,
+}
 
 interface FakePty extends IPty {
   emitData(data: string): void
@@ -206,4 +213,131 @@ describe('ProcessManager (TASK-014)', () => {
     manager.kill('p1')
     expect(backend.terminals[0]?.kills).toEqual([undefined, undefined])
   })
+
+  it('stops at Ctrl+C when a cooperative process exits', async () => {
+    const backend = fakePtyBackend()
+    const events = createEventBus<WorkbenchEvents>()
+    const exited = vi.fn()
+    events.subscribe('process.exited', exited)
+    const manager = createProcessManager({ events, spawn: backend.spawn, hostPlatform: 'linux' })
+    manager.start(request('p1'))
+    const terminal = backend.terminals[0]
+    if (terminal === undefined) throw new Error('expected fake PTY')
+    terminal.write = function (data) {
+      this.writes.push(data)
+      if (data === '\u0003') this.emitExit(130, 2)
+    }
+
+    const result = await manager.stop('p1', FAST_KILL_POLICY)
+    expect(result).toEqual({
+      ok: true,
+      data: { stage: 'interrupt', exit: { processId: 'p1', exitCode: 130, signal: 2 } },
+    })
+    expect(terminal.kills).toEqual([])
+    expect(exited).toHaveBeenCalledTimes(1)
+  })
+
+  it('escalates to graceful terminate when Ctrl+C is ignored', async () => {
+    const backend = fakePtyBackend()
+    const manager = createProcessManager({
+      events: createEventBus(),
+      spawn: backend.spawn,
+      hostPlatform: 'linux',
+    })
+    manager.start(request('p1'))
+    const terminal = backend.terminals[0]
+    if (terminal === undefined) throw new Error('expected fake PTY')
+    terminal.kill = function (signal) {
+      this.kills.push(signal)
+      if (signal === 'SIGTERM') this.emitExit(143, 15)
+    }
+
+    const result = await manager.stop('p1', FAST_KILL_POLICY)
+    expect(result.ok && result.data.stage).toBe('terminate')
+    expect(terminal.writes).toEqual(['\u0003'])
+    expect(terminal.kills).toEqual(['SIGTERM'])
+  })
+
+  it('escalates to force kill and emits exit only once', async () => {
+    const backend = fakePtyBackend()
+    const events = createEventBus<WorkbenchEvents>()
+    const exited = vi.fn()
+    events.subscribe('process.exited', exited)
+    const manager = createProcessManager({ events, spawn: backend.spawn, hostPlatform: 'linux' })
+    manager.start(request('p1'))
+    const terminal = backend.terminals[0]
+    if (terminal === undefined) throw new Error('expected fake PTY')
+    terminal.kill = function (signal) {
+      this.kills.push(signal)
+      if (signal === 'SIGKILL') {
+        this.emitExit(137, 9)
+        this.emitExit(137, 9)
+      }
+    }
+
+    const result = await manager.stop('p1', FAST_KILL_POLICY)
+    expect(result.ok && result.data.stage).toBe('kill')
+    expect(terminal.kills).toEqual(['SIGTERM', 'SIGKILL'])
+    expect(exited).toHaveBeenCalledTimes(1)
+  })
+
+  it('times out after force kill when a stuck backend never reports exit', async () => {
+    const backend = fakePtyBackend()
+    const manager = createProcessManager({
+      events: createEventBus(),
+      spawn: backend.spawn,
+      hostPlatform: 'linux',
+    })
+    manager.start(request('p1'))
+
+    const result = await manager.stop('p1', FAST_KILL_POLICY)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('COMMAND_TIMEOUT')
+    expect(backend.terminals[0]?.writes).toEqual(['\u0003'])
+    expect(backend.terminals[0]?.kills).toEqual(['SIGTERM', 'SIGKILL'])
+  })
+
+  it('rejects invalid kill policies before signalling the process', async () => {
+    const backend = fakePtyBackend()
+    const manager = createProcessManager({
+      events: createEventBus(),
+      spawn: backend.spawn,
+      hostPlatform: 'linux',
+    })
+    manager.start(request('p1'))
+
+    const result = await manager.stop('p1', { ...FAST_KILL_POLICY, interruptTimeoutMs: 0 })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.code).toBe('VALIDATION_FAILED')
+    expect(backend.terminals[0]?.writes).toEqual([])
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    'interrupts a real cooperative PTY process with Ctrl+C',
+    async () => {
+      const nativeRuntime: WorkspaceRuntime = {
+        ...runtime,
+        ref: { kind: 'wsl' },
+        hostNative: true,
+        resolveCommand: (command, args = [], cwd) => ({ executable: command, args, cwd }),
+      }
+      const manager = createProcessManager({ events: createEventBus(), hostPlatform: 'linux' })
+      const started = manager.start({
+        id: 'real-pty',
+        command: process.execPath,
+        args: ['-e', 'setInterval(() => {}, 1000)'],
+        runtime: nativeRuntime,
+      })
+      expect(started.ok).toBe(true)
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      const stopped = await manager.stop('real-pty', {
+        interruptTimeoutMs: 1_000,
+        terminateTimeoutMs: 500,
+        forceKillTimeoutMs: 500,
+      })
+      expect(stopped.ok).toBe(true)
+      if (stopped.ok) expect(stopped.data.stage).toBe('interrupt')
+    },
+  )
 })

@@ -39,6 +39,23 @@ export interface ProcessExit {
   readonly signal?: number
 }
 
+export interface KillPolicy {
+  readonly interruptTimeoutMs: number
+  readonly terminateTimeoutMs: number
+  readonly forceKillTimeoutMs: number
+}
+
+export const DEFAULT_KILL_POLICY: KillPolicy = {
+  interruptTimeoutMs: 1_000,
+  terminateTimeoutMs: 2_000,
+  forceKillTimeoutMs: 1_000,
+}
+
+export interface ProcessStopResult {
+  readonly exit: ProcessExit
+  readonly stage: 'interrupt' | 'terminate' | 'kill'
+}
+
 export interface ProcessManager {
   start(request: ProcessStartRequest): IpcResult<ManagedProcess>
   write(processId: string, data: string): IpcResult<void>
@@ -46,6 +63,7 @@ export interface ProcessManager {
   interrupt(processId: string): IpcResult<void>
   terminate(processId: string): IpcResult<void>
   kill(processId: string): IpcResult<void>
+  stop(processId: string, policy?: KillPolicy): Promise<IpcResult<ProcessStopResult>>
   get(processId: string): ManagedProcess | undefined
   list(): readonly ManagedProcess[]
   waitForExit(processId: string): Promise<IpcResult<ProcessExit>>
@@ -75,6 +93,20 @@ function fail<T>(error: InternalAppError): IpcResult<T> {
 
 function validDimension(value: number): boolean {
   return Number.isInteger(value) && value > 0
+}
+
+function validTimeout(value: number): boolean {
+  return Number.isInteger(value) && value > 0
+}
+
+function waitWithin<T>(promise: Promise<T>, timeoutMs: number): Promise<T | undefined> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(undefined), timeoutMs)
+    void promise.then((value) => {
+      clearTimeout(timer)
+      resolve(value)
+    })
+  })
 }
 
 function processNotFound<T>(processId: string): IpcResult<T> {
@@ -278,6 +310,60 @@ export function createProcessManager(deps: ProcessManagerDeps): ProcessManager {
         } else {
           entry.pty.kill('SIGKILL')
         }
+      })
+    },
+
+    async stop(processId, policy = DEFAULT_KILL_POLICY) {
+      if (
+        !validTimeout(policy.interruptTimeoutMs) ||
+        !validTimeout(policy.terminateTimeoutMs) ||
+        !validTimeout(policy.forceKillTimeoutMs)
+      ) {
+        return fail({
+          code: 'VALIDATION_FAILED',
+          message: 'Every process stop timeout must be a positive integer.',
+          retryable: false,
+          detail: `kill policy: ${JSON.stringify(policy)}`,
+        })
+      }
+      const entry = getActive(processId)
+      if (!entry.ok) {
+        return entry
+      }
+      const exited = entry.data.exited
+
+      const interrupted = manager.interrupt(processId)
+      if (!interrupted.ok) {
+        return interrupted
+      }
+      let exit = await waitWithin(exited, policy.interruptTimeoutMs)
+      if (exit !== undefined) {
+        return { ok: true, data: { exit, stage: 'interrupt' } }
+      }
+
+      const terminated = manager.terminate(processId)
+      if (!terminated.ok) {
+        return terminated
+      }
+      exit = await waitWithin(exited, policy.terminateTimeoutMs)
+      if (exit !== undefined) {
+        return { ok: true, data: { exit, stage: 'terminate' } }
+      }
+
+      const killed = manager.kill(processId)
+      if (!killed.ok) {
+        return killed
+      }
+      exit = await waitWithin(exited, policy.forceKillTimeoutMs)
+      if (exit !== undefined) {
+        return { ok: true, data: { exit, stage: 'kill' } }
+      }
+
+      return fail({
+        code: 'COMMAND_TIMEOUT',
+        message: `Process "${processId}" did not exit after force kill.`,
+        retryable: true,
+        detail: `pid ${String(entry.data.info.pid)} remained active after kill policy ${JSON.stringify(policy)}`,
       })
     },
 
