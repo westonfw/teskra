@@ -185,3 +185,17 @@ export const agentStartRequestSchema = z.strictObject({
   environment: z.record(z.string(), z.string()).optional(),
 })
 export type AgentStartRequest = z.infer<typeof agentStartRequestSchema>
+
+/** plan §131 — opaque provider identity used to resume a persisted CLI session. */
+export const providerSessionRefSchema = z.strictObject({
+  provider: z.string().min(1),
+  sessionId: z.string().min(1).optional(),
+  threadId: z.string().min(1).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+})
+export type ProviderSessionRef = z.infer<typeof providerSessionRefSchema>
+
+export const agentResumeRequestSchema = agentStartRequestSchema.extend({
+  providerSession: providerSessionRefSchema,
+})
+export type AgentResumeRequest = z.infer<typeof agentResumeRequestSchema>

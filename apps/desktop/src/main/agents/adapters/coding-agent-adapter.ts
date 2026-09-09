@@ -1,6 +1,7 @@
 import type {
   AgentDefinition,
   AgentDetectionResult,
+  AgentResumeRequest,
   AgentStartRequest,
   IpcResult,
   WorkspaceRuntimeRef,
@@ -25,5 +26,5 @@ export interface CodingAgentAdapter {
   start(request: AgentStartRequest): Promise<IpcResult<AgentProcessHandle>>
   send(runId: string, input: string): Promise<IpcResult<void>>
   cancel(runId: string): Promise<IpcResult<void>>
-  resume?(request: AgentStartRequest): Promise<IpcResult<AgentProcessHandle>>
+  resume?(request: AgentResumeRequest): Promise<IpcResult<AgentProcessHandle>>
 }

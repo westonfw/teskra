@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { AGENT_RUN_STATUSES, agentDefinitionSchema, agentStartRequestSchema } from './agent'
+import {
+  AGENT_RUN_STATUSES,
+  agentDefinitionSchema,
+  agentResumeRequestSchema,
+  agentStartRequestSchema,
+} from './agent'
 import { IPC_CHANNELS, ipcChannelDefinitions, pingChannel, pingResponseSchema } from './ipc'
 
 describe('agent contracts', () => {
@@ -48,6 +53,27 @@ describe('agent contracts', () => {
 
   it('AgentRunStatus schema accepts interrupted', () => {
     expect(AGENT_RUN_STATUSES).toContain('interrupted')
+  })
+
+  it('validates the provider session reference needed to resume an Agent', () => {
+    const result = agentResumeRequestSchema.safeParse({
+      runId: 'RUN-002',
+      workspace: {
+        id: 'ws1',
+        name: 'demo',
+        runtime: { kind: 'wsl', distro: 'Ubuntu' },
+        path: '/home/user/demo',
+        createdAt: '2026-09-09T00:00:00.000Z',
+        updatedAt: '2026-09-09T00:00:00.000Z',
+      },
+      providerSession: {
+        provider: 'codex',
+        sessionId: '0199-session',
+        metadata: { source: 'agent-run' },
+      },
+    })
+
+    expect(result.success).toBe(true)
   })
 })
 
