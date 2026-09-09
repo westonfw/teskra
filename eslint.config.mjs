@@ -65,18 +65,17 @@ export default tseslint.config(
     },
   },
   {
-    // TASK-012: CommandRunner (apps/desktop/src/main/process/) is the only
+    // TASK-012: CommandRunner is the only module allowed to spawn one-shot
     // module allowed to spawn one-shot commands; every other module injects
-    // it (AGENTS.md: 禁止各模块自己 spawn/exec). Process infrastructure —
-    // currently just CommandRunner; ProcessManager/node-pty joins here in
-    // TASK-013 — is exempt. Tests spawn via the runner, not directly.
+    // commands. TASK-014: ProcessManager is the only module allowed to spawn
+    // PTYs. Tests may exercise the native modules directly.
     //
     // Placed BEFORE the renderer block: flat config lets only the last
     // matching block win per rule name, and the renderer block below already
     // bans ALL node builtins (child_process included), so it stays
     // authoritative for renderer files.
     files: ['apps/desktop/src/**/*.{ts,tsx}'],
-    ignores: ['apps/desktop/src/main/process/**', 'apps/desktop/src/**/*.test.{ts,tsx}'],
+    ignores: ['apps/desktop/src/**/*.test.{ts,tsx}'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -87,12 +86,60 @@ export default tseslint.config(
               message:
                 'Do not spawn processes here; inject CommandRunner (apps/desktop/src/main/process/command-runner.ts, TASK-012).',
             },
+            {
+              name: 'node-pty',
+              message:
+                'Do not spawn PTYs here; inject ProcessManager (apps/desktop/src/main/process/process-manager.ts, TASK-014).',
+            },
           ],
           patterns: [
             {
               group: ['node:child_process'],
               message:
                 'Do not spawn processes here; inject CommandRunner (apps/desktop/src/main/process/command-runner.ts, TASK-012).',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // Per-authority overrides: each may import its own backend, while the
+    // other backend remains prohibited.
+    files: ['apps/desktop/src/main/process/command-runner.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'node-pty',
+              message:
+                'Do not spawn PTYs here; inject ProcessManager (apps/desktop/src/main/process/process-manager.ts, TASK-014).',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['apps/desktop/src/main/process/process-manager.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'child_process',
+              message:
+                'Interactive processes use node-pty here; one-shot commands belong to CommandRunner.',
+            },
+          ],
+          patterns: [
+            {
+              group: ['node:child_process'],
+              message:
+                'Interactive processes use node-pty here; one-shot commands belong to CommandRunner.',
             },
           ],
         },
@@ -111,6 +158,10 @@ export default tseslint.config(
             {
               name: 'electron',
               message: 'Renderer must not import electron; use the window.teskra bridge instead.',
+            },
+            {
+              name: 'node-pty',
+              message: 'Renderer must not import node-pty; use the window.teskra bridge instead.',
             },
             ...nodeBuiltins.map((name) => ({
               name,
