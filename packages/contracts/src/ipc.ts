@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { ipcResultSchema, type IpcResult } from './error'
+import type { WorkbenchEventName, WorkbenchEvents } from './event'
 import {
   requireRuntimePortRequestSchema,
   setDefaultWslDistributionRequestSchema,
@@ -247,5 +248,11 @@ export interface TeskraBridge {
       request: SetDefaultWslDistributionRequest,
     ): Promise<IpcResult<string | null>>
     requireCapability(request: RequireRuntimePortRequest): Promise<IpcResult<unknown>>
+  }
+  readonly events: {
+    subscribe<Name extends WorkbenchEventName>(
+      name: Name,
+      handler: (payload: WorkbenchEvents[Name]) => void,
+    ): () => void
   }
 }

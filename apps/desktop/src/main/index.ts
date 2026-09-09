@@ -1,37 +1,14 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, ipcMain } from 'electron'
 import { join } from 'node:path'
 
+import { createRendererEventBridge, type RendererEventBridge } from './events/renderer-event-bridge'
 import { registerIpcRouter } from './ipc/router'
 import { getLogger } from './logger'
 import { composeTeskraRuntime } from './runtime/compose'
 import type { TeskraRuntime } from './runtime/facade'
 
-function createWindow(): void {
-  const window = new BrowserWindow({
-    title: 'Teskra',
-    width: 1280,
-    height: 800,
-    show: false,
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  })
-
-  window.on('ready-to-show', () => {
-    window.show()
-  })
-
-  if (process.env['ELECTRON_RENDERER_URL']) {
-    window.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    window.loadFile(join(__dirname, '../renderer/index.html'))
-  }
-}
-
 let runtime: TeskraRuntime | undefined
+let rendererBridge: RendererEventBridge | undefined
 const ipcRouter = registerIpcRouter(ipcMain, () => runtime)
 
 app.whenReady().then(async () => {
@@ -47,17 +24,24 @@ app.whenReady().then(async () => {
     )
   }
 
-  createWindow()
+  rendererBridge = createRendererEventBridge(runtime?.events, {
+    preloadPath: join(__dirname, '../preload/index.js'),
+    rendererHtmlPath: join(__dirname, '../renderer/index.html'),
+    rendererUrl: process.env['ELECTRON_RENDERER_URL'],
+  })
+  rendererBridge.createWindow()
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow()
+    if (!rendererBridge?.hasWindows()) {
+      rendererBridge?.createWindow()
     }
   })
 })
 
 app.on('before-quit', () => {
   ipcRouter.dispose()
+  rendererBridge?.dispose()
+  rendererBridge = undefined
   const disposed = runtime?.dispose()
   if (disposed !== undefined && !disposed.ok) {
     getLogger('app').error({ err: disposed.error }, 'Failed to dispose Teskra Runtime cleanly.')

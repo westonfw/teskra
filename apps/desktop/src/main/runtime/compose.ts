@@ -139,6 +139,7 @@ export async function composeTeskraRuntime(
 
   let disposed = false
   const runtime: TeskraRuntime = {
+    events,
     workspace: {
       create: (request) => workspaceManager.create(request),
       open: (request) => workspaceManager.open(request),

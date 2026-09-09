@@ -42,12 +42,18 @@ function runtimeImports(source: string): string[] {
 }
 
 describe('BrowserWindow webPreferences', () => {
+  const bridgeSource = readFileSync(join(srcDir, 'main/events/renderer-event-bridge.ts'), 'utf8')
   const mainSource = readFileSync(join(srcDir, 'main/index.ts'), 'utf8')
 
   it('enforces contextIsolation / nodeIntegration / sandbox', () => {
-    expect(mainSource).toContain('contextIsolation: true')
-    expect(mainSource).toContain('nodeIntegration: false')
-    expect(mainSource).toContain('sandbox: true')
+    expect(bridgeSource).toContain('contextIsolation: true')
+    expect(bridgeSource).toContain('nodeIntegration: false')
+    expect(bridgeSource).toContain('sandbox: true')
+  })
+
+  it('keeps BrowserWindow details inside RendererEventBridge', () => {
+    expect(bridgeSource).toContain("import { BrowserWindow } from 'electron'")
+    expect(mainSource).not.toContain('BrowserWindow')
   })
 })
 
@@ -67,7 +73,7 @@ describe('preload bridge', () => {
     const allowed = new Set(['electron', '@teskra/contracts', '@teskra/shared'])
     const imports = runtimeImports(preloadSource)
     expect(imports).toContain('electron')
-    expect(imports.every((spec) => allowed.has(spec))).toBe(true)
+    expect(imports.every((spec) => spec.startsWith('.') || allowed.has(spec))).toBe(true)
     expect(preloadSource).not.toContain('require(')
   })
 })

@@ -19,6 +19,8 @@ import type {
   WorkspaceValidationResult,
   WslDistribution,
   WslEnvironment,
+  WorkbenchEventName,
+  WorkbenchEvents,
 } from '@teskra/contracts'
 
 export interface WorkspacePort {
@@ -50,10 +52,19 @@ export interface SystemPort {
 
 export type FutureRuntimePort = Record<string, never>
 
+export interface RuntimeEventSource {
+  subscribe<Name extends WorkbenchEventName>(
+    name: Name,
+    handler: (payload: WorkbenchEvents[Name]) => void,
+  ): () => void
+}
+
 export interface TeskraRuntime {
   readonly workspace: WorkspacePort
   readonly terminal: TerminalPort
   readonly system: SystemPort
+  /** Main-process event source consumed only by RendererEventBridge. */
+  readonly events: RuntimeEventSource
   readonly task?: FutureRuntimePort
   readonly agent?: FutureRuntimePort
   readonly git?: FutureRuntimePort

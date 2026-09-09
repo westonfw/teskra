@@ -9,6 +9,7 @@ import {
 
 import type { TeskraRuntime } from '../runtime/facade'
 import { registerIpcRouter, type IpcMainPort } from './router'
+import { createEventBus } from '../events/event-bus'
 
 class FakeIpcMain implements IpcMainPort {
   readonly handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>()
@@ -44,6 +45,7 @@ function ok<T>(data: T): IpcResult<T> {
 
 function fakeRuntime(): TeskraRuntime {
   return {
+    events: createEventBus(),
     workspace: {
       create: vi.fn(() => ok(WORKSPACE)),
       open: vi.fn(() => ok(WORKSPACE)),

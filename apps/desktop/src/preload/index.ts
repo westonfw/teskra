@@ -1,12 +1,26 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
-import { IPC_CHANNELS, type IpcResult, type TeskraBridge } from '@teskra/contracts'
+import {
+  IPC_CHANNELS,
+  RENDERER_EVENT_CHANNEL,
+  type IpcResult,
+  type TeskraBridge,
+  type WorkbenchEventEnvelope,
+} from '@teskra/contracts'
+import { createRendererEventSubscriptions } from './event-subscriptions'
 
 // The preload bundle is self-contained under sandbox:true. Renderer code gets
 // domain methods only — never ipcRenderer and never a generic exec(channel).
 function invoke<Result>(channel: string, payload?: unknown): Promise<IpcResult<Result>> {
   return ipcRenderer.invoke(channel, payload) as Promise<IpcResult<Result>>
 }
+
+const eventSubscriptions = createRendererEventSubscriptions((listener) => {
+  const ipcListener = (_event: unknown, envelope: WorkbenchEventEnvelope): void =>
+    listener(envelope)
+  ipcRenderer.on(RENDERER_EVENT_CHANNEL, ipcListener)
+  return () => ipcRenderer.removeListener(RENDERER_EVENT_CHANNEL, ipcListener)
+})
 
 const bridge: TeskraBridge = {
   appName: 'Teskra',
@@ -37,6 +51,7 @@ const bridge: TeskraBridge = {
     setDefaultWslDistribution: (request) => invoke(IPC_CHANNELS.runtimeSetDefaultWsl, request),
     requireCapability: (request) => invoke(IPC_CHANNELS.runtimeRequireCapability, request),
   },
+  events: eventSubscriptions,
 }
 
 contextBridge.exposeInMainWorld('teskra', bridge)

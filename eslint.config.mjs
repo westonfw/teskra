@@ -105,8 +105,8 @@ export default tseslint.config(
   },
   {
     // TASK-081: everything below Electron Main is UI-agnostic. The sole
-    // future exception is RendererEventBridge (TASK-021); main/index.ts owns
-    // application lifecycle and window creation. Repeat the process backend
+    // exception is RendererEventBridge (TASK-021); main/index.ts owns only
+    // application lifecycle. Repeat the process backend
     // restrictions here because flat-config rules replace rather than merge.
     files: ['apps/desktop/src/main/**/*.ts'],
     ignores: [

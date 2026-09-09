@@ -93,3 +93,32 @@ export interface WorkbenchEvents {
 }
 
 export type WorkbenchEventName = keyof WorkbenchEvents
+
+export const WORKBENCH_EVENT_NAMES = [
+  'process.started',
+  'process.output',
+  'process.exited',
+  'workspace.opened',
+  'terminal.created',
+  'terminal.output',
+  'terminal.closed',
+  'agent.created',
+  'agent.started',
+  'agent.output',
+  'agent.command',
+  'agent.waiting',
+  'agent.completed',
+  'agent.failed',
+  'task.created',
+  'task.updated',
+  'git.changed',
+  'git.diff.updated',
+  'permission.requested',
+  'permission.resolved',
+] as const satisfies readonly WorkbenchEventName[]
+
+export const RENDERER_EVENT_CHANNEL = 'teskra:event' as const
+
+export type WorkbenchEventEnvelope<Name extends WorkbenchEventName = WorkbenchEventName> = {
+  [EventName in Name]: { name: EventName; payload: WorkbenchEvents[EventName] }
+}[Name]
