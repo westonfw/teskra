@@ -15,6 +15,15 @@ export const systemPathsSchema = z.strictObject({
 })
 export type SystemPaths = z.infer<typeof systemPathsSchema>
 
+export const SYSTEM_DIRECTORY_KINDS = ['data', 'logs'] as const
+export const systemDirectoryKindSchema = z.enum(SYSTEM_DIRECTORY_KINDS)
+export type SystemDirectoryKind = z.infer<typeof systemDirectoryKindSchema>
+
+export const openSystemDirectoryRequestSchema = z.strictObject({
+  kind: systemDirectoryKindSchema,
+})
+export type OpenSystemDirectoryRequest = z.infer<typeof openSystemDirectoryRequestSchema>
+
 export const systemHealthSchema = z.strictObject({
   databaseAvailable: z.boolean(),
   wslAvailable: z.boolean(),

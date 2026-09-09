@@ -44,6 +44,8 @@ export interface ComposeRuntimeOptions {
   readonly wslInfo?: WslEnvironmentInfo
   /** Defaults true. Tests may disable filesystem logging. */
   readonly initializeLogs?: boolean
+  /** Electron shell adapter, injected by main/index.ts to keep Runtime Electron-free. */
+  readonly openPath?: (path: string) => Promise<string>
 }
 
 function createRepositories(connection: TeskraDatabase['connection']) {
@@ -194,6 +196,63 @@ export async function composeTeskraRuntime(
       listWslDistributions: () => wsl.listDistributions(),
       getDefaultWslDistribution: () => wsl.getDefaultDistribution(),
       setDefaultWslDistribution: (name) => wsl.setDefaultDistribution(name),
+    },
+    settings: {
+      resolveConfig: (request = {}) => config.resolve(request),
+      updateConfig: (request) => {
+        if (request.layer === 'global') {
+          return config.updateGlobal(request.patch)
+        }
+        if (request.workspaceId === undefined) {
+          return {
+            ok: false,
+            error: {
+              code: 'VALIDATION_FAILED',
+              message: 'A workspace is required for workspace settings.',
+              retryable: false,
+            },
+          }
+        }
+        return config.updateWorkspace(request.workspaceId, request.patch)
+      },
+      openDirectory: async ({ kind }) => {
+        if (options.openPath === undefined) {
+          return {
+            ok: false,
+            error: {
+              code: 'CAPABILITY_NOT_AVAILABLE',
+              message: 'Opening folders is unavailable in this environment.',
+              retryable: false,
+            },
+          }
+        }
+        const directory = kind === 'logs' ? paths.logs() : { ok: true as const, data: paths.home() }
+        if (!directory.ok) return directory
+        try {
+          const failure = await options.openPath(directory.data)
+          if (failure.length > 0) {
+            return {
+              ok: false,
+              error: {
+                code: 'UNKNOWN',
+                message: 'The folder could not be opened.',
+                retryable: true,
+              },
+            }
+          }
+          return { ok: true, data: undefined }
+        } catch (cause) {
+          getLogger('app').error({ cause, path: directory.data }, 'Failed to open Settings folder.')
+          return {
+            ok: false,
+            error: {
+              code: 'UNKNOWN',
+              message: 'The folder could not be opened.',
+              retryable: true,
+            },
+          }
+        }
+      },
     },
     dispose() {
       if (disposed) {

@@ -308,3 +308,43 @@ describe('ConfigService — real filesystem smoke test', () => {
     expect(readFileSync(paths.config(), 'utf8')).toBe('{ broken')
   })
 })
+
+describe('ConfigService.updateWorkspace', () => {
+  it('writes the repo-local layer and resolves workspace provenance', () => {
+    const files: Record<string, string> = {}
+    const service = createConfigService(
+      makeDeps(files, {
+        writeFile: (path, contents) => {
+          files[path] = contents
+        },
+      }),
+    )
+
+    const updated = service.updateWorkspace('ws1', {
+      concurrency: { maxRunsPerWorkspace: 7 },
+    })
+    expect(updated.ok).toBe(true)
+    if (!updated.ok) return
+    expect(updated.data.config.concurrency.maxRunsPerWorkspace).toBe(7)
+    expect(updated.data.sources['concurrency.maxRunsPerWorkspace']).toBe('workspace')
+    expect(JSON.parse(files[`${REPO_ROOT}/.teskra/config.json`] ?? '')).toEqual({
+      concurrency: { maxRunsPerWorkspace: 7 },
+    })
+  })
+
+  it('rejects unknown workspaces and secret-looking values', () => {
+    const writes: string[] = []
+    const service = createConfigService(
+      makeDeps({}, { writeFile: (path) => void writes.push(path) }),
+    )
+
+    const missing = service.updateWorkspace('ghost', { logging: { level: 'debug' } })
+    expect(missing).toMatchObject({ ok: false, error: { code: 'WORKSPACE_NOT_FOUND' } })
+
+    const secret = service.updateWorkspace('ws1', {
+      environment: { defaultDistro: 'ghp_1234567890abcdef' },
+    })
+    expect(secret).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    expect(writes).toEqual([])
+  })
+})

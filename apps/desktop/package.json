@@ -19,13 +19,16 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
   },
   "dependencies": {
+    "@ant-design/icons": "6.3.4",
     "@teskra/contracts": "0.1.0",
     "@teskra/shared": "0.1.0",
+    "antd": "6.6.3",
     "better-sqlite3": "13.0.3",
     "node-pty": "1.1.0",
     "pino": "10.3.1",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "zustand": "5.0.15"
   },
   "devDependencies": {
     "@electron/rebuild": "4.2.0",

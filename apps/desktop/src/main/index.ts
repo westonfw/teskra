@@ -1,4 +1,4 @@
-import { app, ipcMain } from 'electron'
+import { app, ipcMain, shell } from 'electron'
 import { join } from 'node:path'
 
 import { createRendererEventBridge, type RendererEventBridge } from './events/renderer-event-bridge'
@@ -14,7 +14,10 @@ const ipcRouter = registerIpcRouter(ipcMain, () => runtime)
 app.whenReady().then(async () => {
   // TASK-081: all non-Electron services are built at the single composition
   // root. A structured startup failure leaves the secure shell operational.
-  const composed = await composeTeskraRuntime({ appVersion: app.getVersion() })
+  const composed = await composeTeskraRuntime({
+    appVersion: app.getVersion(),
+    openPath: (path) => shell.openPath(path),
+  })
   if (composed.ok) {
     runtime = composed.data
   } else {

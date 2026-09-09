@@ -3,11 +3,21 @@ import { z } from 'zod'
 import { ipcResultSchema, type IpcResult } from './error'
 import type { WorkbenchEventName, WorkbenchEvents } from './event'
 import {
+  resolveConfigRequestSchema,
+  resolvedConfigSchema,
+  updateConfigRequestSchema,
+  type ResolveConfigRequest,
+  type ResolvedConfig,
+  type UpdateConfigRequest,
+} from './config'
+import {
+  openSystemDirectoryRequestSchema,
   requireRuntimePortRequestSchema,
   setDefaultWslDistributionRequestSchema,
   systemHealthSchema,
   systemInfoSchema,
   systemPathsSchema,
+  type OpenSystemDirectoryRequest,
   type RequireRuntimePortRequest,
   type SetDefaultWslDistributionRequest,
   type SystemHealth,
@@ -72,6 +82,9 @@ export const IPC_CHANNELS = {
   runtimeGetDefaultWsl: 'teskra:runtime:wsl:get-default',
   runtimeSetDefaultWsl: 'teskra:runtime:wsl:set-default',
   runtimeRequireCapability: 'teskra:runtime:require-capability',
+  settingsResolveConfig: 'teskra:settings:config:resolve',
+  settingsUpdateConfig: 'teskra:settings:config:update',
+  systemOpenDirectory: 'teskra:system:directory:open',
 } as const
 export type IpcChannelName = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
 
@@ -194,6 +207,21 @@ export const runtimeRequireCapabilityChannel = channel(
   requireRuntimePortRequestSchema,
   z.unknown(),
 )
+export const settingsResolveConfigChannel = channel(
+  IPC_CHANNELS.settingsResolveConfig,
+  resolveConfigRequestSchema,
+  resolvedConfigSchema,
+)
+export const settingsUpdateConfigChannel = channel(
+  IPC_CHANNELS.settingsUpdateConfig,
+  updateConfigRequestSchema,
+  resolvedConfigSchema,
+)
+export const systemOpenDirectoryChannel = channel(
+  IPC_CHANNELS.systemOpenDirectory,
+  openSystemDirectoryRequestSchema,
+  voidResponseSchema,
+)
 
 export const ipcChannelDefinitions = {
   ping: pingChannel,
@@ -216,6 +244,9 @@ export const ipcChannelDefinitions = {
   runtimeGetDefaultWsl: runtimeGetDefaultWslChannel,
   runtimeSetDefaultWsl: runtimeSetDefaultWslChannel,
   runtimeRequireCapability: runtimeRequireCapabilityChannel,
+  settingsResolveConfig: settingsResolveConfigChannel,
+  settingsUpdateConfig: settingsUpdateConfigChannel,
+  systemOpenDirectory: systemOpenDirectoryChannel,
 } as const
 
 export interface TeskraBridge {
@@ -248,6 +279,11 @@ export interface TeskraBridge {
       request: SetDefaultWslDistributionRequest,
     ): Promise<IpcResult<string | null>>
     requireCapability(request: RequireRuntimePortRequest): Promise<IpcResult<unknown>>
+  }
+  readonly settings: {
+    resolveConfig(request?: ResolveConfigRequest): Promise<IpcResult<ResolvedConfig>>
+    updateConfig(request: UpdateConfigRequest): Promise<IpcResult<ResolvedConfig>>
+    openDirectory(request: OpenSystemDirectoryRequest): Promise<IpcResult<void>>
   }
   readonly events: {
     subscribe<Name extends WorkbenchEventName>(

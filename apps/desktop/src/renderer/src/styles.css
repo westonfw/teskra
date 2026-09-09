@@ -1,0 +1,165 @@
+:root {
+  color: #e8edf5;
+  background: #0b0f17;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-width: 860px;
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 82% 8%, rgba(48, 122, 170, 0.15), transparent 30rem), #0b0f17;
+}
+
+.settings-layout {
+  min-height: 100vh;
+  background: transparent;
+}
+
+.settings-sidebar {
+  padding: 28px 18px;
+  background: rgba(13, 18, 28, 0.93) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.settings-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px 28px;
+}
+
+.settings-brand h4,
+.settings-section-stack h3 {
+  margin: 0 !important;
+}
+
+.settings-brand-mark {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  color: #07121a;
+  font-size: 18px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #7be0d6, #6aa9ff);
+  border-radius: 11px;
+  box-shadow: 0 8px 28px rgba(93, 194, 213, 0.22);
+}
+
+.settings-sidebar .ant-menu {
+  background: transparent;
+  border-inline-end: 0 !important;
+}
+
+.settings-content {
+  min-width: 0;
+  padding: 34px clamp(30px, 6vw, 92px) 64px;
+}
+
+.settings-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 32px;
+  max-width: 980px;
+  margin: 0 auto 24px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.settings-toolbar .ant-typography {
+  margin-bottom: 0;
+}
+
+.settings-eyebrow {
+  color: #79d6cf !important;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.settings-notice,
+.settings-panel {
+  max-width: 980px;
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.settings-notice {
+  margin-bottom: 14px;
+}
+
+.settings-panel {
+  padding-top: 8px;
+}
+
+.settings-section-stack {
+  width: 100%;
+}
+
+.settings-section-stack > .ant-space-item:first-child {
+  padding-bottom: 2px;
+}
+
+.settings-section-stack .ant-card {
+  background: rgba(20, 27, 40, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.065);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.16);
+}
+
+.settings-field {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(180px, 280px);
+  gap: 30px;
+  align-items: center;
+  padding: 18px 0;
+}
+
+.settings-field + .settings-field {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.settings-field-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 5px;
+}
+
+.settings-field-control > * {
+  width: 100%;
+}
+
+@media (max-width: 980px) {
+  .settings-content {
+    padding-right: 30px;
+    padding-left: 30px;
+  }
+
+  .settings-field {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+}

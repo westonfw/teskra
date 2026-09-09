@@ -7,7 +7,8 @@ import {
   teskraConfigSchema,
   type ConfigLayerName,
   type ConfigSources,
-  type TeskraConfig,
+  type ConfigWarning,
+  type ResolvedConfig,
   type TeskraConfigLayer,
 } from '@teskra/contracts'
 import type { IpcResult } from '@teskra/contracts'
@@ -41,20 +42,6 @@ import { containsSecretValue, looksLikeSecretKey } from '../redact'
  * file problem.
  */
 
-export interface ConfigWarning {
-  readonly layer: ConfigLayerName
-  /** Dotted field path (e.g. "concurrency.maxGlobalRuns") when applicable. */
-  readonly fieldPath?: string
-  readonly message: string
-}
-
-export interface ResolvedConfig {
-  readonly config: TeskraConfig
-  /** Every leaf field's winning layer, e.g. "logging.level" → "workspace". */
-  readonly sources: ConfigSources
-  readonly warnings: readonly ConfigWarning[]
-}
-
 export interface ResolveConfigOptions {
   /** Loads the workspace layer from the repo at this workspace's path. */
   readonly workspaceId?: string
@@ -66,6 +53,8 @@ export interface ConfigService {
   resolve(options?: ResolveConfigOptions): IpcResult<ResolvedConfig>
   /** Deep-merges a validated patch into the private global config layer. */
   updateGlobal(patch: unknown): IpcResult<ResolvedConfig>
+  /** Deep-merges a validated, secret-free patch into a repo-local layer. */
+  updateWorkspace(workspaceId: string, patch: unknown): IpcResult<ResolvedConfig>
 }
 
 export interface ConfigServiceDeps {
@@ -263,6 +252,109 @@ export function createConfigService(deps: ConfigServiceDeps): ConfigService {
     return parsed.data
   }
 
+  const writeLayerFile = (
+    layer: 'global' | 'workspace',
+    path: string,
+    patch: unknown,
+  ): IpcResult<void> => {
+    if (layer === 'workspace' && isPlainObject(patch)) {
+      const scan = stripSecrets(patch)
+      if (scan.warnings.length > 0) {
+        return {
+          ok: false,
+          error: toPublicError({
+            code: 'VALIDATION_FAILED',
+            message: 'Workspace config cannot contain sensitive values.',
+            retryable: false,
+            detail: scan.warnings.map((warning) => warning.fieldPath).join(', '),
+          }),
+        }
+      }
+    }
+
+    const parsedPatch = teskraConfigLayerSchema.safeParse(patch)
+    if (!parsedPatch.success) {
+      return {
+        ok: false,
+        error: toPublicError({
+          code: 'VALIDATION_FAILED',
+          message: `Invalid ${layer} config update.`,
+          retryable: false,
+          detail: `${layer} patch: ${JSON.stringify(parsedPatch.error.issues)}`,
+        }),
+      }
+    }
+
+    let current: TeskraConfigLayer = {}
+    try {
+      const raw = readFile(path)
+      const json: unknown = JSON.parse(raw)
+      const parsedCurrent = teskraConfigLayerSchema.safeParse(json)
+      if (!parsedCurrent.success) {
+        return {
+          ok: false,
+          error: toPublicError({
+            code: 'VALIDATION_FAILED',
+            message: `The existing ${layer} config is invalid and was not overwritten.`,
+            retryable: false,
+            detail: `${layer} config ${path}: ${JSON.stringify(parsedCurrent.error.issues)}`,
+          }),
+        }
+      }
+      current = parsedCurrent.data
+    } catch (cause) {
+      const code = (cause as NodeJS.ErrnoException).code
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+        return {
+          ok: false,
+          error: toPublicError({
+            code: code === undefined ? 'VALIDATION_FAILED' : 'UNKNOWN',
+            message:
+              code === undefined
+                ? `The existing ${layer} config is not valid JSON and was not overwritten.`
+                : `Failed to read the ${layer} config before updating it.`,
+            retryable: false,
+            detail: `${layer} config ${path}`,
+            cause,
+          }),
+        }
+      }
+    }
+
+    const merged = deepMerge(
+      current as Record<string, unknown>,
+      parsedPatch.data as Record<string, unknown>,
+    )
+    const validated = teskraConfigLayerSchema.safeParse(merged)
+    if (!validated.success) {
+      return {
+        ok: false,
+        error: toPublicError({
+          code: 'VALIDATION_FAILED',
+          message: `The merged ${layer} config is invalid.`,
+          retryable: false,
+          detail: `merged ${layer} config: ${JSON.stringify(validated.error.issues)}`,
+        }),
+      }
+    }
+
+    try {
+      writeFile(path, `${JSON.stringify(validated.data, null, 2)}\n`)
+    } catch (cause) {
+      return {
+        ok: false,
+        error: toPublicError({
+          code: 'UNKNOWN',
+          message: `Failed to save the ${layer} config.`,
+          retryable: true,
+          detail: `write ${layer} config ${path}`,
+          cause,
+        }),
+      }
+    }
+    return { ok: true, data: undefined }
+  }
+
   const service: ConfigService = {
     resolve(options = {}) {
       const warnings: ConfigWarning[] = []
@@ -346,88 +438,39 @@ export function createConfigService(deps: ConfigServiceDeps): ConfigService {
     },
 
     updateGlobal(patch) {
-      const parsedPatch = teskraConfigLayerSchema.safeParse(patch)
-      if (!parsedPatch.success) {
-        return {
-          ok: false,
-          error: toPublicError({
-            code: 'VALIDATION_FAILED',
-            message: 'Invalid global config update.',
-            retryable: false,
-            detail: `global patch: ${JSON.stringify(parsedPatch.error.issues)}`,
-          }),
-        }
-      }
-
-      const path = deps.paths.config()
-      let current: TeskraConfigLayer = {}
-      try {
-        const raw = readFile(path)
-        const json: unknown = JSON.parse(raw)
-        const parsedCurrent = teskraConfigLayerSchema.safeParse(json)
-        if (!parsedCurrent.success) {
-          return {
-            ok: false,
-            error: toPublicError({
-              code: 'VALIDATION_FAILED',
-              message: 'The existing global config is invalid and was not overwritten.',
-              retryable: false,
-              detail: `global config ${path}: ${JSON.stringify(parsedCurrent.error.issues)}`,
-            }),
-          }
-        }
-        current = parsedCurrent.data
-      } catch (cause) {
-        const code = (cause as NodeJS.ErrnoException).code
-        if (code !== 'ENOENT' && code !== 'ENOTDIR') {
-          return {
-            ok: false,
-            error: toPublicError({
-              code: code === undefined ? 'VALIDATION_FAILED' : 'UNKNOWN',
-              message:
-                code === undefined
-                  ? 'The existing global config is not valid JSON and was not overwritten.'
-                  : 'Failed to read the global config before updating it.',
-              retryable: false,
-              detail: `global config ${path}`,
-              cause,
-            }),
-          }
-        }
-      }
-
-      const merged = deepMerge(
-        current as Record<string, unknown>,
-        parsedPatch.data as Record<string, unknown>,
-      )
-      const validated = teskraConfigLayerSchema.safeParse(merged)
-      if (!validated.success) {
-        return {
-          ok: false,
-          error: toPublicError({
-            code: 'VALIDATION_FAILED',
-            message: 'The merged global config is invalid.',
-            retryable: false,
-            detail: `merged global config: ${JSON.stringify(validated.error.issues)}`,
-          }),
-        }
-      }
-
-      try {
-        writeFile(path, `${JSON.stringify(validated.data, null, 2)}\n`)
-      } catch (cause) {
-        return {
-          ok: false,
-          error: toPublicError({
-            code: 'UNKNOWN',
-            message: 'Failed to save the global config.',
-            retryable: true,
-            detail: `write global config ${path}`,
-            cause,
-          }),
-        }
-      }
+      const written = writeLayerFile('global', deps.paths.config(), patch)
+      if (!written.ok) return written
       return service.resolve()
+    },
+
+    updateWorkspace(workspaceId, patch) {
+      if (deps.workspaces === undefined) {
+        return {
+          ok: false,
+          error: toPublicError({
+            code: 'CAPABILITY_NOT_AVAILABLE',
+            message: 'Workspace configuration is not available.',
+            retryable: false,
+            detail: 'ConfigService has no WorkspaceRepository',
+          }),
+        }
+      }
+      const workspace = deps.workspaces.getById(workspaceId)
+      if (!workspace.ok) return workspace
+      if (workspace.data === null) {
+        return {
+          ok: false,
+          error: toPublicError({
+            code: 'WORKSPACE_NOT_FOUND',
+            message: 'The selected workspace no longer exists.',
+            retryable: false,
+            detail: `workspaceId=${workspaceId}`,
+          }),
+        }
+      }
+      const written = writeLayerFile('workspace', deps.paths.repoConfig(workspace.data.path), patch)
+      if (!written.ok) return written
+      return service.resolve({ workspaceId })
     },
   }
 

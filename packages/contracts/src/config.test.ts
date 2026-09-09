@@ -5,6 +5,7 @@ import {
   DEFAULT_CONFIG,
   teskraConfigLayerSchema,
   teskraConfigSchema,
+  updateConfigRequestSchema,
 } from './config'
 
 describe('config contracts (TASK-080)', () => {
@@ -31,6 +32,28 @@ describe('config contracts (TASK-080)', () => {
     expect(teskraConfigLayerSchema.safeParse({ logging: { level: 'loud' } }).success).toBe(false)
     expect(
       teskraConfigLayerSchema.safeParse({ environment: { defaultDistro: 'Ubuntu-24.04' } }).success,
+    ).toBe(true)
+  })
+
+  it('requires a workspace id only for workspace-layer writes', () => {
+    expect(
+      updateConfigRequestSchema.safeParse({
+        layer: 'global',
+        patch: { logging: { level: 'warn' } },
+      }).success,
+    ).toBe(true)
+    expect(
+      updateConfigRequestSchema.safeParse({
+        layer: 'workspace',
+        patch: { logging: { level: 'warn' } },
+      }).success,
+    ).toBe(false)
+    expect(
+      updateConfigRequestSchema.safeParse({
+        layer: 'workspace',
+        workspaceId: 'ws1',
+        patch: { logging: { level: 'warn' } },
+      }).success,
     ).toBe(true)
   })
 })

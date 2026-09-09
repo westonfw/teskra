@@ -6,6 +6,9 @@ import type {
   ListRecentWorkspacesRequest,
   ListTerminalsRequest,
   OpenWorkspaceRequest,
+  OpenSystemDirectoryRequest,
+  ResolveConfigRequest,
+  ResolvedConfig,
   SystemHealth,
   SystemInfo,
   SystemPaths,
@@ -14,6 +17,7 @@ import type {
   TerminalResizeRequest,
   TerminalSession,
   TerminalWriteRequest,
+  UpdateConfigRequest,
   Workspace,
   WorkspaceIdRequest,
   WorkspaceValidationResult,
@@ -50,6 +54,12 @@ export interface SystemPort {
   setDefaultWslDistribution(name: string | null): Promise<IpcResult<string | null>>
 }
 
+export interface SettingsPort {
+  resolveConfig(request?: ResolveConfigRequest): IpcResult<ResolvedConfig>
+  updateConfig(request: UpdateConfigRequest): IpcResult<ResolvedConfig>
+  openDirectory(request: OpenSystemDirectoryRequest): Promise<IpcResult<void>>
+}
+
 export type FutureRuntimePort = Record<string, never>
 
 export interface RuntimeEventSource {
@@ -63,6 +73,7 @@ export interface TeskraRuntime {
   readonly workspace: WorkspacePort
   readonly terminal: TerminalPort
   readonly system: SystemPort
+  readonly settings: SettingsPort
   /** Main-process event source consumed only by RendererEventBridge. */
   readonly events: RuntimeEventSource
   readonly task?: FutureRuntimePort

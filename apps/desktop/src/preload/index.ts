@@ -51,6 +51,11 @@ const bridge: TeskraBridge = {
     setDefaultWslDistribution: (request) => invoke(IPC_CHANNELS.runtimeSetDefaultWsl, request),
     requireCapability: (request) => invoke(IPC_CHANNELS.runtimeRequireCapability, request),
   },
+  settings: {
+    resolveConfig: (request = {}) => invoke(IPC_CHANNELS.settingsResolveConfig, request),
+    updateConfig: (request) => invoke(IPC_CHANNELS.settingsUpdateConfig, request),
+    openDirectory: (request) => invoke(IPC_CHANNELS.systemOpenDirectory, request),
+  },
   events: eventSubscriptions,
 }
 

@@ -158,6 +158,18 @@ export function registerIpcRouter(
     ipcChannelDefinitions.runtimeRequireCapability,
     withRuntime((runtime, request) => requireRuntimePort(runtime, request.name)),
   )
+  register(
+    ipcChannelDefinitions.settingsResolveConfig,
+    withRuntime((runtime, request) => runtime.settings.resolveConfig(request)),
+  )
+  register(
+    ipcChannelDefinitions.settingsUpdateConfig,
+    withRuntime((runtime, request) => runtime.settings.updateConfig(request)),
+  )
+  register(
+    ipcChannelDefinitions.systemOpenDirectory,
+    withRuntime((runtime, request) => runtime.settings.openDirectory(request)),
+  )
 
   return {
     dispose() {

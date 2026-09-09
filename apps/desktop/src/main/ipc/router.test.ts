@@ -85,6 +85,40 @@ function fakeRuntime(): TeskraRuntime {
       getDefaultWslDistribution: vi.fn(async () => ok<string | null>(null)),
       setDefaultWslDistribution: vi.fn(async (name: string | null) => ok(name)),
     },
+    settings: {
+      resolveConfig: vi.fn(() =>
+        ok({
+          config: {
+            logging: { level: 'info' as const },
+            concurrency: { maxGlobalRuns: 4, maxRunsPerWorkspace: 3, maxRunsPerAgent: 2 },
+            watchdog: { stalledThresholdMs: 600_000 },
+            environment: { defaultDistro: null },
+          },
+          sources: {
+            'logging.level': 'default' as const,
+            'concurrency.maxGlobalRuns': 'default' as const,
+            'concurrency.maxRunsPerWorkspace': 'default' as const,
+            'concurrency.maxRunsPerAgent': 'default' as const,
+            'watchdog.stalledThresholdMs': 'default' as const,
+            'environment.defaultDistro': 'default' as const,
+          },
+          warnings: [],
+        }),
+      ),
+      updateConfig: vi.fn(() =>
+        ok({
+          config: {
+            logging: { level: 'warn' as const },
+            concurrency: { maxGlobalRuns: 4, maxRunsPerWorkspace: 3, maxRunsPerAgent: 2 },
+            watchdog: { stalledThresholdMs: 600_000 },
+            environment: { defaultDistro: null },
+          },
+          sources: { 'logging.level': 'global' as const },
+          warnings: [],
+        }),
+      ),
+      openDirectory: vi.fn(async () => ok(undefined)),
+    },
     dispose: vi.fn(() => ok(undefined)),
   }
 }

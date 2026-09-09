@@ -94,3 +94,44 @@ export const DEFAULT_CONFIG: TeskraConfig = {
  * value won.
  */
 export type ConfigSources = Record<string, ConfigLayerName>
+
+export const configSourcesSchema = z.record(z.string(), configLayerNameSchema)
+
+export const configWarningSchema = z.strictObject({
+  layer: configLayerNameSchema,
+  fieldPath: z.string().optional(),
+  message: z.string(),
+})
+export type ConfigWarning = z.infer<typeof configWarningSchema>
+
+export const resolvedConfigSchema = z.strictObject({
+  config: teskraConfigSchema,
+  sources: configSourcesSchema,
+  warnings: z.array(configWarningSchema),
+})
+export type ResolvedConfig = z.infer<typeof resolvedConfigSchema>
+
+export const writableConfigLayerSchema = z.enum(['global', 'workspace'])
+export type WritableConfigLayer = z.infer<typeof writableConfigLayerSchema>
+
+export const resolveConfigRequestSchema = z.strictObject({
+  workspaceId: z.string().min(1).optional(),
+})
+export type ResolveConfigRequest = z.infer<typeof resolveConfigRequestSchema>
+
+export const updateConfigRequestSchema = z
+  .strictObject({
+    layer: writableConfigLayerSchema,
+    workspaceId: z.string().min(1).optional(),
+    patch: teskraConfigLayerSchema,
+  })
+  .superRefine((request, context) => {
+    if (request.layer === 'workspace' && request.workspaceId === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['workspaceId'],
+        message: 'workspaceId is required when writing the workspace layer',
+      })
+    }
+  })
+export type UpdateConfigRequest = z.infer<typeof updateConfigRequestSchema>

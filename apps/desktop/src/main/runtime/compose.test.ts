@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { FUTURE_RUNTIME_PORTS } from '@teskra/contracts'
 
@@ -119,6 +119,52 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       ok: true,
       data: 'Debian',
     })
+    composed.data.dispose()
+  })
+
+  it('mounts Settings config writes and the injected folder opener', async () => {
+    const home = makeHome()
+    const openPath = vi.fn(async () => '')
+    const composed = await composeTeskraRuntime({
+      paths: createTeskraPaths({ TESKRA_HOME: home }),
+      commands: wslCommands(),
+      hostPlatform: 'linux',
+      initializeLogs: false,
+      openPath,
+    })
+    if (!composed.ok) throw new Error('expected runtime')
+
+    const repo = join(home, 'repo')
+    mkdirSync(repo)
+    const workspace = composed.data.workspace.create({
+      name: 'Demo',
+      runtime: { kind: 'wsl', distro: 'Ubuntu-24.04' },
+      path: repo,
+    })
+    if (!workspace.ok) throw new Error('expected workspace')
+
+    const global = composed.data.settings.updateConfig({
+      layer: 'global',
+      patch: { logging: { level: 'debug' } },
+    })
+    expect(global.ok && global.data.sources['logging.level']).toBe('global')
+    const local = composed.data.settings.updateConfig({
+      layer: 'workspace',
+      workspaceId: workspace.data.id,
+      patch: { logging: { level: 'warn' } },
+    })
+    expect(local.ok && local.data.sources['logging.level']).toBe('workspace')
+
+    expect(await composed.data.settings.openDirectory({ kind: 'data' })).toEqual({
+      ok: true,
+      data: undefined,
+    })
+    expect(await composed.data.settings.openDirectory({ kind: 'logs' })).toEqual({
+      ok: true,
+      data: undefined,
+    })
+    expect(openPath).toHaveBeenNthCalledWith(1, home)
+    expect(openPath).toHaveBeenNthCalledWith(2, join(home, 'logs'))
     composed.data.dispose()
   })
 

@@ -1,37 +1,31 @@
-import { useEffect, useState } from 'react'
+import { App as AntApp, ConfigProvider, theme } from 'antd'
 import type { JSX } from 'react'
 
+import { registerBuiltInSettings } from './settings/builtin-sections'
+import { createSettingsSectionRegistry } from './settings/registry'
+import { SettingsPage } from './settings/settings-page'
+
+const settingsRegistry = createSettingsSectionRegistry()
+registerBuiltInSettings(settingsRegistry)
+
 function App(): JSX.Element {
-  const [pong, setPong] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    window.teskra
-      .ping()
-      .then((result) => {
-        if (!cancelled) {
-          setPong(result.ok ? result.data : null)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setPong(null)
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
   return (
-    <main>
-      <h1>Teskra</h1>
-      <p>Orchestrate your coding agents.</p>
-      <p>
-        Bridge: {window.teskra.appName} v{window.teskra.appVersion}
-        {pong ? ` — IPC ${pong}` : ''}
-      </p>
-    </main>
+    <ConfigProvider
+      theme={{
+        algorithm: theme.darkAlgorithm,
+        token: {
+          colorPrimary: '#65cfc5',
+          colorBgBase: '#0b0f17',
+          colorBgContainer: '#141b28',
+          borderRadius: 10,
+          fontSize: 14,
+        },
+      }}
+    >
+      <AntApp>
+        <SettingsPage registry={settingsRegistry} />
+      </AntApp>
+    </ConfigProvider>
   )
 }
 
