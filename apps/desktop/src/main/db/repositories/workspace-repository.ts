@@ -66,6 +66,7 @@ export interface CreateWorkspaceInput {
   readonly gitRoot?: string
   readonly defaultBranch?: string
   readonly env?: Record<string, string>
+  readonly lastOpenedAt?: string
 }
 
 /** `null` clears a nullable column; `undefined` leaves it untouched. */
@@ -82,6 +83,11 @@ export interface UpdateWorkspaceInput {
 export interface WorkspaceRepository {
   create(input: CreateWorkspaceInput, now?: string): IpcResult<Workspace>
   getById(id: string): IpcResult<Workspace | null>
+  /**
+   * Looks up by the idx_workspaces_runtime_path identity:
+   * (runtime_kind, IFNULL(wsl_distro,''), path).
+   */
+  findByPath(runtime: WorkspaceRuntimeRef, path: string): IpcResult<Workspace | null>
   update(id: string, patch: UpdateWorkspaceInput, now?: string): IpcResult<Workspace | null>
   list(): IpcResult<Workspace[]>
   /** Most recently opened first; never-opened workspaces last. */
@@ -124,8 +130,8 @@ export function createWorkspaceRepository(connection: Database.Database): Worksp
       const inserted = execute(ENTITY, 'create', () => {
         connection
           .prepare(
-            `INSERT INTO workspaces (id, name, runtime_kind, wsl_distro, ssh_host, container_id, path, git_root, default_branch, env_json, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO workspaces (id, name, runtime_kind, wsl_distro, ssh_host, container_id, path, git_root, default_branch, env_json, last_opened_at, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             input.id,
@@ -138,6 +144,7 @@ export function createWorkspaceRepository(connection: Database.Database): Worksp
             input.gitRoot ?? null,
             input.defaultBranch ?? null,
             encodeJson(input.env),
+            input.lastOpenedAt ?? null,
             now,
             now,
           )
@@ -150,6 +157,24 @@ export function createWorkspaceRepository(connection: Database.Database): Worksp
 
     getById(id) {
       const row = execute(ENTITY, 'read', () => getRow(id))
+      if (!row.ok) {
+        return row
+      }
+      if (row.data === undefined) {
+        return { ok: true, data: null }
+      }
+      return toDomain(row.data)
+    },
+
+    findByPath(runtime, path) {
+      const row = execute(ENTITY, 'read', () => {
+        return connection
+          .prepare(
+            `SELECT * FROM workspaces
+             WHERE runtime_kind = ? AND IFNULL(wsl_distro, '') = IFNULL(?, '') AND path = ?`,
+          )
+          .get(runtime.kind, runtime.distro ?? null, path) as WorkspaceRow | undefined
+      })
       if (!row.ok) {
         return row
       }

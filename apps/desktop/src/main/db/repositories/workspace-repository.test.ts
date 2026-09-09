@@ -123,6 +123,59 @@ describe('WorkspaceRepository', () => {
     expect(repo.delete('ws-1')).toEqual({ ok: true, data: false })
   })
 
+  it('finds a workspace by its (runtime_kind, wsl_distro, path) identity', () => {
+    setup()
+    repo.create({
+      id: 'ws-win',
+      name: 'Win',
+      runtime: { kind: 'windows' },
+      path: 'C:\\dev\\same',
+    })
+    repo.create({
+      id: 'ws-wsl',
+      name: 'Wsl',
+      runtime: { kind: 'wsl', distro: 'Ubuntu-24.04' },
+      path: '/home/user/same',
+    })
+    repo.create({
+      id: 'ws-wsl-alt',
+      name: 'WslAlt',
+      runtime: { kind: 'wsl', distro: 'Debian' },
+      path: '/home/user/same',
+    })
+
+    const win = repo.findByPath({ kind: 'windows' }, 'C:\\dev\\same')
+    expect(win.ok && win.data?.id).toBe('ws-win')
+
+    const wsl = repo.findByPath({ kind: 'wsl', distro: 'Ubuntu-24.04' }, '/home/user/same')
+    expect(wsl.ok && wsl.data?.id).toBe('ws-wsl')
+
+    // Same path under a different distro is a different workspace.
+    const otherDistro = repo.findByPath({ kind: 'wsl', distro: 'Debian' }, '/home/user/same')
+    expect(otherDistro.ok && otherDistro.data?.id).toBe('ws-wsl-alt')
+
+    expect(repo.findByPath({ kind: 'windows' }, 'C:\\nope')).toEqual({ ok: true, data: null })
+    expect(repo.findByPath({ kind: 'wsl' }, '/home/user/same')).toEqual({
+      ok: true,
+      data: null,
+    })
+  })
+
+  it('persists lastOpenedAt given at create time', () => {
+    setup()
+    const created = repo.create({
+      id: 'ws-1',
+      name: 'Demo',
+      runtime: { kind: 'windows' },
+      path: 'C:\\d',
+      lastOpenedAt: '2026-09-09T10:00:00.000Z',
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    expect(created.data.lastOpenedAt).toBe('2026-09-09T10:00:00.000Z')
+  })
+
+
   it('returns VALIDATION_FAILED for corrupted env_json instead of throwing', () => {
     setup()
     repo.create({ id: 'ws-1', name: 'Demo', runtime: { kind: 'windows' }, path: 'C:\\d' })
