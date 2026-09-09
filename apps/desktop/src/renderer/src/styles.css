@@ -394,3 +394,33 @@ body {
   position: absolute;
   inset: 0;
 }
+
+.agent-picker {
+  width: min(280px, 34vw);
+}
+
+.agent-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.agent-card,
+.agent-settings-list,
+.agent-settings-list > .ant-space-item {
+  width: 100%;
+}
+
+.agent-card {
+  cursor: pointer;
+  background: rgba(20, 27, 40, 0.86);
+  border-color: rgba(255, 255, 255, 0.065);
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.agent-card-selected {
+  border-color: rgba(101, 207, 197, 0.72);
+  box-shadow: 0 12px 34px rgba(36, 130, 128, 0.14);
+}

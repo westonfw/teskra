@@ -19,6 +19,8 @@ describe('agent contracts', () => {
       prompt: {},
       detection: { versionArgs: ['--version'] },
       defaults: {},
+      permissionEnforcement: 'none',
+      routing: { agentId: 'fake-agent-for-tests', strengths: ['testing'] },
     }
     const result = agentDefinitionSchema.safeParse(definition)
     expect(result.success).toBe(true)

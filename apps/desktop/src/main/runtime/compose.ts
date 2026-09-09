@@ -32,6 +32,7 @@ import { createWorkspaceRuntime, type WslEnvironmentInfo } from '../workspace/ru
 import { createWorkspaceManager } from '../workspace/workspace-manager'
 import { createWslManager } from '../workspace/wsl-manager'
 import type { TeskraRuntime } from './facade'
+import { createBuiltInAgentRegistry } from '../agents/agent-registry'
 
 export interface ComposeRuntimeOptions {
   readonly paths?: TeskraPaths
@@ -108,6 +109,12 @@ export async function composeTeskraRuntime(
     return resolvedConfig
   }
 
+  const registeredAgents = createBuiltInAgentRegistry()
+  if (!registeredAgents.ok) {
+    database.close()
+    return registeredAgents
+  }
+
   const events = createEventBus()
   const commands = options.commands ?? createCommandRunner({ hostPlatform: options.hostPlatform })
   const wsl = createWslManager({ commands, config })
@@ -144,6 +151,9 @@ export async function composeTeskraRuntime(
   let disposed = false
   const runtime: TeskraRuntime = {
     events,
+    agent: {
+      listDefinitions: () => ({ ok: true, data: registeredAgents.data.list() }),
+    },
     workspace: {
       create: (request) => workspaceManager.create(request),
       open: (request) => workspaceManager.open(request),

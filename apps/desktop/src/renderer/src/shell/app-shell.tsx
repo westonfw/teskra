@@ -12,6 +12,7 @@ import { Button, Empty, Layout, Menu, Select, Space, Tag, Typography } from 'ant
 import { useEffect } from 'react'
 
 import { SettingsPage } from '../settings/settings-page'
+import { AgentCatalogPage } from '../agents/agent-catalog-page'
 import type { SettingsSectionRegistry } from '../settings/registry'
 import { useNavigationStore, type WorkbenchPage } from '../stores/navigation-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
@@ -144,14 +145,7 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
                   description="The shell is ready; TaskManager is connected in Phase C."
                 />,
               )}
-            {page === 'runs' &&
-              needsWorkspace(
-                'Runs',
-                <PendingFeature
-                  title="No Agent runs yet"
-                  description="Installed coding Agents and live runs appear here."
-                />,
-              )}
+            {page === 'runs' && needsWorkspace('Runs', <AgentCatalogPage />)}
             {page === 'git' &&
               needsWorkspace(
                 'Git',

@@ -47,34 +47,62 @@ export const agentExecutableDefinitionSchema = z.strictObject({
 })
 export type AgentExecutableDefinition = z.infer<typeof agentExecutableDefinitionSchema>
 
+export const PERMISSION_ENFORCEMENT_MODES = ['native', 'config', 'none'] as const
+export const permissionEnforcementSchema = z.enum(PERMISSION_ENFORCEMENT_MODES)
+export type PermissionEnforcement = z.infer<typeof permissionEnforcementSchema>
+
+export const AGENT_COST_CLASSES = ['low', 'medium', 'high'] as const
+export const agentCostClassSchema = z.enum(AGENT_COST_CLASSES)
+
+export const agentRoutingProfileSchema = z.strictObject({
+  agentId: z.string().min(1),
+  useWhen: z.string().min(1).optional(),
+  strengths: z.array(z.string().min(1)).optional(),
+  costClass: agentCostClassSchema.optional(),
+  priority: z.number().int().optional(),
+})
+export type AgentRoutingProfile = z.infer<typeof agentRoutingProfileSchema>
+
 /**
  * plan §116.2 — the single Agent Registry entry. `id` is a free-form string
  * (per TASK-003 / plan §21: agentType must NOT be a hardcoded enum, otherwise
  * TASK-022 Fake Agent cannot pass).
  */
-export const agentDefinitionSchema = z.strictObject({
-  id: z.string(),
-  name: z.string(),
-  executable: agentExecutableDefinitionSchema,
-  capabilities: z.strictObject({
-    interactive: z.boolean(),
-    headless: z.boolean(),
-    resume: z.boolean(),
-    readOnlyMode: z.boolean(),
-    modelSelection: z.boolean(),
-  }),
-  prompt: z.strictObject({
-    interactiveArgs: z.array(z.string()).optional(),
-    headlessArgs: z.array(z.string()).optional(),
-  }),
-  detection: z.strictObject({
-    versionArgs: z.array(z.string()),
-  }),
-  defaults: z.strictObject({
-    role: agentRoleSchema.optional(),
-    permissionProfile: z.string().optional(),
-  }),
-})
+export const agentDefinitionSchema = z
+  .strictObject({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    executable: agentExecutableDefinitionSchema,
+    capabilities: z.strictObject({
+      interactive: z.boolean(),
+      headless: z.boolean(),
+      resume: z.boolean(),
+      readOnlyMode: z.boolean(),
+      modelSelection: z.boolean(),
+    }),
+    prompt: z.strictObject({
+      interactiveArgs: z.array(z.string()).optional(),
+      headlessArgs: z.array(z.string()).optional(),
+    }),
+    detection: z.strictObject({
+      versionArgs: z.array(z.string()),
+    }),
+    defaults: z.strictObject({
+      role: agentRoleSchema.optional(),
+      permissionProfile: z.string().optional(),
+    }),
+    permissionEnforcement: permissionEnforcementSchema,
+    routing: agentRoutingProfileSchema.optional(),
+  })
+  .superRefine((definition, context) => {
+    if (definition.routing !== undefined && definition.routing.agentId !== definition.id) {
+      context.addIssue({
+        code: 'custom',
+        path: ['routing', 'agentId'],
+        message: 'routing.agentId must match the Agent definition id',
+      })
+    }
+  })
 export type AgentDefinition = z.infer<typeof agentDefinitionSchema>
 
 /**

@@ -107,6 +107,10 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.workspace.selectDirectory(request)),
   )
   register(
+    ipcChannelDefinitions.agentListDefinitions,
+    withRuntime((runtime) => runtime.agent.listDefinitions()),
+  )
+  register(
     ipcChannelDefinitions.terminalCreate,
     withRuntime((runtime, request) => runtime.terminal.create(request)),
   )

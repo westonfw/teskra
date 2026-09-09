@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import { agentDefinitionSchema, type AgentDefinition } from './agent'
 import { ipcResultSchema, type IpcResult } from './error'
 import type { WorkbenchEventName, WorkbenchEvents } from './event'
 import {
@@ -71,6 +72,7 @@ export const IPC_CHANNELS = {
   workspaceListRecent: 'teskra:workspace:list-recent',
   workspaceValidate: 'teskra:workspace:validate',
   workspaceSelectDirectory: 'teskra:workspace:select-directory',
+  agentListDefinitions: 'teskra:agent:list-definitions',
   terminalCreate: 'teskra:terminal:create',
   terminalWrite: 'teskra:terminal:write',
   terminalResize: 'teskra:terminal:resize',
@@ -144,6 +146,11 @@ export const workspaceSelectDirectoryChannel = channel(
   IPC_CHANNELS.workspaceSelectDirectory,
   selectWorkspaceDirectoryRequestSchema,
   z.string().nullable(),
+)
+export const agentListDefinitionsChannel = channel(
+  IPC_CHANNELS.agentListDefinitions,
+  noRequestSchema,
+  z.array(agentDefinitionSchema),
 )
 export const terminalCreateChannel = channel(
   IPC_CHANNELS.terminalCreate,
@@ -239,6 +246,7 @@ export const ipcChannelDefinitions = {
   workspaceListRecent: workspaceListRecentChannel,
   workspaceValidate: workspaceValidateChannel,
   workspaceSelectDirectory: workspaceSelectDirectoryChannel,
+  agentListDefinitions: agentListDefinitionsChannel,
   terminalCreate: terminalCreateChannel,
   terminalWrite: terminalWriteChannel,
   terminalResize: terminalResizeChannel,
@@ -277,6 +285,9 @@ export interface TeskraBridge {
     close(request: TerminalCloseRequest): Promise<IpcResult<void>>
     get(request: TerminalIdRequest): Promise<IpcResult<TerminalSession | null>>
     list(request?: ListTerminalsRequest): Promise<IpcResult<TerminalSession[]>>
+  }
+  readonly agent: {
+    listDefinitions(): Promise<IpcResult<AgentDefinition[]>>
   }
   readonly runtime: {
     info(): Promise<IpcResult<SystemInfo>>

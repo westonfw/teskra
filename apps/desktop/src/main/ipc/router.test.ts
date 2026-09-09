@@ -71,6 +71,9 @@ function fakeRuntime(): TeskraRuntime {
       get: vi.fn(() => ok(null)),
       list: vi.fn(() => ok([])),
     },
+    agent: {
+      listDefinitions: vi.fn(() => ok([])),
+    },
     system: {
       info: vi.fn(() => ok({ appVersion: '0.1.0', runtimeVersion: '22.0.0' })),
       paths: vi.fn(() =>
@@ -179,6 +182,15 @@ describe('Typed IPC Router (TASK-020)', () => {
         retryable: true,
       },
     })
+  })
+
+  it('lists Agent definitions through the runtime facade', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    expect(await ipc.invoke(IPC_CHANNELS.agentListDefinitions)).toEqual({ ok: true, data: [] })
+    expect(runtime.agent.listDefinitions).toHaveBeenCalledOnce()
   })
 
   it('validates Facade responses and converts thrown errors', async () => {

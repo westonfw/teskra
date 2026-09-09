@@ -1,4 +1,5 @@
 import type {
+  AgentDefinition,
   CreateTerminalRequest,
   CreateWorkspaceRequest,
   FutureRuntimePortName,
@@ -62,7 +63,11 @@ export interface SettingsPort {
   openDirectory(request: OpenSystemDirectoryRequest): Promise<IpcResult<void>>
 }
 
-export type FutureRuntimePort = Record<string, never>
+export interface AgentCatalogPort {
+  listDefinitions(): IpcResult<readonly AgentDefinition[]>
+}
+
+export type FutureRuntimePort = object
 
 export interface RuntimeEventSource {
   subscribe<Name extends WorkbenchEventName>(
@@ -79,7 +84,7 @@ export interface TeskraRuntime {
   /** Main-process event source consumed only by RendererEventBridge. */
   readonly events: RuntimeEventSource
   readonly task?: FutureRuntimePort
-  readonly agent?: FutureRuntimePort
+  readonly agent: AgentCatalogPort
   readonly git?: FutureRuntimePort
   readonly worktree?: FutureRuntimePort
   readonly workflow?: FutureRuntimePort

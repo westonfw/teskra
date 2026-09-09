@@ -42,6 +42,9 @@ const bridge: TeskraBridge = {
     get: (request) => invoke(IPC_CHANNELS.terminalGet, request),
     list: (request = {}) => invoke(IPC_CHANNELS.terminalList, request),
   },
+  agent: {
+    listDefinitions: () => invoke(IPC_CHANNELS.agentListDefinitions),
+  },
   runtime: {
     info: () => invoke(IPC_CHANNELS.runtimeInfo),
     paths: () => invoke(IPC_CHANNELS.runtimePaths),
