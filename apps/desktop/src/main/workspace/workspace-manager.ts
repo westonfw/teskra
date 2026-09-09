@@ -1,25 +1,24 @@
 import { randomUUID } from 'node:crypto'
 import { statSync } from 'node:fs'
-import { basename, isAbsolute, win32 } from 'node:path'
+import { basename, win32 } from 'node:path'
 
 import type { IpcResult, Workspace, WorkspaceRuntimeRef } from '@teskra/contracts'
 
 import type { WorkspaceRepository } from '../db/repositories'
 import { type InternalAppError, toPublicError } from '../errors'
 import { validateWorkspaceDraft, type WorkspaceDraft } from './domain'
+import { createWorkspaceRuntime, type WorkspaceRuntime } from './runtime'
 
 /**
  * WorkspaceManager (TASK-009, teskra-tasks.md) — create / open / remove /
  * listRecent / validate on top of the domain rules (TASK-008) and the
  * WorkspaceRepository (TASK-007). No SQL and no electron imports here.
  *
- * Existence probing is deliberately first-version: a path is only probed
- * when the runtime kind matches the host filesystem family, because node:fs
- * can only see the host. On the Windows production host, `windows` paths are
- * probed directly while `wsl` paths resolve through wsl.exe — that is
- * WorkspaceRuntime's job (TASK-010), so WSL probes report "not checkable"
- * there. On the Linux/WSL2 dev machine the situation is mirrored: WSL
- * (POSIX) paths probe natively, Windows paths report "not checkable".
+ * Existence probing goes through the WorkspaceRuntime abstraction (TASK-010):
+ * `runtime.hostNative` tells whether node:fs on this host can stat the
+ * workspace path directly (Windows paths on Windows, WSL paths on the
+ * Linux/WSL2 dev host). Non-native paths report "not checkable" — real
+ * probing through wsl.exe belongs to the runtime's command path, not here.
  */
 
 export interface OpenWorkspaceInput {
@@ -57,6 +56,11 @@ export interface WorkspaceManager {
 export interface WorkspaceManagerOptions {
   /** Injectable clock for tests; defaults to the current time (ISO UTC). */
   readonly now?: () => string
+  /**
+   * Runtime resolution (TASK-010); defaults to the real factory probing the
+   * host platform. Tests may inject a stub to control host-nativeness.
+   */
+  readonly createRuntime?: (ref: WorkspaceRuntimeRef) => IpcResult<WorkspaceRuntime>
 }
 
 function fail(error: InternalAppError): { ok: false; error: ReturnType<typeof toPublicError> } {
@@ -66,19 +70,6 @@ function fail(error: InternalAppError): { ok: false; error: ReturnType<typeof to
 function defaultName(runtime: WorkspaceRuntimeRef, path: string): string {
   const base = runtime.kind === 'windows' ? win32.basename(path) : basename(path)
   return base.length > 0 ? base : path
-}
-
-/**
- * First-version checkability rule; TASK-010's WorkspaceRuntime takes over.
- * This is the single place the manager reasons about the host platform.
- */
-function isHostCheckable(runtime: WorkspaceRuntimeRef, path: string): boolean {
-  if (runtime.kind === 'windows') {
-    return process.platform === 'win32'
-  }
-  // WSL paths are POSIX-absolute; they are only directly stat-able on a
-  // Linux-family host (dev machine / WSL2 itself).
-  return process.platform !== 'win32' && isAbsolute(path)
 }
 
 /** Probes directory existence; null means the host cannot check this path. */
@@ -108,6 +99,17 @@ export function createWorkspaceManager(
   options: WorkspaceManagerOptions = {},
 ): WorkspaceManager {
   const now = options.now ?? (() => new Date().toISOString())
+  const createRuntime =
+    options.createRuntime ?? ((ref: WorkspaceRuntimeRef) => createWorkspaceRuntime(ref))
+
+  /** Probes via the runtime's host-nativeness; null means "not checkable". */
+  const probe = (ref: WorkspaceRuntimeRef, path: string): IpcResult<boolean | null> => {
+    const runtime = createRuntime(ref)
+    if (!runtime.ok) {
+      return runtime
+    }
+    return probeDirectory(path, runtime.data.hostNative)
+  }
 
   const manager: WorkspaceManager = {
     create(input) {
@@ -139,10 +141,7 @@ export function createWorkspaceManager(
         return draft
       }
 
-      const exists = probeDirectory(
-        draft.data.path,
-        isHostCheckable(draft.data.runtime, draft.data.path),
-      )
+      const exists = probe(draft.data.runtime, draft.data.path)
       if (!exists.ok) {
         return exists
       }
@@ -160,11 +159,7 @@ export function createWorkspaceManager(
         return existing
       }
       if (existing.data !== null) {
-        const reopened = repository.update(
-          existing.data.id,
-          { lastOpenedAt: now() },
-          now(),
-        )
+        const reopened = repository.update(existing.data.id, { lastOpenedAt: now() }, now())
         if (!reopened.ok) {
           return reopened
         }
@@ -202,10 +197,7 @@ export function createWorkspaceManager(
       if (!draft.ok) {
         return draft
       }
-      const exists = probeDirectory(
-        draft.data.path,
-        isHostCheckable(draft.data.runtime, draft.data.path),
-      )
+      const exists = probe(draft.data.runtime, draft.data.path)
       if (!exists.ok) {
         return exists
       }

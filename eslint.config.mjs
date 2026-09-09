@@ -130,11 +130,25 @@ export default tseslint.config(
     },
   },
   {
+    // TASK-078 + TASK-010 boundary rules. One block because flat config lets
+    // only the last matching block's options win for a given rule name.
+    //
     // TASK-078: all data-root paths come from src/main/paths.ts (ADR-0003);
-    // nobody else may hand-build a ".teskra" path. The paths module itself
-    // and tests (which build temp TESKRA_HOME dirs) are exempt.
+    // nobody else may hand-build a ".teskra" path.
+    // TASK-010: platform branching lives in the WorkspaceRuntime abstraction
+    // (main/workspace/runtime.ts); Agent / Git / Terminal / Manager code must
+    // not scatter process.platform checks.
+    //
+    // Exempt: paths.ts (the path authority), runtime.ts (the platform
+    // authority), main/index.ts (the Electron app-lifecycle darwin check),
+    // and tests (which parameterize host-dependent scenarios).
     files: ['apps/desktop/src/**/*.{ts,tsx}'],
-    ignores: ['apps/desktop/src/main/paths.ts', 'apps/desktop/src/**/*.test.{ts,tsx}'],
+    ignores: [
+      'apps/desktop/src/main/paths.ts',
+      'apps/desktop/src/main/workspace/runtime.ts',
+      'apps/desktop/src/main/index.ts',
+      'apps/desktop/src/**/*.test.{ts,tsx}',
+    ],
     rules: {
       'no-restricted-syntax': [
         'error',
@@ -147,6 +161,11 @@ export default tseslint.config(
           selector: 'TemplateElement[value.raw=/\\.teskra/]',
           message:
             'Do not hand-build ".teskra" paths; use apps/desktop/src/main/paths.ts (ADR-0003).',
+        },
+        {
+          selector: "MemberExpression[object.name='process'][property.name='platform']",
+          message:
+            'Do not branch on process.platform; use the WorkspaceRuntime abstraction (apps/desktop/src/main/workspace/runtime.ts, TASK-010).',
         },
       ],
     },

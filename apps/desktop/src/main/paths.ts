@@ -6,6 +6,9 @@ import type { IpcResult } from '@teskra/contracts'
 
 import { type InternalAppError, toPublicError } from './errors'
 
+/** The single directory name every Teskra data root is built from. */
+export const TESKRA_DATA_DIR = '.teskra'
+
 /**
  * Central path resolution for the Teskra data root (ADR-0003 / TASK-078).
  *
@@ -61,7 +64,7 @@ function isValidSegment(value: string): boolean {
 export function createTeskraPaths(env: NodeJS.ProcessEnv = process.env): TeskraPaths {
   const home = (): string => {
     const override = env['TESKRA_HOME']
-    return override && override.length > 0 ? override : join(homedir(), '.teskra')
+    return override && override.length > 0 ? override : join(homedir(), TESKRA_DATA_DIR)
   }
 
   const ensureDir = (dir: string): IpcResult<string> => {
