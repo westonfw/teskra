@@ -15,8 +15,8 @@ import permissionsSql from './migrations/005_permissions.sql?raw'
  * main-process bundle via Vite `?raw` imports so the packaged app needs no
  * filesystem access to apply them.
  *
- * File contents are placeholders until TASK-090 lands the plan §139.1 DDL —
- * only the mechanism is real in TASK-006.
+ * File contents are the plan §139.1 authoritative DDL (TASK-090); the
+ * migration mechanism itself is TASK-006.
  */
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: '001_init', sql: initSql },

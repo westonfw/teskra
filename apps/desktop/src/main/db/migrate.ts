@@ -8,8 +8,8 @@ import { type InternalAppError, toPublicError } from '../errors'
  * Database migration mechanism (TASK-006).
  *
  * A migration is an ordered `{ version, name, sql }` record; the canonical
- * registry lives in ./migrations.ts (the 001–005 .sql files whose real DDL
- * TASK-090 fills in from plan §139.1). This module is the mechanism only —
+ * registry lives in ./migrations.ts (the 001–005 .sql files holding the
+ * plan §139.1 DDL, TASK-090). This module is the mechanism only —
  * it works on any caller-supplied migration list, which is how tests supply
  * their own fixture migrations without touching the canonical files.
  *
