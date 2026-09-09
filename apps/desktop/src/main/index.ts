@@ -1,6 +1,8 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'node:path'
 
+import { IPC_CHANNELS } from '@teskra/contracts'
+
 function createWindow(): void {
   const window = new BrowserWindow({
     title: 'Teskra',
@@ -26,7 +28,7 @@ function createWindow(): void {
   }
 }
 
-ipcMain.handle('teskra:ping', () => 'pong')
+ipcMain.handle(IPC_CHANNELS.ping, () => 'pong')
 
 app.whenReady().then(() => {
   createWindow()

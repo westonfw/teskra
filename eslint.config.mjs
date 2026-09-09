@@ -88,9 +88,53 @@ export default tseslint.config(
               message:
                 'Renderer must not import Node builtins (node:*); go through window.teskra IPC.',
             },
+            {
+              // TASK-003: Renderer → Preload → Main layering; the renderer
+              // must never reach into main/preload process code directly.
+              group: ['**/main/**', '**/preload/**'],
+              message:
+                'Renderer must not import apps/desktop/src/main|preload code; use window.teskra IPC.',
+            },
           ],
         },
       ],
+    },
+  },
+  {
+    // TASK-003: @teskra/contracts is bundled into the sandboxed preload
+    // (which may only require `electron`), so it must not import Node
+    // builtins or electron itself.
+    files: ['packages/contracts/src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'electron',
+              message: 'contracts must not import electron; it is bundled into the preload.',
+            },
+            ...nodeBuiltins.map((name) => ({
+              name,
+              message: `contracts must not import Node builtin "${name}"; it is bundled into the sandboxed preload.`,
+            })),
+          ],
+          patterns: [
+            {
+              group: ['node:*'],
+              message: 'contracts must not import Node builtins (node:*).',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // Test files run under Vitest (Node) and are exempt — the runtime check
+    // for shipped modules lives in src/no-node-builtins.test.ts.
+    files: ['packages/contracts/src/**/*.test.ts'],
+    rules: {
+      'no-restricted-imports': 'off',
     },
   },
 )

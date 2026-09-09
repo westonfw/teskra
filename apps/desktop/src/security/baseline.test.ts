@@ -59,8 +59,15 @@ describe('preload bridge', () => {
     expect(preloadSource).toMatch(/exposeInMainWorld\(\s*['"]teskra['"]/)
   })
 
-  it('requires only electron at runtime (sandbox: true forbids npm packages)', () => {
-    expect(runtimeImports(preloadSource)).toEqual(['electron'])
+  it('requires only electron plus the bundle-time allow-list (sandbox: true forbids npm requires)', () => {
+    // TASK-003: the preload may import @teskra/* runtime values because the
+    // preload build does NOT externalize deps — they are bundled in (see
+    // electron.vite.config.ts). The built artifact is asserted self-contained
+    // by scripts/assert-security-baseline.mjs (npm run test:security).
+    const allowed = new Set(['electron', '@teskra/contracts', '@teskra/shared'])
+    const imports = runtimeImports(preloadSource)
+    expect(imports).toContain('electron')
+    expect(imports.every((spec) => allowed.has(spec))).toBe(true)
     expect(preloadSource).not.toContain('require(')
   })
 })

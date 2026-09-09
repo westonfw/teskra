@@ -31,14 +31,21 @@ function cspPlugin(): Plugin {
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    // TASK-003: @teskra/contracts ships TypeScript sources (exports point at
+    // ./src/*.ts), so it cannot stay an external runtime require — bundle it
+    // (and its zod dependency) into the main-process output.
+    plugins: [externalizeDepsPlugin({ exclude: ['@teskra/contracts', '@teskra/shared', 'zod'] })],
   },
   preload: {
     // TASK-002: sandboxed preload scripts can only require `electron`, so all
     // other dependencies (contracts, zod, ...) must be bundled into the
-    // preload output — do NOT externalize them here. `electron` itself stays
-    // external regardless.
+    // preload output. electron-vite auto-injects dependency externalization
+    // unless disabled, so turn it off explicitly — `electron` itself stays
+    // external regardless (preset rollupOptions.external).
     plugins: [],
+    build: {
+      externalizeDeps: false,
+    },
   },
   renderer: {
     plugins: [react(), cspPlugin()],
