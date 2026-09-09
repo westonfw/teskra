@@ -10,14 +10,25 @@ import { bindTerminalSession } from './terminal-session-binding'
 interface TerminalViewProps {
   readonly session: TerminalSession
   readonly visible?: boolean
+  readonly initialData?: string
+  readonly readOnly?: boolean
   readonly className?: string
   readonly onClosed?: () => void
 }
 
 /** Interactive ANSI/TTY surface for a live TerminalManager session (TASK-018). */
-export function TerminalView({ session, visible = true, className, onClosed }: TerminalViewProps) {
+export function TerminalView({
+  session,
+  visible = true,
+  initialData,
+  readOnly = false,
+  className,
+  onClosed,
+}: TerminalViewProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const fitRef = useRef<FitAddon | null>(null)
+  const terminalRef = useRef<Terminal | null>(null)
+  const initialDataRef = useRef(initialData)
   const onClosedRef = useRef(onClosed)
   const [error, setError] = useState<string>()
   onClosedRef.current = onClosed
@@ -34,6 +45,7 @@ export function TerminalView({ session, visible = true, className, onClosed }: T
       lineHeight: 1.18,
       scrollback: 10_000,
       allowProposedApi: false,
+      disableStdin: readOnly,
       theme: {
         background: '#090d14',
         foreground: '#d9e2ef',
@@ -45,29 +57,33 @@ export function TerminalView({ session, visible = true, className, onClosed }: T
     const fit = new FitAddon()
     terminal.loadAddon(fit)
     terminal.open(host)
+    if (initialDataRef.current !== undefined) terminal.write(initialDataRef.current)
     fitRef.current = fit
+    terminalRef.current = terminal
 
-    const cleanupBinding = bindTerminalSession(
-      session.id,
-      terminal,
-      {
-        write: (terminalId, data) => window.teskra.terminal.write({ terminalId, data }),
-        resize: (terminalId, cols, rows) =>
-          window.teskra.terminal.resize({ terminalId, cols, rows }),
-        subscribeOutput: (terminalId, handler) =>
-          window.teskra.events.subscribe('terminal.output', (event) => {
-            if (event.terminalId === terminalId) handler(event.data)
-          }),
-        subscribeClosed: (terminalId, handler) =>
-          window.teskra.events.subscribe('terminal.closed', (event) => {
-            if (event.terminalId === terminalId) handler()
-          }),
-      },
-      {
-        onError: setError,
-        onClosed: () => onClosedRef.current?.(),
-      },
-    )
+    const cleanupBinding = readOnly
+      ? undefined
+      : bindTerminalSession(
+          session.id,
+          terminal,
+          {
+            write: (terminalId, data) => window.teskra.terminal.write({ terminalId, data }),
+            resize: (terminalId, cols, rows) =>
+              window.teskra.terminal.resize({ terminalId, cols, rows }),
+            subscribeOutput: (terminalId, handler) =>
+              window.teskra.events.subscribe('terminal.output', (event) => {
+                if (event.terminalId === terminalId) handler(event.data)
+              }),
+            subscribeClosed: (terminalId, handler) =>
+              window.teskra.events.subscribe('terminal.closed', (event) => {
+                if (event.terminalId === terminalId) handler()
+              }),
+          },
+          {
+            onError: setError,
+            onClosed: () => onClosedRef.current?.(),
+          },
+        )
 
     const fitNow = (): void => {
       if (host.clientWidth > 0 && host.clientHeight > 0) fit.fit()
@@ -79,13 +95,18 @@ export function TerminalView({ session, visible = true, className, onClosed }: T
     return () => {
       window.cancelAnimationFrame(frame)
       observer.disconnect()
-      cleanupBinding()
+      cleanupBinding?.()
       fitRef.current = null
+      terminalRef.current = null
       terminal.dispose()
       // The PTY deliberately remains owned by TerminalManager. Unmounting a
       // Renderer surface must never imply terminal.close() (TASK-019).
     }
   }, [session.id])
+
+  useEffect(() => {
+    if (terminalRef.current !== null) terminalRef.current.options.disableStdin = readOnly
+  }, [readOnly])
 
   useEffect(() => {
     if (!visible) return
