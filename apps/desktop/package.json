@@ -5,6 +5,12 @@
   "private": true,
   "description": "Teskra desktop application (Electron).",
   "main": "./out/main/index.js",
+  "build": {
+    "asarUnpack": [
+      "**/node_modules/node-pty/**",
+      "**/node_modules/better-sqlite3/**"
+    ]
+  },
   "scripts": {
     "postinstall": "install-electron && electron-rebuild",
     "dev": "electron-vite dev",
@@ -16,6 +22,7 @@
     "@teskra/contracts": "0.1.0",
     "@teskra/shared": "0.1.0",
     "better-sqlite3": "13.0.3",
+    "node-pty": "1.1.0",
     "pino": "10.3.1",
     "react": "19.2.8",
     "react-dom": "19.2.8"

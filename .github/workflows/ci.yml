@@ -73,5 +73,11 @@ jobs:
         shell: bash
         run: node -e "const db=require('better-sqlite3')(':memory:');db.exec('CREATE TABLE t(a INTEGER)');db.prepare('INSERT INTO t VALUES (?)').run(1);if(db.prepare('SELECT a FROM t').get().a!==1)process.exit(1);console.log('better-sqlite3 smoke OK')"
 
+      - name: node-pty Electron ABI spawn smoke (TASK-013)
+        # npm ci rebuilt native modules for Electron. ELECTRON_RUN_AS_NODE
+        # exercises Electron's embedded Node ABI without opening a GUI.
+        shell: bash
+        run: ELECTRON_RUN_AS_NODE=1 ./node_modules/.bin/electron scripts/smoke-node-pty.mjs
+
       - name: Security baseline assertions (TASK-002)
         run: node scripts/assert-security-baseline.mjs
