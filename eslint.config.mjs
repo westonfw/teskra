@@ -130,6 +130,28 @@ export default tseslint.config(
     },
   },
   {
+    // TASK-078: all data-root paths come from src/main/paths.ts (ADR-0003);
+    // nobody else may hand-build a ".teskra" path. The paths module itself
+    // and tests (which build temp TESKRA_HOME dirs) are exempt.
+    files: ['apps/desktop/src/**/*.{ts,tsx}'],
+    ignores: ['apps/desktop/src/main/paths.ts', 'apps/desktop/src/**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'Literal[value=/\\.teskra/]',
+          message:
+            'Do not hand-build ".teskra" paths; use apps/desktop/src/main/paths.ts (ADR-0003).',
+        },
+        {
+          selector: 'TemplateElement[value.raw=/\\.teskra/]',
+          message:
+            'Do not hand-build ".teskra" paths; use apps/desktop/src/main/paths.ts (ADR-0003).',
+        },
+      ],
+    },
+  },
+  {
     // Test files run under Vitest (Node) and are exempt — the runtime check
     // for shipped modules lives in src/no-node-builtins.test.ts.
     files: ['packages/contracts/src/**/*.test.ts'],
