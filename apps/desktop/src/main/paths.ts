@@ -35,6 +35,13 @@ export interface TeskraPaths {
   worktreeRoot(workspaceId: string): IpcResult<string>
   /** <home>/config.json — resolution only; the file may not exist. */
   config(): string
+  /**
+   * <repoRoot>/.teskra/config.json (ADR-0003 repo-local config, TASK-080) —
+   * resolution only, no I/O. Uses host path semantics; reading a WSL-side
+   * repo from a Windows host is the WorkspaceRuntime's future concern, so a
+   * non-native repoRoot simply yields a path that will not exist on the host.
+   */
+  repoConfig(repoRoot: string): string
 }
 
 function invalidSegmentError(kind: string, value: string): InternalAppError {
@@ -99,6 +106,9 @@ export function createTeskraPaths(env: NodeJS.ProcessEnv = process.env): TeskraP
     },
     config() {
       return join(home(), 'config.json')
+    },
+    repoConfig(repoRoot: string) {
+      return join(repoRoot, TESKRA_DATA_DIR, 'config.json')
     },
   }
 }

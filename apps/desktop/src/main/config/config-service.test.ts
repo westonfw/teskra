@@ -1,0 +1,278 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+
+import { DEFAULT_CONFIG, type Workspace } from '@teskra/contracts'
+
+import type { TeskraPaths } from '../paths'
+import { createConfigService, type ConfigServiceDeps } from './config-service'
+
+// Warnings are asserted on the resolve() result; keep the file/stdout pino
+// logger quiet (getLogger reads this lazily, at first use).
+process.env['TESKRA_LOG_LEVEL'] = 'fatal'
+
+const GLOBAL_CONFIG_PATH = '/teskra-home/config.json'
+
+function stubPaths(): TeskraPaths {
+  return {
+    home: () => '/teskra-home',
+    db: () => ({ ok: true, data: '/teskra-home/db/teskra.sqlite' }),
+    logs: () => ({ ok: true, data: '/teskra-home/logs' }),
+    runDir: (runId) => ({ ok: true, data: `/teskra-home/runs/${runId}` }),
+    worktreeRoot: (wsId) => ({ ok: true, data: `/teskra-home/worktrees/${wsId}` }),
+    config: () => GLOBAL_CONFIG_PATH,
+    repoConfig: (repoRoot) => `${repoRoot}/.teskra/config.json`,
+  }
+}
+
+function enoent(path: string): Error {
+  const error = new Error(`ENOENT: no such file or directory, open '${path}'`)
+  ;(error as NodeJS.ErrnoException).code = 'ENOENT'
+  return error
+}
+
+/** In-memory file map: path → file content; missing keys throw ENOENT. */
+function fakeReadFile(files: Record<string, string>): (path: string) => string {
+  return (path) => {
+    if (!(path in files)) {
+      throw enoent(path)
+    }
+    return files[path]
+  }
+}
+
+const REPO_ROOT = '/repo/demo'
+
+function stubWorkspace(id: string): Workspace {
+  return {
+    id,
+    name: 'demo',
+    runtime: { kind: 'wsl', distro: 'Ubuntu' },
+    path: REPO_ROOT,
+    createdAt: '2026-09-09T00:00:00.000Z',
+    updatedAt: '2026-09-09T00:00:00.000Z',
+  }
+}
+
+function makeDeps(
+  files: Record<string, string>,
+  overrides: Partial<ConfigServiceDeps> = {},
+): ConfigServiceDeps {
+  return {
+    paths: stubPaths(),
+    readFile: fakeReadFile(files),
+    workspaces: {
+      getById: (id) => ({ ok: true, data: id === 'ws1' ? stubWorkspace(id) : null }),
+    },
+    ...overrides,
+  }
+}
+
+describe('ConfigService.resolve — layer order', () => {
+  it('returns built-in defaults when no layer files exist', () => {
+    const service = createConfigService(makeDeps({}))
+    const resolved = service.resolve()
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.data.config).toEqual(DEFAULT_CONFIG)
+    expect(resolved.data.warnings).toEqual([])
+    for (const source of Object.values(resolved.data.sources)) {
+      expect(source).toBe('default')
+    }
+  })
+
+  it('applies default < global < workspace < override with per-field sources', () => {
+    const service = createConfigService(
+      makeDeps({
+        [GLOBAL_CONFIG_PATH]: JSON.stringify({
+          logging: { level: 'debug' },
+          concurrency: { maxGlobalRuns: 8 },
+        }),
+        [`${REPO_ROOT}/.teskra/config.json`]: JSON.stringify({
+          concurrency: { maxGlobalRuns: 6 },
+        }),
+      }),
+    )
+    const resolved = service.resolve({
+      workspaceId: 'ws1',
+      override: { watchdog: { stalledThresholdMs: 60_000 } },
+    })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    const { config, sources, warnings } = resolved.data
+    expect(warnings).toEqual([])
+    expect(config).toEqual({
+      logging: { level: 'debug' }, // global
+      concurrency: {
+        maxGlobalRuns: 6, // workspace beats global
+        maxRunsPerWorkspace: 3, // default untouched
+        maxRunsPerAgent: 2,
+      },
+      watchdog: { stalledThresholdMs: 60_000 }, // run override beats all
+    })
+    expect(sources).toEqual({
+      'logging.level': 'global',
+      'concurrency.maxGlobalRuns': 'workspace',
+      'concurrency.maxRunsPerWorkspace': 'default',
+      'concurrency.maxRunsPerAgent': 'default',
+      'watchdog.stalledThresholdMs': 'override',
+    })
+  })
+
+  it('merges partial groups deeply instead of replacing them', () => {
+    const service = createConfigService(
+      makeDeps({
+        [GLOBAL_CONFIG_PATH]: JSON.stringify({ concurrency: { maxRunsPerAgent: 1 } }),
+      }),
+    )
+    const resolved = service.resolve()
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.data.config.concurrency).toEqual({
+      maxGlobalRuns: 4,
+      maxRunsPerWorkspace: 3,
+      maxRunsPerAgent: 1,
+    })
+    expect(resolved.data.sources['concurrency.maxRunsPerAgent']).toBe('global')
+    expect(resolved.data.sources['concurrency.maxGlobalRuns']).toBe('default')
+  })
+})
+
+describe('ConfigService.resolve — degradation', () => {
+  it('skips a non-JSON global layer with a warning and keeps defaults', () => {
+    const service = createConfigService(makeDeps({ [GLOBAL_CONFIG_PATH]: '{ not json' }))
+    const resolved = service.resolve()
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.data.config).toEqual(DEFAULT_CONFIG)
+    expect(resolved.data.warnings).toHaveLength(1)
+    expect(resolved.data.warnings[0]).toMatchObject({ layer: 'global' })
+  })
+
+  it('skips a schema-invalid layer, naming the layer and field path', () => {
+    const service = createConfigService(
+      makeDeps({
+        [GLOBAL_CONFIG_PATH]: JSON.stringify({ concurrency: { maxGlobalRuns: 8 } }),
+        [`${REPO_ROOT}/.teskra/config.json`]: JSON.stringify({
+          concurrency: { maxGlobalRuns: 0 },
+        }),
+      }),
+    )
+    const resolved = service.resolve({ workspaceId: 'ws1' })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    // The invalid workspace layer is dropped entirely → global wins.
+    expect(resolved.data.config.concurrency.maxGlobalRuns).toBe(8)
+    expect(resolved.data.sources['concurrency.maxGlobalRuns']).toBe('global')
+    expect(resolved.data.warnings).toHaveLength(1)
+    expect(resolved.data.warnings[0]).toMatchObject({
+      layer: 'workspace',
+      fieldPath: 'concurrency.maxGlobalRuns',
+    })
+  })
+
+  it('warns and continues when the workspace id is unknown', () => {
+    const service = createConfigService(makeDeps({}))
+    const resolved = service.resolve({ workspaceId: 'ghost' })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.data.config).toEqual(DEFAULT_CONFIG)
+    expect(resolved.data.warnings[0]).toMatchObject({ layer: 'workspace' })
+  })
+
+  it('rejects an invalid caller-supplied override with a structured error', () => {
+    const service = createConfigService(makeDeps({}))
+    const resolved = service.resolve({ override: { watchdog: { stalledThresholdMs: -5 } } })
+    expect(resolved.ok).toBe(false)
+    if (resolved.ok) return
+    expect(resolved.error.code).toBe('VALIDATION_FAILED')
+  })
+})
+
+describe('ConfigService.resolve — repo-local secret scanning', () => {
+  it('strips secret-looking fields but still loads the rest of the layer', () => {
+    const service = createConfigService(
+      makeDeps({
+        [`${REPO_ROOT}/.teskra/config.json`]: JSON.stringify({
+          githubToken: 'ghp_1234567890abcdef',
+          concurrency: { maxGlobalRuns: 6 },
+        }),
+      }),
+    )
+    const resolved = service.resolve({ workspaceId: 'ws1' })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.data.warnings).toHaveLength(1)
+    expect(resolved.data.warnings[0]).toMatchObject({
+      layer: 'workspace',
+      fieldPath: 'githubToken',
+    })
+    // The non-secret field from the same file is still applied.
+    expect(resolved.data.config.concurrency.maxGlobalRuns).toBe(6)
+    expect(resolved.data.sources['concurrency.maxGlobalRuns']).toBe('workspace')
+  })
+
+  it('strips values that match a secret shape even under innocent keys', () => {
+    const service = createConfigService(
+      makeDeps({
+        [`${REPO_ROOT}/.teskra/config.json`]: JSON.stringify({
+          logging: { level: 'sk-proj-abcd1234' },
+        }),
+      }),
+    )
+    const resolved = service.resolve({ workspaceId: 'ws1' })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.data.warnings[0]).toMatchObject({
+      layer: 'workspace',
+      fieldPath: 'logging.level',
+    })
+    expect(resolved.data.config.logging.level).toBe('info')
+    expect(resolved.data.sources['logging.level']).toBe('default')
+  })
+
+  it('does not secret-scan the private global layer', () => {
+    // A global-layer value that fails the enum is a plain validation issue,
+    // not a secret warning.
+    const service = createConfigService(
+      makeDeps({ [GLOBAL_CONFIG_PATH]: JSON.stringify({ logging: { level: 'sk-x' } }) }),
+    )
+    const resolved = service.resolve()
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.data.warnings[0]?.message).toContain('Invalid global config field')
+  })
+})
+
+describe('ConfigService — real filesystem smoke test', () => {
+  let tempHome: string
+  let savedTeskraHome: string | undefined
+
+  beforeEach(() => {
+    savedTeskraHome = process.env['TESKRA_HOME']
+    tempHome = mkdtempSync(join(tmpdir(), 'teskra-config-'))
+    process.env['TESKRA_HOME'] = tempHome
+  })
+
+  afterEach(() => {
+    if (savedTeskraHome === undefined) {
+      delete process.env['TESKRA_HOME']
+    } else {
+      process.env['TESKRA_HOME'] = savedTeskraHome
+    }
+    rmSync(tempHome, { recursive: true, force: true })
+  })
+
+  it('reads the global config through the real paths module', async () => {
+    const { createTeskraPaths } = await import('../paths')
+    const { writeFileSync } = await import('node:fs')
+    const paths = createTeskraPaths()
+    writeFileSync(paths.config(), JSON.stringify({ logging: { level: 'warn' } }))
+    const service = createConfigService({ paths })
+    const resolved = service.resolve()
+    expect(resolved.ok && resolved.data.config.logging.level).toBe('warn')
+    expect(resolved.ok && resolved.data.sources['logging.level']).toBe('global')
+  })
+})

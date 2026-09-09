@@ -13,19 +13,34 @@ export const REDACTED = '[redacted]'
 
 const SECRET_KEY_PATTERN = /(token|secret|password|passwd|api_?key|credential|private_?key)/i
 
-const SECRET_VALUE_PATTERNS: RegExp[] = [
+// Base patterns without the global flag, so they can be reused for stateless
+// detection (a /g regex carries lastIndex across .test() calls).
+const SECRET_VALUE_SOURCES: string[] = [
   // OpenAI-style API keys
-  /sk-[A-Za-z0-9_-]+/g,
+  'sk-[A-Za-z0-9_-]+',
   // GitHub tokens (ghp_, gho_, ghu_, ghs_, ghr_) and fine-grained PATs
-  /gh[pousr]_[A-Za-z0-9]+/g,
-  /github_pat_[A-Za-z0-9_]+/g,
+  'gh[pousr]_[A-Za-z0-9]+',
+  'github_pat_[A-Za-z0-9_]+',
   // Slack tokens
-  /xox[bpoa]-[A-Za-z0-9-]+/g,
+  'xox[bpoa]-[A-Za-z0-9-]+',
   // AWS access key ids
-  /AKIA[A-Z0-9]{16}/g,
+  'AKIA[A-Z0-9]{16}',
   // JWTs
-  /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
+  'eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+',
 ]
+
+const SECRET_VALUE_PATTERNS: RegExp[] = SECRET_VALUE_SOURCES.map((s) => new RegExp(s, 'g'))
+const SECRET_VALUE_TESTERS: RegExp[] = SECRET_VALUE_SOURCES.map((s) => new RegExp(s))
+
+/** True when a config/log key name marks its value as a secret holder. */
+export function looksLikeSecretKey(key: string): boolean {
+  return SECRET_KEY_PATTERN.test(key)
+}
+
+/** True when a string contains a well-known token shape (`sk-…`, `ghp_…`). */
+export function containsSecretValue(value: string): boolean {
+  return SECRET_VALUE_TESTERS.some((pattern) => pattern.test(value))
+}
 
 function redactString(value: string): string {
   let result = value

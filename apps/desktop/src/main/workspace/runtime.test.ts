@@ -19,6 +19,7 @@ function stubPaths(): TeskraPaths {
     runDir: (runId) => ({ ok: true, data: `${HOST_HOME}/runs/${runId}` }),
     worktreeRoot: (wsId) => ({ ok: true, data: `${HOST_HOME}/worktrees/${wsId}` }),
     config: () => `${HOST_HOME}/config.json`,
+    repoConfig: (repoRoot) => `${repoRoot}/.teskra/config.json`,
   }
 }
 
