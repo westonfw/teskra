@@ -67,3 +67,5 @@ jobs:
         run: npm run build
 
       # --- Smoke checks (append below; added by TASK-005 / TASK-013 / TASK-072) ---
+      - name: Security baseline assertions (TASK-002)
+        run: node scripts/assert-security-baseline.mjs
