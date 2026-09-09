@@ -3,19 +3,9 @@ import { join } from 'node:path'
 
 import { IPC_CHANNELS } from '@teskra/contracts'
 
-import { openDatabase, type TeskraDatabase } from './db'
-import { migrateDatabase } from './db/migrations'
-import { getLogger, initializeLogging } from './logger'
-import { createTeskraPaths } from './paths'
-
-// TASK-004: file logging first, so every later startup step is captured.
-const logging = initializeLogging(createTeskraPaths())
-if (!logging.ok) {
-  getLogger('app').error(
-    { err: logging.error },
-    'File logging unavailable; falling back to stdout.',
-  )
-}
+import { getLogger } from './logger'
+import { composeTeskraRuntime } from './runtime/compose'
+import type { TeskraRuntime } from './runtime/facade'
 
 function createWindow(): void {
   const window = new BrowserWindow({
@@ -44,29 +34,19 @@ function createWindow(): void {
 
 ipcMain.handle(IPC_CHANNELS.ping, () => 'pong')
 
-// TASK-005: the database opens at startup and closes on quit. An open failure
-// is logged (via toPublicError inside openDatabase) and the app continues
-// without persistence — the Renderer is never exposed to DB errors directly.
-let database: TeskraDatabase | undefined
+let runtime: TeskraRuntime | undefined
 
-app.whenReady().then(() => {
-  const opened = openDatabase(createTeskraPaths())
-  if (opened.ok) {
-    // TASK-006: bring the schema up to date before anything touches it. A
-    // migration failure (including a newer-than-code schema version) leaves
-    // the database closed and unused — never silently continued.
-    const migrated = migrateDatabase(opened.data.connection)
-    if (migrated.ok) {
-      database = opened.data
-    } else {
-      getLogger('app').error(
-        { err: migrated.error },
-        'Database migration failed; continuing without persistence.',
-      )
-      opened.data.close()
-    }
+app.whenReady().then(async () => {
+  // TASK-081: all non-Electron services are built at the single composition
+  // root. A structured startup failure leaves the secure shell operational.
+  const composed = await composeTeskraRuntime({ appVersion: app.getVersion() })
+  if (composed.ok) {
+    runtime = composed.data
   } else {
-    getLogger('app').error({ err: opened.error }, 'Database unavailable; continuing without it.')
+    getLogger('app').error(
+      { err: composed.error },
+      'Teskra Runtime unavailable; continuing with the application shell.',
+    )
   }
 
   createWindow()
@@ -79,8 +59,11 @@ app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
-  database?.close()
-  database = undefined
+  const disposed = runtime?.dispose()
+  if (disposed !== undefined && !disposed.ok) {
+    getLogger('app').error({ err: disposed.error }, 'Failed to dispose Teskra Runtime cleanly.')
+  }
+  runtime = undefined
 })
 
 app.on('window-all-closed', () => {

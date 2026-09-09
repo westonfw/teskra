@@ -104,6 +104,46 @@ export default tseslint.config(
     },
   },
   {
+    // TASK-081: everything below Electron Main is UI-agnostic. The sole
+    // future exception is RendererEventBridge (TASK-021); main/index.ts owns
+    // application lifecycle and window creation. Repeat the process backend
+    // restrictions here because flat-config rules replace rather than merge.
+    files: ['apps/desktop/src/main/**/*.ts'],
+    ignores: [
+      'apps/desktop/src/main/index.ts',
+      'apps/desktop/src/main/events/renderer-event-bridge.ts',
+      'apps/desktop/src/**/*.test.ts',
+    ],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'electron',
+              message:
+                'Runtime services and Managers must not import Electron; use RendererEventBridge.',
+            },
+            {
+              name: 'child_process',
+              message: 'Inject CommandRunner for one-shot processes.',
+            },
+            {
+              name: 'node-pty',
+              message: 'Inject ProcessManager for interactive PTYs.',
+            },
+          ],
+          patterns: [
+            {
+              group: ['node:child_process'],
+              message: 'Inject CommandRunner for one-shot processes.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // Per-authority overrides: each may import its own backend, while the
     // other backend remains prohibited.
     files: ['apps/desktop/src/main/process/command-runner.ts'],
@@ -112,6 +152,10 @@ export default tseslint.config(
         'error',
         {
           paths: [
+            {
+              name: 'electron',
+              message: 'CommandRunner must remain Electron-free.',
+            },
             {
               name: 'node-pty',
               message:
@@ -129,6 +173,10 @@ export default tseslint.config(
         'error',
         {
           paths: [
+            {
+              name: 'electron',
+              message: 'ProcessManager must remain Electron-free.',
+            },
             {
               name: 'child_process',
               message:

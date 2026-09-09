@@ -31,3 +31,34 @@ export const workspaceSchema = z.strictObject({
   updatedAt: z.string(),
 })
 export type Workspace = z.infer<typeof workspaceSchema>
+
+const workspaceInputFields = {
+  runtime: workspaceRuntimeRefSchema,
+  path: z.string().min(1),
+  gitRoot: z.string().optional(),
+  defaultBranch: z.string().optional(),
+  env: z.record(z.string(), z.string()).optional(),
+}
+
+export const createWorkspaceRequestSchema = z.strictObject({
+  name: z.string().min(1),
+  ...workspaceInputFields,
+})
+export type CreateWorkspaceRequest = z.infer<typeof createWorkspaceRequestSchema>
+
+export const openWorkspaceRequestSchema = z.strictObject({
+  name: z.string().min(1).optional(),
+  ...workspaceInputFields,
+})
+export type OpenWorkspaceRequest = z.infer<typeof openWorkspaceRequestSchema>
+
+export const workspaceIdRequestSchema = z.strictObject({ id: z.string().min(1) })
+export type WorkspaceIdRequest = z.infer<typeof workspaceIdRequestSchema>
+
+export const listRecentWorkspacesRequestSchema = z.strictObject({
+  limit: z.number().int().positive().max(100).optional(),
+})
+export type ListRecentWorkspacesRequest = z.infer<typeof listRecentWorkspacesRequestSchema>
+
+export const workspaceValidationSchema = z.strictObject({ exists: z.boolean().nullable() })
+export type WorkspaceValidationResult = z.infer<typeof workspaceValidationSchema>

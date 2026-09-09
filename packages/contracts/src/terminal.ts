@@ -43,3 +43,11 @@ export const terminalCloseRequestSchema = z.strictObject({
   terminalId: z.string().min(1),
 })
 export type TerminalCloseRequest = z.infer<typeof terminalCloseRequestSchema>
+
+export const terminalIdRequestSchema = terminalCloseRequestSchema
+export type TerminalIdRequest = TerminalCloseRequest
+
+export const listTerminalsRequestSchema = z.strictObject({
+  workspaceId: z.string().min(1).optional(),
+})
+export type ListTerminalsRequest = z.infer<typeof listTerminalsRequestSchema>
