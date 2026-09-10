@@ -156,15 +156,34 @@ describe('ReviewRepository', () => {
       runId: 'run-1',
       criterionId: 'crit-1',
       result: 'pass',
-      evidence: { note: 'verified' },
+      evidence: ['vitest run passed: 42/42'],
     })
     expect(second.ok).toBe(true)
     if (!second.ok) return
     expect(second.data.result).toBe('pass')
-    expect(second.data.evidence).toEqual({ note: 'verified' })
+    expect(second.data.evidence).toEqual(['vitest run passed: 42/42'])
 
     const scores = repo.listScoresByRun('run-1')
     expect(scores.ok && scores.data.length).toBe(1)
+  })
+
+  it('lists criterion scores by task via the owning runs', () => {
+    setup()
+    connection
+      .prepare(
+        `INSERT INTO agent_runs (id, workspace_id, task_id, agent_type, status, execution_mode, run_dir, created_at, updated_at)
+         VALUES ('run-2', 'ws-1', 'task-1', 'claude', 'completed', 'attended', 'runs/run-2', '2026-09-09T00:00:00.000Z', '2026-09-09T00:00:00.000Z')`,
+      )
+      .run()
+    repo.recordScore({ id: 's-1', runId: 'run-1', criterionId: 'crit-1', result: 'pass' })
+    repo.recordScore({ id: 's-2', runId: 'run-2', criterionId: 'crit-1', result: 'unknown' })
+
+    const byTask = repo.listScoresByTask('task-1')
+    expect(byTask.ok && byTask.data.map((score) => [score.runId, score.result])).toEqual([
+      ['run-1', 'pass'],
+      ['run-2', 'unknown'],
+    ])
+    expect(repo.listScoresByTask('task-unknown')).toMatchObject({ ok: true, data: [] })
   })
 
   it('returns VALIDATION_FAILED for corrupted aggregate_json', () => {

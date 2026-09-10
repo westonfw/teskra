@@ -1,8 +1,14 @@
 import type Database from 'better-sqlite3'
 import { z } from 'zod'
 
-import type { IpcResult, ReviewFindingRecord, ReviewSeverity } from '@teskra/contracts'
-import { reviewFindingRecordSchema } from '@teskra/contracts'
+import type {
+  CriterionResult,
+  CriterionScoreRecord,
+  IpcResult,
+  ReviewFindingRecord,
+  ReviewSeverity,
+} from '@teskra/contracts'
+import { criterionScoreRecordSchema, reviewFindingRecordSchema } from '@teskra/contracts'
 
 import {
   decodeJson,
@@ -40,10 +46,11 @@ export const REVIEW_VERDICTS = ['approve', 'changes_requested', 'unable_to_revie
 export const reviewVerdictSchema = z.enum(REVIEW_VERDICTS)
 export type ReviewVerdict = z.infer<typeof reviewVerdictSchema>
 
-/** §139.1 `criterion_scores.result` (line 5396). */
-export const CRITERION_RESULTS = ['pass', 'fail', 'unknown'] as const
-export const criterionResultSchema = z.enum(CRITERION_RESULTS)
-export type CriterionResult = z.infer<typeof criterionResultSchema>
+/**
+ * §139.1 `criterion_scores.result` (line 5396) is pinned in contracts
+ * (`criterionResultSchema`, packages/contracts/src/criteria.ts) so the handoff
+ * schema, the persisted record, and Typed IPC all share one enum.
+ */
 
 export const reviewPanelRecordSchema = z.strictObject({
   id: z.string(),
@@ -79,15 +86,12 @@ export type ReviewPanelMember = z.infer<typeof reviewPanelMemberRecordSchema>
  */
 export type { ReviewFindingRecord } from '@teskra/contracts'
 
-export const criterionScoreRecordSchema = z.strictObject({
-  id: z.string(),
-  runId: z.string(),
-  criterionId: z.string(),
-  result: criterionResultSchema,
-  evidence: jsonRecordSchema.optional(),
-  createdAt: isoTimestampSchema,
-})
-export type CriterionScore = z.infer<typeof criterionScoreRecordSchema>
+/**
+ * Same reasoning as the finding record: the persisted score shape IS the
+ * contracts `CriterionScoreRecord` (packages/contracts/src/review.ts), with
+ * plan §123 `evidence` as a string array in `evidence_json`.
+ */
+export type { CriterionScoreRecord } from '@teskra/contracts'
 
 interface PanelRow {
   id: string
@@ -178,7 +182,8 @@ export interface RecordScoreInput {
   readonly runId: string
   readonly criterionId: string
   readonly result: CriterionResult
-  readonly evidence?: JsonRecord
+  /** plan §123: evidence strings; persisted as a JSON array. */
+  readonly evidence?: readonly string[]
 }
 
 export interface ReviewRepository {
@@ -197,8 +202,10 @@ export interface ReviewRepository {
   /** Removes a run's findings; returns true when at least one row existed. */
   deleteFindingsByRun(runId: string): IpcResult<boolean>
   /** (run_id, criterion_id) is unique — re-scoring overwrites in place. */
-  recordScore(input: RecordScoreInput, now?: string): IpcResult<CriterionScore>
-  listScoresByRun(runId: string): IpcResult<CriterionScore[]>
+  recordScore(input: RecordScoreInput, now?: string): IpcResult<CriterionScoreRecord>
+  listScoresByRun(runId: string): IpcResult<CriterionScoreRecord[]>
+  /** Scores of every Run belonging to the Task (join via agent_runs). */
+  listScoresByTask(taskId: string): IpcResult<CriterionScoreRecord[]>
 }
 
 const PANEL = 'review-panel'
@@ -206,8 +213,8 @@ const MEMBER = 'review-panel-member'
 const FINDING = 'review-finding'
 const SCORE = 'criterion-score'
 
-/** plan §143: finding evidence is an array of strings (JSON array on disk). */
-const findingEvidenceSchema = z.array(z.string())
+/** plan §143/§123: review evidence is an array of strings (JSON on disk). */
+const evidenceSchema = z.array(z.string())
 
 function panelToDomain(row: PanelRow): IpcResult<ReviewPanel> {
   const aggregate = decodeJson(jsonRecordSchema, PANEL, 'aggregate_json', row.aggregate_json)
@@ -240,7 +247,7 @@ function memberToDomain(row: MemberRow): IpcResult<ReviewPanelMember> {
 }
 
 function findingToDomain(row: FindingRow): IpcResult<ReviewFindingRecord> {
-  const evidence = decodeJson(findingEvidenceSchema, FINDING, 'evidence_json', row.evidence_json)
+  const evidence = decodeJson(evidenceSchema, FINDING, 'evidence_json', row.evidence_json)
   if (!evidence.ok) {
     return evidence
   }
@@ -259,8 +266,8 @@ function findingToDomain(row: FindingRow): IpcResult<ReviewFindingRecord> {
   })
 }
 
-function scoreToDomain(row: ScoreRow): IpcResult<CriterionScore> {
-  const evidence = decodeJson(jsonRecordSchema, SCORE, 'evidence_json', row.evidence_json)
+function scoreToDomain(row: ScoreRow): IpcResult<CriterionScoreRecord> {
+  const evidence = decodeJson(evidenceSchema, SCORE, 'evidence_json', row.evidence_json)
   if (!evidence.ok) {
     return evidence
   }
@@ -539,6 +546,22 @@ export function createReviewRepository(connection: Database.Database): ReviewRep
         return connection
           .prepare('SELECT * FROM criterion_scores WHERE run_id = ? ORDER BY created_at ASC')
           .all(runId) as ScoreRow[]
+      })
+      if (!rows.ok) {
+        return rows
+      }
+      return mapRows(rows.data, scoreToDomain)
+    },
+
+    listScoresByTask(taskId) {
+      const rows = execute(SCORE, 'listScoresByTask', () => {
+        return connection
+          .prepare(
+            `SELECT s.* FROM criterion_scores s
+             JOIN agent_runs r ON r.id = s.run_id
+             WHERE r.task_id = ? ORDER BY s.created_at ASC`,
+          )
+          .all(taskId) as ScoreRow[]
       })
       if (!rows.ok) {
         return rows

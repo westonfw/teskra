@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildHandoffContext, inspectRunWatchdog, isNonEmptyString } from './index'
+import {
+  buildHandoffContext,
+  computeCriteriaReviewOutcome,
+  inspectRunWatchdog,
+  isNonEmptyString,
+} from './index'
 
 describe('isNonEmptyString', () => {
   it('accepts a non-empty string', () => {
@@ -103,5 +108,56 @@ describe('buildHandoffContext (TASK-051)', () => {
     expect(buildHandoffContext({ type: 'review', parseStatus: 'degraded' })).toBe(
       'Handoff (parse_status: degraded) contains no summary.',
     )
+  })
+})
+
+describe('computeCriteriaReviewOutcome (TASK-054)', () => {
+  const criteria = [
+    { id: 'c-req', required: true },
+    { id: 'c-opt', required: false },
+  ]
+
+  it('fails when a required criterion fails, even if everything else passed', () => {
+    expect(
+      computeCriteriaReviewOutcome(criteria, [
+        { criterionId: 'c-req', result: 'fail' },
+        { criterionId: 'c-opt', result: 'pass' },
+      ]),
+    ).toBe('fail')
+  })
+
+  it('passes only when every criterion passed', () => {
+    expect(
+      computeCriteriaReviewOutcome(criteria, [
+        { criterionId: 'c-req', result: 'pass' },
+        { criterionId: 'c-opt', result: 'pass' },
+      ]),
+    ).toBe('pass')
+  })
+
+  it('never auto-passes unknown or missing results', () => {
+    expect(
+      computeCriteriaReviewOutcome(criteria, [
+        { criterionId: 'c-req', result: 'pass' },
+        { criterionId: 'c-opt', result: 'unknown' },
+      ]),
+    ).toBe('unknown')
+    expect(
+      computeCriteriaReviewOutcome(criteria, [{ criterionId: 'c-req', result: 'pass' }]),
+    ).toBe('unknown')
+    expect(computeCriteriaReviewOutcome(criteria, [])).toBe('unknown')
+  })
+
+  it('treats an optional-only failure as unknown, not overall fail or pass', () => {
+    expect(
+      computeCriteriaReviewOutcome(criteria, [
+        { criterionId: 'c-req', result: 'pass' },
+        { criterionId: 'c-opt', result: 'fail' },
+      ]),
+    ).toBe('unknown')
+  })
+
+  it('stays unknown for an empty criteria set', () => {
+    expect(computeCriteriaReviewOutcome([], [])).toBe('unknown')
   })
 })

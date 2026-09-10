@@ -279,7 +279,11 @@ export async function composeTeskraRuntime(
     resolveRuntime: runtimeFor,
   }
   const runLogs = createRunLogStore({ paths })
-  const reviewCollector = createReviewCollector({ reviews: repositories.reviews })
+  const reviewCollector = createReviewCollector({
+    reviews: repositories.reviews,
+    runs: repositories.agentRuns,
+    criteria: repositories.criteria,
+  })
   const agentManager = createAgentManager({
     registry: registeredAgents.data,
     adapters: [
@@ -396,6 +400,22 @@ export async function composeTeskraRuntime(
         }
         if (request.taskId !== undefined) {
           return repositories.reviews.listFindingsByTask(request.taskId)
+        }
+        return {
+          ok: false,
+          error: {
+            code: 'VALIDATION_FAILED',
+            message: 'Exactly one of runId / taskId is required.',
+            retryable: false,
+          },
+        }
+      },
+      listCriterionScores: (request) => {
+        if (request.runId !== undefined) {
+          return repositories.reviews.listScoresByRun(request.runId)
+        }
+        if (request.taskId !== undefined) {
+          return repositories.reviews.listScoresByTask(request.taskId)
         }
         return {
           ok: false,

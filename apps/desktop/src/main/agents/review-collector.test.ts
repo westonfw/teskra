@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { HandoffParseStatus } from '@teskra/contracts'
 
 import { migrateDatabase } from '../db/migrations'
+import { createAgentRunRepository } from '../db/repositories/agent-run-repository'
+import { createCriteriaRepository } from '../db/repositories/criteria-repository'
 import type { Handoff } from '../db/repositories/handoff-repository'
 import {
   createReviewRepository,
@@ -43,21 +45,27 @@ function setup() {
     .run()
   connection
     .prepare(
-      `INSERT INTO acceptance_criteria (id, criteria_set_id, ordinal, description, created_at)
-       VALUES ('crit-1', 'cs-1', 1, 'Tests pass', '${AT}')`,
+      `INSERT INTO acceptance_criteria (id, criteria_set_id, ordinal, description, required, created_at)
+       VALUES ('crit-1', 'cs-1', 1, 'Tests pass', 1, '${AT}'),
+              ('crit-2', 'cs-1', 2, 'Docs updated', 0, '${AT}')`,
     )
     .run()
   connection
     .prepare(
       `INSERT INTO agent_runs (id, workspace_id, task_id, agent_type, role, status, execution_mode, run_dir, created_at, updated_at)
-       VALUES ('run-1', 'ws-1', 'task-1', 'codex', 'reviewer', 'completed', 'orchestrated', 'runs/run-1', '${AT}', '${AT}')`,
+       VALUES ('run-1', 'ws-1', 'task-1', 'codex', 'reviewer', 'completed', 'orchestrated', 'runs/run-1', '${AT}', '${AT}'),
+              ('run-impl', 'ws-1', 'task-1', 'codex', 'implementer', 'completed', 'orchestrated', 'runs/run-impl', '${AT}', '${AT}')`,
     )
     .run()
   reviews = createReviewRepository(connection)
   let findingSeq = 0
+  let scoreSeq = 0
   collector = createReviewCollector({
     reviews,
+    runs: createAgentRunRepository(connection),
+    criteria: createCriteriaRepository(connection),
     createFindingId: () => `finding-${++findingSeq}`,
+    createScoreId: () => `score-${++scoreSeq}`,
     now: () => AT,
   })
 }
@@ -209,5 +217,162 @@ describe('ReviewCollector (TASK-053, ADR-0004)', () => {
       handoff({ runId: 'run-1', type: 'review', summary: 's', findings: [] }, 'ok'),
     )
     expect(persistedFindings()).toEqual([])
+  })
+})
+
+describe('ReviewCollector criterion scores (TASK-054)', () => {
+  function persistedScores(runId: string) {
+    const listed = reviews.listScoresByRun(runId)
+    if (!listed.ok) throw new Error(listed.error.message)
+    return listed.data
+  }
+
+  it('persists pass/fail/unknown per criterion and backfills unreported ones as unknown', () => {
+    setup()
+    collector.ingest(
+      'run-1',
+      handoff(
+        {
+          runId: 'run-1',
+          type: 'review',
+          summary: 'Reviewed.',
+          criterionScores: [
+            { criterionId: 'crit-1', result: 'fail', evidence: ['no test covers src/db.ts'] },
+          ],
+        },
+        'ok',
+      ),
+    )
+
+    const scores = persistedScores('run-1')
+    expect(scores).toHaveLength(2)
+    expect(scores).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          criterionId: 'crit-1',
+          result: 'fail',
+          evidence: ['no test covers src/db.ts'],
+        }),
+        // Never reported → explicit unknown, never an implicit pass.
+        expect.objectContaining({
+          criterionId: 'crit-2',
+          result: 'unknown',
+          evidence: ['The reviewer did not report a result for this criterion.'],
+        }),
+      ]),
+    )
+  })
+
+  it('attributes scores to the reviewed run declared via targetRunId', () => {
+    setup()
+    collector.ingest(
+      'run-1',
+      handoff(
+        {
+          runId: 'run-1',
+          type: 'review',
+          summary: 'Reviewed the implement run.',
+          targetRunId: 'run-impl',
+          criterionScores: [{ criterionId: 'crit-1', result: 'pass' }],
+        },
+        'ok',
+      ),
+    )
+
+    expect(persistedScores('run-impl')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ criterionId: 'crit-1', result: 'pass' }),
+        expect.objectContaining({ criterionId: 'crit-2', result: 'unknown' }),
+      ]),
+    )
+    expect(persistedScores('run-1')).toEqual([])
+  })
+
+  it('keeps scores on the reviewer run when targetRunId does not resolve', () => {
+    setup()
+    collector.ingest(
+      'run-1',
+      handoff(
+        {
+          runId: 'run-1',
+          type: 'review',
+          summary: 'Bad target.',
+          targetRunId: 'run-missing',
+          criterionScores: [{ criterionId: 'crit-1', result: 'pass' }],
+        },
+        'ok',
+      ),
+    )
+
+    expect(persistedScores('run-1')).toEqual(
+      expect.arrayContaining([expect.objectContaining({ criterionId: 'crit-1', result: 'pass' })]),
+    )
+    expect(persistedScores('run-missing')).toEqual([])
+  })
+
+  it('drops scores for criteria outside the resolved set, per item', () => {
+    setup()
+    collector.ingest(
+      'run-1',
+      handoff(
+        {
+          runId: 'run-1',
+          type: 'review',
+          summary: 'Partially malformed.',
+          criterionScores: [
+            { criterionId: 'crit-1', result: 'pass', evidence: ['ok'] },
+            { criterionId: 'crit-missing', result: 'pass' },
+            { criterionId: 'crit-2', result: 'definitely-not-a-result' },
+          ],
+        },
+        'degraded',
+      ),
+    )
+
+    const scores = persistedScores('run-1')
+    expect(scores).toHaveLength(2)
+    expect(scores).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ criterionId: 'crit-1', result: 'pass' }),
+        // crit-2's entry failed validation → treated as unreported.
+        expect.objectContaining({ criterionId: 'crit-2', result: 'unknown' }),
+      ]),
+    )
+  })
+
+  it('skips scoring when the run has no confirmed criteria set', () => {
+    setup()
+    connection.prepare("UPDATE acceptance_criteria_sets SET status = 'draft' WHERE id = 'cs-1'").run()
+    collector.ingest(
+      'run-1',
+      handoff(
+        {
+          runId: 'run-1',
+          type: 'review',
+          summary: 'Reviewed.',
+          criterionScores: [{ criterionId: 'crit-1', result: 'pass' }],
+        },
+        'ok',
+      ),
+    )
+    expect(persistedScores('run-1')).toEqual([])
+  })
+
+  it('does not touch scores when the handoff has no criterionScores key', () => {
+    setup()
+    collector.ingest(
+      'run-1',
+      handoff(
+        {
+          runId: 'run-1',
+          type: 'review',
+          summary: 'Findings only.',
+          findings: [{ severity: 'low', title: 'nit' }],
+        },
+        'ok',
+      ),
+    )
+    expect(persistedScores('run-1')).toEqual([])
+    expect(persistedFindings()).toHaveLength(1)
   })
 })

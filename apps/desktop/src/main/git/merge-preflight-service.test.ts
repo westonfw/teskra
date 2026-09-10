@@ -17,6 +17,8 @@ import {
   createWorktreeRepository,
 } from '../db/repositories'
 import { createEventBus } from '../events/event-bus'
+import type { Handoff } from '../db/repositories/handoff-repository'
+import { createReviewCollector } from '../agents/review-collector'
 import { createTeskraPaths } from '../paths'
 import { createCommandRunner, type CommandRunner } from '../process/command-runner'
 import { createWorkspaceRuntime } from '../workspace/runtime'
@@ -331,6 +333,86 @@ describe('MergePreflightService (TASK-045)', () => {
     const met = requireOk(await fixture.service.check({ worktreeId: worktree.id }))
     expect(met.status).toBe('pass')
     expect(checkById(met.checks, 'acceptance-criteria').outcome).toBe('pass')
+  })
+
+  it('is driven by ingested review scores end to end (TASK-054)', async () => {
+    const fixture = await setup()
+    const worktree = await createWorktree(fixture, 'run-1')
+    requireOk(
+      fixture.tasks.create({ id: 'task-1', workspaceId: 'workspace-1', title: 'Reviewed task' }),
+    )
+    requireOk(
+      fixture.runs.create({
+        id: 'run-1',
+        workspaceId: 'workspace-1',
+        taskId: 'task-1',
+        agentType: 'fake-agent',
+        executionMode: 'orchestrated',
+        runDir: join(fixture.repoDir, '.run'),
+        worktreeId: worktree.id,
+      }),
+    )
+    requireOk(
+      fixture.runs.create({
+        id: 'run-review',
+        workspaceId: 'workspace-1',
+        taskId: 'task-1',
+        agentType: 'fake-agent',
+        role: 'reviewer',
+        executionMode: 'attended',
+        runDir: join(fixture.repoDir, '.run-review'),
+      }),
+    )
+    requireOk(fixture.criteria.createSet({ id: 'set-1', taskId: 'task-1', version: 1 }))
+    const criterion = requireOk(
+      fixture.criteria.addCriterion({
+        id: 'crit-1',
+        criteriaSetId: 'set-1',
+        ordinal: 1,
+        description: 'Unit tests cover the change',
+        required: true,
+      }),
+    )
+    requireOk(fixture.criteria.confirmSet('set-1'))
+
+    let ids = 0
+    const collector = createReviewCollector({
+      reviews: fixture.reviews,
+      runs: fixture.runs,
+      criteria: fixture.criteria,
+      createFindingId: () => `finding-${++ids}`,
+      createScoreId: () => `score-${++ids}`,
+      now: () => '2026-09-10T00:00:00.000Z',
+    })
+    const reviewHandoff = (result: 'pass' | 'fail'): Handoff => ({
+      id: `handoff-${result}`,
+      runId: 'run-review',
+      type: 'review',
+      payload: {
+        runId: 'run-review',
+        type: 'review',
+        summary: 'Review complete.',
+        targetRunId: 'run-1',
+        criterionScores: [{ criterionId: criterion.id, result, evidence: [`verdict: ${result}`] }],
+      },
+      parseStatus: 'ok',
+      createdAt: '2026-09-10T00:00:00.000Z',
+    })
+
+    // A failed required criterion from the review blocks the merge.
+    collector.ingest('run-review', reviewHandoff('fail'))
+    const blocked = requireOk(await fixture.service.check({ worktreeId: worktree.id }))
+    expect(blocked.status).toBe('blocked')
+    expect(checkById(blocked.checks, 'acceptance-criteria')).toMatchObject({
+      outcome: 'failed',
+      blocker: { code: 'CRITERIA_UNMET' },
+    })
+
+    // A passing re-review (upsert on run_id + criterion_id) clears it.
+    collector.ingest('run-review', reviewHandoff('pass'))
+    const cleared = requireOk(await fixture.service.check({ worktreeId: worktree.id }))
+    expect(cleared.status).toBe('pass')
+    expect(checkById(cleared.checks, 'acceptance-criteria').outcome).toBe('pass')
   })
 
   it('is read-only: preflight never alters git or database state', async () => {

@@ -96,9 +96,19 @@ export function createReviewerService(deps: ReviewerServiceDeps): ReviewerServic
   }
 
   /** Most specific reference wins; no reference at all means shared review. */
-  const resolveTargetWorktree = (request: StartReviewRunRequest): IpcResult<Worktree | null> => {
+  const resolveTarget = (
+    request: StartReviewRunRequest,
+  ): IpcResult<{ worktree: Worktree | null; runId?: string }> => {
     if (request.targetWorktreeId !== undefined) {
-      return lookupWorktree(request.targetWorktreeId, request.workspaceId)
+      const worktree = lookupWorktree(request.targetWorktreeId, request.workspaceId)
+      if (!worktree.ok) return worktree
+      return {
+        ok: true,
+        data: {
+          worktree: worktree.data,
+          ...(worktree.data.runId === undefined ? {} : { runId: worktree.data.runId }),
+        },
+      }
     }
     if (request.targetRunId !== undefined) {
       const run = deps.runs.getById(request.targetRunId)
@@ -115,9 +125,12 @@ export function createReviewerService(deps: ReviewerServiceDeps): ReviewerServic
           `run workspace=${run.data.workspaceId} review workspace=${request.workspaceId}`,
         )
       }
-      return run.data.worktreeId === undefined
-        ? { ok: true, data: null }
-        : lookupWorktree(run.data.worktreeId, request.workspaceId)
+      if (run.data.worktreeId === undefined) {
+        return { ok: true, data: { worktree: null, runId: run.data.id } }
+      }
+      const worktree = lookupWorktree(run.data.worktreeId, request.workspaceId)
+      if (!worktree.ok) return worktree
+      return { ok: true, data: { worktree: worktree.data, runId: run.data.id } }
     }
     if (request.taskId !== undefined) {
       const taskRuns = deps.runs.listByTask(request.taskId)
@@ -125,11 +138,14 @@ export function createReviewerService(deps: ReviewerServiceDeps): ReviewerServic
       const latest = taskRuns.data
         .filter((run) => run.workspaceId === request.workspaceId && run.worktreeId !== undefined)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
-      return latest?.worktreeId === undefined
-        ? { ok: true, data: null }
-        : lookupWorktree(latest.worktreeId, request.workspaceId)
+      if (latest?.worktreeId === undefined) {
+        return { ok: true, data: { worktree: null } }
+      }
+      const worktree = lookupWorktree(latest.worktreeId, request.workspaceId)
+      if (!worktree.ok) return worktree
+      return { ok: true, data: { worktree: worktree.data, runId: latest.id } }
     }
-    return { ok: true, data: null }
+    return { ok: true, data: { worktree: null } }
   }
 
   const discardSnapshot = (worktreeId: string, runId: string): void => {
@@ -174,9 +190,21 @@ export function createReviewerService(deps: ReviewerServiceDeps): ReviewerServic
           `ReviewerService could not resolve agentType=${JSON.stringify(request.agentType)}`,
         )
       }
-      const target = resolveTargetWorktree(request)
+      const target = resolveTarget(request)
       if (!target.ok) return target
-      const worktree = target.data
+      const worktree = target.data.worktree
+      // TASK-054: the reviewer echoes this id as the handoff's targetRunId so
+      // criterion scores are attributed to the reviewed Run (merge preflight
+      // reads scores off the worktree's Run, not the reviewer Run). Teskra's
+      // own attribution wins over a caller-supplied environment entry.
+      const environment = {
+        ...request.environment,
+        ...(target.data.runId === undefined
+          ? {}
+          : { TESKRA_REVIEW_TARGET_RUN_ID: target.data.runId }),
+      }
+      const environmentField =
+        Object.keys(environment).length === 0 ? {} : { environment }
 
       if (definition.capabilities.readOnlyMode) {
         const isolation = worktree === null ? 'shared-readonly' : 'worktree-readonly'
@@ -191,7 +219,7 @@ export function createReviewerService(deps: ReviewerServiceDeps): ReviewerServic
           ...(request.mode === undefined ? {} : { mode: request.mode }),
           ...(request.executionMode === undefined ? {} : { executionMode: request.executionMode }),
           ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
-          ...(request.environment === undefined ? {} : { environment: request.environment }),
+          ...environmentField,
         })
         return started.ok ? { ok: true, data: { run: started.data, isolation } } : started
       }
@@ -222,7 +250,7 @@ export function createReviewerService(deps: ReviewerServiceDeps): ReviewerServic
         ...(request.mode === undefined ? {} : { mode: request.mode }),
         ...(request.executionMode === undefined ? {} : { executionMode: request.executionMode }),
         ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
-        ...(request.environment === undefined ? {} : { environment: request.environment }),
+        ...environmentField,
       })
       if (!started.ok) {
         // Compensating action: never leave an orphan snapshot behind.

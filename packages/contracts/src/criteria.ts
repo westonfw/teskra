@@ -55,6 +55,15 @@ export const acceptanceCriteriaSetDetailSchema = z.strictObject({
 })
 export type AcceptanceCriteriaSetDetail = z.infer<typeof acceptanceCriteriaSetDetailSchema>
 
+/**
+ * §139.1 `criterion_scores.result` (line 5396) — the three-state review
+ * verdict for one Criterion (TASK-054). `unknown` is explicit: an unreviewed
+ * or unverifiable Criterion is never auto-passed.
+ */
+export const CRITERION_RESULTS = ['pass', 'fail', 'unknown'] as const
+export const criterionResultSchema = z.enum(CRITERION_RESULTS)
+export type CriterionResult = z.infer<typeof criterionResultSchema>
+
 export const listCriteriaSetsRequestSchema = z.strictObject({
   taskId: z.string().min(1),
 })

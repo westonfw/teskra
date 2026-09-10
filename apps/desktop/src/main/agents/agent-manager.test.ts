@@ -16,6 +16,7 @@ import { migrateDatabase } from '../db/migrations'
 import {
   createAgentEventRepository,
   createAgentRunRepository,
+  createCriteriaRepository,
   createHandoffRepository,
   createReviewRepository,
   createTaskRepository,
@@ -154,7 +155,11 @@ function setup(concurrency?: ConcurrencyConfig, failAgentEventWrites = false): T
     runs,
     agentEvents: persistedEvents,
     handoffs,
-    reviewCollector: createReviewCollector({ reviews }),
+    reviewCollector: createReviewCollector({
+      reviews,
+      runs,
+      criteria: createCriteriaRepository(connection),
+    }),
     workspaces,
     tasks,
     worktrees,

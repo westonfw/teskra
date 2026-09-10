@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { criterionResultSchema } from './criteria'
+
 /**
  * plan §125 WorkerHandoff + TASK-051 + ADR-0004 — delivered via the file at
  * TESKRA_HANDOFF_PATH, never parsed from stdout. Values mirror §139.1:
@@ -48,6 +50,17 @@ export const reviewFindingSchema = z.strictObject({
 })
 export type ReviewFinding = z.infer<typeof reviewFindingSchema>
 
+/**
+ * plan §123 CriterionScore — the per-criterion verdict a reviewer Agent
+ * reports inside the WorkerHandoff `criterionScores` array (TASK-054).
+ */
+export const handoffCriterionScoreSchema = z.strictObject({
+  criterionId: z.string(),
+  result: criterionResultSchema,
+  evidence: z.array(z.string()).optional(),
+})
+export type HandoffCriterionScore = z.infer<typeof handoffCriterionScoreSchema>
+
 export const workerHandoffSchema = z.strictObject({
   runId: z.string(),
   type: handoffTypeSchema,
@@ -56,6 +69,13 @@ export const workerHandoffSchema = z.strictObject({
   commandsRun: z.array(commandEvidenceSchema).optional(),
   tests: z.array(testEvidenceSchema).optional(),
   findings: z.array(reviewFindingSchema).optional(),
+  /**
+   * TASK-054: review handoffs declare the implement Run they evaluated so its
+   * criterion scores are attributed to the reviewed Run (which is what merge
+   * preflight inspects), not to the reviewer Run that produced them.
+   */
+  targetRunId: z.string().optional(),
+  criterionScores: z.array(handoffCriterionScoreSchema).optional(),
   blockers: z.array(z.string()).optional(),
   suggestedNextAction: z.string().optional(),
 })

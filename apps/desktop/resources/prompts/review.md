@@ -31,9 +31,15 @@ Do not modify code in this phase.
 When you finish, write your handoff as a JSON file at
 `{{env.TESKRA_HANDOFF_PATH}}` conforming to the WorkerHandoff contract: required
 fields `runId`, `type`, `summary`; optional fields `filesChanged`,
-`commandsRun`, `tests`, `findings`, `blockers`, `suggestedNextAction`. Use
-`"type": "review"` and put every review finding into `findings`. Teskra reads
-this file after your process exits — it is the only reliable channel back, so
-writing it is mandatory. Store any large outputs (full review reports, diffs)
-as files under `{{env.TESKRA_ARTIFACT_DIR}}` and reference them from the
-handoff.
+`commandsRun`, `tests`, `findings`, `criterionScores`, `targetRunId`,
+`blockers`, `suggestedNextAction`. Use `"type": "review"` and put every review
+finding into `findings` (each with `severity`, `title`, and where applicable
+`file`, `line`, `criterionId`, `evidence`). Score every acceptance criterion in
+`criterionScores` as `{ "criterionId", "result": "pass" | "fail" | "unknown",
+"evidence": [...] }` — use `unknown` when you cannot verify a criterion, never
+guess `pass`. When `TESKRA_REVIEW_TARGET_RUN_ID` is set in your environment,
+echo it as `targetRunId` so the scores are attributed to the reviewed run.
+Teskra reads this file after your process exits — it is the only reliable
+channel back, so writing it is mandatory. Store any large outputs (full
+review reports, diffs) as files under `{{env.TESKRA_ARTIFACT_DIR}}` and
+reference them from the handoff.

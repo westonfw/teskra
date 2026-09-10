@@ -19,9 +19,12 @@ import { useEffect, useState } from 'react'
 import {
   CRITERION_CATEGORIES,
   type AcceptanceCriterion,
+  type CriteriaReviewOutcome,
   type CriteriaSetStatus,
   type CriterionCategory,
+  type CriterionResult,
 } from '@teskra/contracts'
+import { computeCriteriaReviewOutcome } from '@teskra/shared'
 
 import { AppErrorAlert } from '../components/app-error-alert'
 import {
@@ -29,6 +32,7 @@ import {
   isCriteriaSetEditable,
   useCriteriaStore,
 } from '../stores/criteria-store'
+import { latestScoresByCriterion, useReviewStore } from '../stores/review-store'
 
 /**
  * CriteriaPanel (TASK-049) — full Acceptance Criteria editing UI.
@@ -44,6 +48,19 @@ const statusColor: Record<CriteriaSetStatus, string> = {
   draft: 'default',
   confirmed: 'green',
   superseded: 'orange',
+}
+
+/** TASK-054: per-criterion review score and overall outcome tag colors. */
+const scoreColor: Record<CriterionResult, string> = {
+  pass: 'green',
+  fail: 'red',
+  unknown: 'default',
+}
+
+const outcomeColor: Record<CriteriaReviewOutcome, string> = {
+  pass: 'green',
+  fail: 'red',
+  unknown: 'gold',
 }
 
 type EditorState =
@@ -66,6 +83,8 @@ export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
   const removeCriterion = useCriteriaStore((state) => state.removeCriterion)
   const confirmSet = useCriteriaStore((state) => state.confirmSet)
   const clearError = useCriteriaStore((state) => state.clearError)
+  const scores = useReviewStore((state) => state.scores)
+  const startScoreSynchronization = useReviewStore((state) => state.startScoreSynchronization)
 
   const [selectedSetId, setSelectedSetId] = useState<string>()
   const [editor, setEditor] = useState<EditorState>()
@@ -74,12 +93,21 @@ export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
   const [required, setRequired] = useState(true)
 
   useEffect(() => startSynchronization(taskId), [startSynchronization, taskId])
+  useEffect(() => startScoreSynchronization(taskId), [startScoreSynchronization, taskId])
 
   const selected =
     details.find(({ set }) => set.id === selectedSetId) ??
     editableCriteriaDetail(details) ??
     details[0]
   const editable = selected !== undefined && isCriteriaSetEditable(selected.set)
+  // TASK-054: latest review score per criterion plus the derived overall
+  // outcome (unknown never auto-passes; a required fail fails the review).
+  const latestScores = latestScoresByCriterion(scores)
+  const reviewed = (selected?.criteria ?? []).some((criterion) => latestScores.has(criterion.id))
+  const overall =
+    selected === undefined || selected.criteria.length === 0 || !reviewed
+      ? undefined
+      : computeCriteriaReviewOutcome(selected.criteria, [...latestScores.values()])
 
   const openEditor = (next: EditorState): void => {
     setEditor(next)
@@ -156,6 +184,9 @@ export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
             <Space wrap>
               <Typography.Text strong>v{selected.set.version}</Typography.Text>
               <Tag color={statusColor[selected.set.status]}>{selected.set.status}</Tag>
+              {overall !== undefined && (
+                <Tag color={outcomeColor[overall]}>{`review: ${overall}`}</Tag>
+              )}
               {selected.set.confirmedAt !== undefined && (
                 <Typography.Text type="secondary">
                   confirmed {new Date(selected.set.confirmedAt).toLocaleString()}
@@ -239,6 +270,11 @@ export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
                     </Typography.Text>
                     {criterion.category !== undefined && <Tag>{criterion.category}</Tag>}
                     {criterion.required && <Tag color="red">required</Tag>}
+                    {latestScores.has(criterion.id) && (
+                      <Tag color={scoreColor[latestScores.get(criterion.id)?.result ?? 'unknown']}>
+                        {latestScores.get(criterion.id)?.result}
+                      </Tag>
+                    )}
                   </Space>
                 </List.Item>
               )}

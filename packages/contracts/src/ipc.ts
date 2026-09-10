@@ -49,8 +49,12 @@ import {
 import { ipcResultSchema, type IpcResult } from './error'
 import { handoffRecordSchema, type HandoffRecord } from './handoff'
 import {
+  criterionScoreRecordSchema,
+  listCriterionScoresRequestSchema,
   listReviewFindingsRequestSchema,
   reviewFindingRecordSchema,
+  type CriterionScoreRecord,
+  type ListCriterionScoresRequest,
   type ListReviewFindingsRequest,
   type ReviewFindingRecord,
 } from './review'
@@ -241,6 +245,7 @@ export const IPC_CHANNELS = {
   artifactScanRun: 'teskra:artifact:scan-run',
   handoffGet: 'teskra:handoff:get',
   reviewListFindings: 'teskra:review:findings:list',
+  reviewListCriterionScores: 'teskra:review:criterion-scores:list',
   agentListDefinitions: 'teskra:agent:list-definitions',
   agentDetect: 'teskra:agent:detect',
   agentListDetections: 'teskra:agent:list-detections',
@@ -448,6 +453,11 @@ export const reviewListFindingsChannel = channel(
   IPC_CHANNELS.reviewListFindings,
   listReviewFindingsRequestSchema,
   z.array(reviewFindingRecordSchema),
+)
+export const reviewListCriterionScoresChannel = channel(
+  IPC_CHANNELS.reviewListCriterionScores,
+  listCriterionScoresRequestSchema,
+  z.array(criterionScoreRecordSchema),
 )
 export const agentListDefinitionsChannel = channel(
   IPC_CHANNELS.agentListDefinitions,
@@ -725,6 +735,7 @@ export const ipcChannelDefinitions = {
   artifactScanRun: artifactScanRunChannel,
   handoffGet: handoffGetChannel,
   reviewListFindings: reviewListFindingsChannel,
+  reviewListCriterionScores: reviewListCriterionScoresChannel,
   agentListDefinitions: agentListDefinitionsChannel,
   agentDetect: agentDetectChannel,
   agentListDetections: agentListDetectionsChannel,
@@ -827,6 +838,9 @@ export interface TeskraBridge {
   }
   readonly review: {
     listFindings(request: ListReviewFindingsRequest): Promise<IpcResult<ReviewFindingRecord[]>>
+    listCriterionScores(
+      request: ListCriterionScoresRequest,
+    ): Promise<IpcResult<CriterionScoreRecord[]>>
   }
   readonly agent: {
     listDefinitions(): Promise<IpcResult<AgentDefinition[]>>

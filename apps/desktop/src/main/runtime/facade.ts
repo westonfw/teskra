@@ -21,6 +21,7 @@ import type {
   CreateWorkspaceRequest,
   CriteriaSetIdRequest,
   CriterionIdRequest,
+  CriterionScoreRecord,
   DiffResult,
   DoctorReport,
   FutureRuntimePortName,
@@ -41,6 +42,7 @@ import type {
   ListAgentRunsRequest,
   ListArtifactsRequest,
   ListCriteriaSetsRequest,
+  ListCriterionScoresRequest,
   ListPromptTemplatesRequest,
   ListReviewFindingsRequest,
   ListTasksRequest,
@@ -169,9 +171,12 @@ export interface HandoffPort {
   get(request: AgentRunIdRequest): IpcResult<HandoffRecord | null>
 }
 
-/** TASK-053: read access to persisted review findings (ADR-0004). */
+/** TASK-053/054: read access to persisted review findings and criterion scores. */
 export interface ReviewPort {
   listFindings(request: ListReviewFindingsRequest): IpcResult<readonly ReviewFindingRecord[]>
+  listCriterionScores(
+    request: ListCriterionScoresRequest,
+  ): IpcResult<readonly CriterionScoreRecord[]>
 }
 
 export interface GitPort {

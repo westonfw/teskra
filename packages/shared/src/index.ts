@@ -1,4 +1,9 @@
-import type { HandoffParseStatus, HandoffType } from '@teskra/contracts'
+import type {
+  CriteriaReviewOutcome,
+  CriterionResult,
+  HandoffParseStatus,
+  HandoffType,
+} from '@teskra/contracts'
 
 export function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0
@@ -94,4 +99,31 @@ export function buildHandoffContext(
   const nextAction = payload['suggestedNextAction']
   if (isNonEmptyString(nextAction)) lines.push(`Suggested next action: ${nextAction}`)
   return lines.join('\n')
+}
+
+/**
+ * TASK-054 overall review outcome (contracts `CriteriaReviewOutcome`):
+ *
+ * - 'fail' when any REQUIRED criterion scored 'fail' (a required failure is
+ *   never outweighed);
+ * - 'pass' only when every criterion scored 'pass' — an empty criteria set or
+ *   any unreviewed/unverifiable criterion is NOT a pass;
+ * - 'unknown' otherwise (missing scores, explicit 'unknown', or failures on
+ *   optional criteria only) — the conservative middle state.
+ */
+export function computeCriteriaReviewOutcome(
+  criteria: readonly { readonly id: string; readonly required: boolean }[],
+  scores: readonly { readonly criterionId: string; readonly result: CriterionResult }[],
+): CriteriaReviewOutcome {
+  const byCriterion = new Map(scores.map((score) => [score.criterionId, score.result]))
+  if (criteria.some((criterion) => criterion.required && byCriterion.get(criterion.id) === 'fail')) {
+    return 'fail'
+  }
+  if (
+    criteria.length > 0 &&
+    criteria.every((criterion) => byCriterion.get(criterion.id) === 'pass')
+  ) {
+    return 'pass'
+  }
+  return 'unknown'
 }

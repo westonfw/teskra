@@ -27,6 +27,20 @@ describe('WorkerHandoff schema (plan §125 / TASK-051 / ADR-0004)', () => {
     expect(result.success).toBe(true)
   })
 
+  it('accepts review criterion scores and the reviewed run attribution (TASK-054)', () => {
+    const result = workerHandoffSchema.safeParse({
+      runId: 'RUN-005',
+      type: 'review',
+      summary: 'Reviewed run RUN-003.',
+      targetRunId: 'RUN-003',
+      criterionScores: [
+        { criterionId: 'crit-1', result: 'pass', evidence: ['vitest: 42/42'] },
+        { criterionId: 'crit-2', result: 'unknown' },
+      ],
+    })
+    expect(result.success).toBe(true)
+  })
+
   it('rejects missing runId / unknown type / extra keys (strict)', () => {
     expect(workerHandoffSchema.safeParse({ type: 'implementation', summary: 'x' }).success).toBe(
       false,

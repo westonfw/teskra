@@ -147,6 +147,7 @@ function fakeRuntime(): TeskraRuntime {
     },
     review: {
       listFindings: vi.fn(() => ok([])),
+      listCriterionScores: vi.fn(() => ok([])),
     },
     terminal: {
       create: vi.fn(() =>
@@ -424,6 +425,25 @@ describe('Typed IPC Router (TASK-020)', () => {
     const invalid = await ipc.invoke(IPC_CHANNELS.reviewListFindings, {})
     expect(invalid).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
     expect(runtime.review.listFindings).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes criterion score lookups through the runtime facade (TASK-054)', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    expect(await ipc.invoke(IPC_CHANNELS.reviewListCriterionScores, { taskId: 'task-1' })).toEqual({
+      ok: true,
+      data: [],
+    })
+    expect(runtime.review.listCriterionScores).toHaveBeenCalledWith({ taskId: 'task-1' })
+
+    const invalid = await ipc.invoke(IPC_CHANNELS.reviewListCriterionScores, {
+      runId: 'run-1',
+      taskId: 'task-1',
+    })
+    expect(invalid).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    expect(runtime.review.listCriterionScores).toHaveBeenCalledTimes(1)
   })
 
   it('routes reviewer launches through the runtime facade (TASK-052)', async () => {

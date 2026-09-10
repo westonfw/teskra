@@ -275,6 +275,32 @@ describe('ReviewerService (TASK-052)', () => {
     expect(requireOk(fixture.agents.get(result.run.id))).toMatchObject({ status: 'completed' })
   })
 
+  it('injects TESKRA_REVIEW_TARGET_RUN_ID so reviews can attribute scores (TASK-054)', async () => {
+    const fixture = await setup()
+    const implement = await implementRun(fixture, 'impl-1')
+
+    const result = requireOk(
+      await fixture.service.startReview({
+        workspaceId: 'workspace-1',
+        agentType: 'codex',
+        targetRunId: implement.runId,
+        prompt: 'Review the change.',
+      }),
+    )
+
+    expect(result.isolation).toBe('worktree-readonly')
+    const start = vi.mocked(fixture.adapters.codex.start).mock.calls.at(-1)?.[0]
+    expect(start?.environment).toEqual({ TESKRA_REVIEW_TARGET_RUN_ID: implement.runId })
+
+    // Without a resolvable target there is nothing to attribute.
+    const untargeted = requireOk(
+      await fixture.service.startReview({ workspaceId: 'workspace-1', agentType: 'codex' }),
+    )
+    expect(untargeted.isolation).toBe('shared-readonly')
+    const second = vi.mocked(fixture.adapters.codex.start).mock.calls.at(-1)?.[0]
+    expect(second?.environment).toBeUndefined()
+  })
+
   it('falls back to shared-readonly in the main workspace without a review target', async () => {
     const fixture = await setup()
 
