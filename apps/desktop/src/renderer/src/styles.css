@@ -824,6 +824,22 @@ body {
   padding-top: 10px;
 }
 
+.task-modal-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.criteria-set {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.criteria-readonly-note {
+  margin-bottom: 0;
+}
+
 @media (max-width: 1050px) {
   .task-workbench {
     grid-template-columns: 220px minmax(0, 1fr);

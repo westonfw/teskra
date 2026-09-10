@@ -1,18 +1,43 @@
-import { Card, Empty, List, Space, Spin, Tag, Typography } from 'antd'
-import { useCallback, useEffect, useState } from 'react'
+import { CheckOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
+import {
+  Button,
+  Card,
+  Empty,
+  Input,
+  List,
+  Modal,
+  Popconfirm,
+  Select,
+  Space,
+  Spin,
+  Switch,
+  Tag,
+  Typography,
+} from 'antd'
+import { useEffect, useState } from 'react'
 
-import type {
-  AcceptanceCriteriaSetDetail,
-  CriteriaSetStatus,
-  PublicAppError,
+import {
+  CRITERION_CATEGORIES,
+  type AcceptanceCriterion,
+  type CriteriaSetStatus,
+  type CriterionCategory,
 } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../components/app-error-alert'
+import {
+  editableCriteriaDetail,
+  isCriteriaSetEditable,
+  useCriteriaStore,
+} from '../stores/criteria-store'
 
 /**
- * CriteriaPanel (TASK-048) — read-only view of a Task's acceptance criteria
- * versions. Editing (add / edit / remove / confirm) is TASK-049; this panel
- * only proves the domain + IPC path end-to-end.
+ * CriteriaPanel (TASK-049) — full Acceptance Criteria editing UI.
+ *
+ * Draft sets are editable (add / edit / remove / confirm); confirming freezes
+ * the version. Confirmed sets are read-only and offer "New version to edit",
+ * which creates a draft copy of their content (the confirmed set stays
+ * immutable; the old confirmed set is superseded once the new draft is
+ * confirmed).
  */
 
 const statusColor: Record<CriteriaSetStatus, string> = {
@@ -21,92 +46,244 @@ const statusColor: Record<CriteriaSetStatus, string> = {
   superseded: 'orange',
 }
 
+type EditorState =
+  | { readonly mode: 'add' }
+  | { readonly mode: 'edit'; readonly criterion: AcceptanceCriterion }
+
 interface CriteriaPanelProps {
   readonly taskId: string
 }
 
 export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
-  const [details, setDetails] = useState<readonly AcceptanceCriteriaSetDetail[]>()
-  const [error, setError] = useState<PublicAppError>()
+  const details = useCriteriaStore((state) => state.details)
+  const loading = useCriteriaStore((state) => state.loading)
+  const saving = useCriteriaStore((state) => state.saving)
+  const error = useCriteriaStore((state) => state.error)
+  const startSynchronization = useCriteriaStore((state) => state.startSynchronization)
+  const createDraftSet = useCriteriaStore((state) => state.createDraftSet)
+  const addCriterion = useCriteriaStore((state) => state.addCriterion)
+  const updateCriterion = useCriteriaStore((state) => state.updateCriterion)
+  const removeCriterion = useCriteriaStore((state) => state.removeCriterion)
+  const confirmSet = useCriteriaStore((state) => state.confirmSet)
+  const clearError = useCriteriaStore((state) => state.clearError)
 
-  const load = useCallback(async () => {
-    const sets = await window.teskra.criteria.listSets({ taskId })
-    if (!sets.ok) {
-      setError(sets.error)
-      return
-    }
-    const resolved = await Promise.all(
-      sets.data.map((set) => window.teskra.criteria.getSet({ setId: set.id })),
-    )
-    const failure = resolved.find((result) => !result.ok)
-    if (failure !== undefined && !failure.ok) {
-      setError(failure.error)
-      return
-    }
-    setError(undefined)
-    setDetails(
-      resolved.flatMap((result) => (result.ok && result.data !== null ? [result.data] : [])),
-    )
-  }, [taskId])
+  const [selectedSetId, setSelectedSetId] = useState<string>()
+  const [editor, setEditor] = useState<EditorState>()
+  const [description, setDescription] = useState('')
+  const [category, setCategory] = useState<CriterionCategory>()
+  const [required, setRequired] = useState(true)
 
-  useEffect(() => {
-    setDetails(undefined)
-    void load()
-  }, [load])
+  useEffect(() => startSynchronization(taskId), [startSynchronization, taskId])
 
-  useEffect(
-    () =>
-      window.teskra.events.subscribe('task.updated', (payload) => {
-        if (payload.taskId === taskId) void load()
-      }),
-    [load, taskId],
-  )
+  const selected =
+    details.find(({ set }) => set.id === selectedSetId) ??
+    editableCriteriaDetail(details) ??
+    details[0]
+  const editable = selected !== undefined && isCriteriaSetEditable(selected.set)
+
+  const openEditor = (next: EditorState): void => {
+    setEditor(next)
+    setDescription(next.mode === 'edit' ? next.criterion.description : '')
+    setCategory(next.mode === 'edit' ? next.criterion.category : undefined)
+    setRequired(next.mode === 'edit' ? next.criterion.required : true)
+  }
+
+  const handleSave = async (): Promise<void> => {
+    if (editor === undefined || selected === undefined) return
+    const trimmed = description.trim()
+    const succeeded =
+      editor.mode === 'add'
+        ? await addCriterion({
+            setId: selected.set.id,
+            description: trimmed,
+            ...(category === undefined ? {} : { category }),
+            required,
+          })
+        : await updateCriterion({
+            criterionId: editor.criterion.id,
+            description: trimmed,
+            category: category ?? null,
+            required,
+          })
+    if (succeeded) setEditor(undefined)
+  }
+
+  const handleConfirm = (setId: string): void => {
+    Modal.confirm({
+      title: 'Confirm this criteria version?',
+      content:
+        'A confirmed version is immutable. Any further change will require creating a new version, and the previously confirmed version will be superseded.',
+      okText: 'Confirm',
+      onOk: () => confirmSet(setId),
+    })
+  }
 
   return (
-    <Card className="task-detail-card" title="Acceptance Criteria">
+    <Card
+      className="task-detail-card"
+      title="Acceptance Criteria"
+      extra={
+        details.length > 1 && (
+          <Select
+            size="small"
+            value={selected?.set.id}
+            options={details.map(({ set }) => ({
+              value: set.id,
+              label: `v${set.version} · ${set.status}`,
+            }))}
+            onChange={setSelectedSetId}
+          />
+        )
+      }
+    >
       {error !== undefined && (
-        <AppErrorAlert className="page-alert" error={error} onClose={() => setError(undefined)} />
+        <AppErrorAlert className="page-alert" error={error} onClose={clearError} />
       )}
-      {details === undefined ? (
-        <Spin />
-      ) : details.length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No acceptance criteria yet" />
-      ) : (
-        <List
-          dataSource={[...details]}
-          renderItem={(detail) => (
-            <List.Item>
-              <div className="criteria-set">
-                <Space>
-                  <Typography.Text strong>v{detail.set.version}</Typography.Text>
-                  <Tag color={statusColor[detail.set.status]}>{detail.set.status}</Tag>
-                  {detail.set.confirmedAt !== undefined && (
-                    <Typography.Text type="secondary">
-                      confirmed {new Date(detail.set.confirmedAt).toLocaleString()}
+      <Spin spinning={loading}>
+        {selected === undefined ? (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No acceptance criteria yet">
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              loading={saving}
+              onClick={() => void createDraftSet(taskId)}
+            >
+              Create criteria
+            </Button>
+          </Empty>
+        ) : (
+          <div className="criteria-set">
+            <Space wrap>
+              <Typography.Text strong>v{selected.set.version}</Typography.Text>
+              <Tag color={statusColor[selected.set.status]}>{selected.set.status}</Tag>
+              {selected.set.confirmedAt !== undefined && (
+                <Typography.Text type="secondary">
+                  confirmed {new Date(selected.set.confirmedAt).toLocaleString()}
+                </Typography.Text>
+              )}
+              {editable ? (
+                <>
+                  <Button
+                    size="small"
+                    icon={<PlusOutlined />}
+                    disabled={saving}
+                    onClick={() => openEditor({ mode: 'add' })}
+                  >
+                    Add criterion
+                  </Button>
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<CheckOutlined />}
+                    disabled={saving || selected.criteria.length === 0}
+                    onClick={() => handleConfirm(selected.set.id)}
+                  >
+                    Confirm version
+                  </Button>
+                </>
+              ) : (
+                selected.set.status === 'confirmed' && (
+                  <Button
+                    size="small"
+                    icon={<EditOutlined />}
+                    loading={saving}
+                    onClick={() => void createDraftSet(taskId, selected.set.id)}
+                  >
+                    New version to edit
+                  </Button>
+                )
+              )}
+            </Space>
+            {!editable && (
+              <Typography.Paragraph type="secondary" className="criteria-readonly-note">
+                This version is immutable and shown read-only.
+              </Typography.Paragraph>
+            )}
+            <List
+              size="small"
+              dataSource={selected.criteria}
+              locale={{ emptyText: 'No criteria in this version' }}
+              renderItem={(criterion) => (
+                <List.Item
+                  actions={
+                    editable
+                      ? [
+                          <Button
+                            key="edit"
+                            type="text"
+                            size="small"
+                            icon={<EditOutlined />}
+                            disabled={saving}
+                            onClick={() => openEditor({ mode: 'edit', criterion })}
+                          />,
+                          <Popconfirm
+                            key="remove"
+                            title="Remove this criterion?"
+                            onConfirm={() => void removeCriterion(criterion.id)}
+                          >
+                            <Button
+                              type="text"
+                              size="small"
+                              danger
+                              icon={<DeleteOutlined />}
+                              disabled={saving}
+                            />
+                          </Popconfirm>,
+                        ]
+                      : undefined
+                  }
+                >
+                  <Space>
+                    <Typography.Text>
+                      #{criterion.ordinal} {criterion.description}
                     </Typography.Text>
-                  )}
-                </Space>
-                <List
-                  size="small"
-                  dataSource={detail.criteria}
-                  locale={{ emptyText: 'No criteria in this version' }}
-                  renderItem={(criterion) => (
-                    <List.Item>
-                      <Space>
-                        <Typography.Text>
-                          #{criterion.ordinal} {criterion.description}
-                        </Typography.Text>
-                        {criterion.category !== undefined && <Tag>{criterion.category}</Tag>}
-                        {criterion.required && <Tag color="red">required</Tag>}
-                      </Space>
-                    </List.Item>
-                  )}
-                />
-              </div>
-            </List.Item>
-          )}
-        />
-      )}
+                    {criterion.category !== undefined && <Tag>{criterion.category}</Tag>}
+                    {criterion.required && <Tag color="red">required</Tag>}
+                  </Space>
+                </List.Item>
+              )}
+            />
+          </div>
+        )}
+      </Spin>
+
+      <Modal
+        title={editor?.mode === 'edit' ? 'Edit criterion' : 'Add criterion'}
+        open={editor !== undefined}
+        confirmLoading={saving}
+        okButtonProps={{ disabled: description.trim().length === 0 }}
+        onOk={() => void handleSave()}
+        onCancel={() => setEditor(undefined)}
+      >
+        <Space direction="vertical" size={14} className="task-modal-fields">
+          <label>
+            <Typography.Text type="secondary">Description</Typography.Text>
+            <Input.TextArea
+              value={description}
+              autoSize={{ minRows: 2, maxRows: 6 }}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="What must be true for this Task to be accepted?"
+              autoFocus
+            />
+          </label>
+          <label>
+            <Typography.Text type="secondary">Category</Typography.Text>
+            <Select<CriterionCategory>
+              value={category}
+              allowClear
+              placeholder="Optional"
+              options={CRITERION_CATEGORIES.map((value) => ({ value, label: value }))}
+              onChange={(value) => setCategory(value)}
+            />
+          </label>
+          <label>
+            <Typography.Text type="secondary">Required</Typography.Text>
+            <div>
+              <Switch checked={required} onChange={setRequired} />
+            </div>
+          </label>
+        </Space>
+      </Modal>
     </Card>
   )
 }
