@@ -28,8 +28,10 @@ import type { EventBus } from '../events/event-bus'
 import { type InternalAppError, toPublicError } from '../errors'
 import { getLogger } from '../logger'
 import type { TeskraPaths } from '../paths'
+import { buildHandoffContext } from '@teskra/shared'
 import type { AgentRegistry } from './agent-registry'
 import { createAgentOutputBatcher } from './agent-output-batcher'
+import { createHandoffCollector, type HandoffCollector } from './handoff-collector'
 import type { RunLogStore } from './run-log-store'
 import type { CodingAgentAdapter } from './adapters/coding-agent-adapter'
 
@@ -56,6 +58,7 @@ export interface AgentManagerDeps {
   readonly events: EventBus<WorkbenchEvents>
   readonly paths: TeskraPaths
   readonly runLogs: RunLogStore
+  readonly handoffCollector?: HandoffCollector
   readonly createRunId?: () => string
   readonly now?: () => string
   readonly resolveConcurrency?: (workspaceId: string) => IpcResult<ConcurrencyConfig>
@@ -149,6 +152,9 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
   const now = deps.now ?? (() => new Date().toISOString())
   const resolveConcurrency =
     deps.resolveConcurrency ?? (() => ({ ok: true, data: DEFAULT_CONFIG.concurrency }))
+  const handoffCollector =
+    deps.handoffCollector ??
+    createHandoffCollector({ handoffs: deps.handoffs, paths: deps.paths, now })
   let advancingQueue = false
 
   const appendEvent = (
@@ -180,6 +186,24 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     const written = deps.runLogs.writeRun(run)
     if (!written.ok) {
       logger.error({ runId: run.id, error: written.error }, 'Failed to update Run manifest.')
+    }
+  }
+
+  /**
+   * ADR-0004: handoff collection is best-effort — a collector failure is
+   * logged and the Run keeps its terminal status either way.
+   */
+  const collectHandoff = (runId: string): void => {
+    try {
+      const collected = handoffCollector.collect(runId)
+      if (!collected.ok) {
+        logger.error(
+          { runId, error: collected.error },
+          'Handoff collection failed; the Run result is unaffected.',
+        )
+      }
+    } catch (cause) {
+      logger.error({ runId, cause }, 'Handoff collection threw; the Run result is unaffected.')
     }
   }
 
@@ -424,6 +448,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       persistRunManifest(updated.data)
       synchronizeTaskStatus(updated.data)
     }
+    collectHandoff(agentRunId)
     if (status === 'completed') {
       deps.events.emit('agent.completed', { runId: agentRunId, exitCode })
     } else if (status === 'cancelled') {
@@ -688,11 +713,10 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         if (!output.ok) return output
         const handoff = deps.handoffs.getByRunId(run.id)
         if (!handoff.ok) return handoff
-        const summary = handoff.data?.payload?.['summary']
         prompt = buildResumeContext(
           run,
           output.data,
-          typeof summary === 'string' ? summary : undefined,
+          buildHandoffContext(handoff.data),
           request.prompt,
         )
       }
@@ -818,6 +842,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       cancelRequested.delete(runId)
       activeAdapters.delete(runId)
       if (updated.ok && updated.data !== null) persistRunManifest(updated.data)
+      collectHandoff(runId)
       deps.events.emit('agent.cancelled', { runId })
       if (updated.ok && updated.data !== null) synchronizeTaskStatus(updated.data)
       if (!updated.ok) return updated

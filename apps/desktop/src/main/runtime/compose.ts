@@ -374,6 +374,9 @@ export async function composeTeskraRuntime(
       get: (request) => artifactStore.get(request),
       scanRun: (request) => artifactStore.scanRun(request),
     },
+    handoff: {
+      get: ({ runId }) => repositories.handoffs.getByRunId(runId),
+    },
     prompts: {
       list: (request = {}) => {
         const repoRoot = repoRootFor(request.workspaceId)

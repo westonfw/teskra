@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { FUTURE_RUNTIME_PORTS } from '@teskra/contracts'
+import { buildHandoffContext } from '@teskra/shared'
 
 import { createTeskraPaths } from '../paths'
 import type { CommandRunner } from '../process/command-runner'
@@ -227,6 +228,89 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       ok: true,
       data: { status: 'completed', exitCode: 0 },
     })
+
+    // TASK-051: the Fake Agent's file-contract handoff was collected on exit
+    // and is queryable through the facade (ADR-0004).
+    const handoff = composed.data.handoff.get({ runId: exit.runId })
+    expect(handoff).toMatchObject({
+      ok: true,
+      data: {
+        runId: exit.runId,
+        type: 'implementation',
+        parseStatus: 'ok',
+        payload: { summary: 'Fake Agent completed the requested work.' },
+      },
+    })
+
+    // The next Agent can receive the handoff as prompt context: the same
+    // record renders as the {{previousHandoff}} variable (TASK-079).
+    const previousHandoff =
+      handoff.ok && handoff.data !== null ? buildHandoffContext(handoff.data) : undefined
+    expect(previousHandoff).toContain('Fake Agent completed the requested work.')
+    const rendered = composed.data.prompts.render({
+      name: 'review',
+      context: {
+        task: { title: 'Demo Task', description: 'Describe it.' },
+        criteria: ['It works'],
+        role: 'reviewer',
+        memory: '',
+        ...(previousHandoff === undefined ? {} : { previousHandoff }),
+        env: { TESKRA_HANDOFF_PATH: '/tmp/handoff.json', TESKRA_ARTIFACT_DIR: '/tmp/artifacts' },
+      },
+    })
+    expect(rendered.ok).toBe(true)
+    if (rendered.ok) {
+      expect(rendered.data.content).toContain('Fake Agent completed the requested work.')
+    }
+
+    composed.data.dispose()
+  })
+
+  it('degrades gracefully when the Fake Agent writes a malformed handoff (TASK-051)', async () => {
+    const home = makeHome()
+    const composed = await composeTeskraRuntime({
+      paths: createTeskraPaths({ TESKRA_HOME: home }),
+      hostPlatform: 'linux',
+      wslInfo: { available: true },
+      initializeLogs: false,
+      includeDevelopmentAgents: true,
+      fakeAgentScriptPath: join(process.cwd(), 'tools', 'fake-agent.js'),
+    })
+    if (!composed.ok) throw new Error('expected runtime')
+
+    const repo = join(home, 'repo')
+    mkdirSync(repo)
+    const workspace = composed.data.workspace.create({
+      name: 'Demo',
+      runtime: { kind: 'wsl', distro: 'Ubuntu' },
+      path: repo,
+    })
+    if (!workspace.ok) throw new Error(workspace.error.message)
+    const completed = new Promise<{ runId: string; exitCode: number }>((resolveCompleted) => {
+      composed.data.events.subscribe('agent.completed', resolveCompleted)
+    })
+
+    const started = await composed.data.agent.start({
+      workspaceId: workspace.data.id,
+      agentType: 'fake',
+      executionMode: 'attended',
+      environment: { TESKRA_FAKE_SCENARIO: 'bad-handoff' },
+    })
+    expect(started).toMatchObject({ ok: true, data: { status: 'running' } })
+    const exit = await completed
+
+    // The run still completes and the raw handoff file is preserved on disk.
+    expect(composed.data.agent.get({ runId: exit.runId })).toMatchObject({
+      ok: true,
+      data: { status: 'completed', exitCode: 0 },
+    })
+    const handoff = composed.data.handoff.get({ runId: exit.runId })
+    expect(handoff).toMatchObject({ ok: true, data: { parseStatus: 'degraded' } })
+    if (handoff.ok && handoff.data !== null) {
+      expect(readFileSync(handoff.data.rawPath as string, 'utf8')).toBe(
+        '{ definitely-not-valid-json',
+      )
+    }
 
     composed.data.dispose()
   })

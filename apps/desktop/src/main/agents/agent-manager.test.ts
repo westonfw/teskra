@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -723,8 +723,7 @@ describe('AgentManager resume (TASK-042)', () => {
       'agent.resumed',
     ])
     expect(
-      history.ok &&
-        history.data.find(({ eventType }) => eventType === 'agent.resumed')?.payload,
+      history.ok && history.data.find(({ eventType }) => eventType === 'agent.resumed')?.payload,
     ).toMatchObject({ nativeSession: true })
   })
 
@@ -763,8 +762,160 @@ describe('AgentManager resume (TASK-042)', () => {
     expect(relaunched?.prompt).toContain('Additional instructions:\nKeep going')
     const history = context.agentEvents.listByRun('run-1')
     expect(
-      history.ok &&
-        history.data.find(({ eventType }) => eventType === 'agent.resumed')?.payload,
+      history.ok && history.data.find(({ eventType }) => eventType === 'agent.resumed')?.payload,
     ).toMatchObject({ nativeSession: false })
+  })
+})
+
+describe('AgentManager handoff collection (TASK-051, ADR-0004)', () => {
+  const exitRun = (context: TestContext, runId: string, exitCode = 0) => {
+    context.events.emit('process.exited', {
+      processId: `codex:${runId}`,
+      agentRunId: runId,
+      exitCode,
+    })
+  }
+
+  it('collects a valid handoff file as parse_status ok when the run completes', async () => {
+    const context = setup()
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    const files = context.paths.runFiles('run-1')
+    if (!files.ok) throw new Error(files.error.message)
+    writeFileSync(
+      files.data.handoff,
+      JSON.stringify({
+        runId: 'run-1',
+        type: 'implementation',
+        summary: 'Codex finished the work.',
+        filesChanged: ['src/index.ts'],
+      }),
+      'utf8',
+    )
+
+    exitRun(context, 'run-1')
+
+    expect(context.manager.get('run-1')).toMatchObject({
+      ok: true,
+      data: { status: 'completed', exitCode: 0 },
+    })
+    expect(context.handoffs.getByRunId('run-1')).toMatchObject({
+      ok: true,
+      data: {
+        runId: 'run-1',
+        type: 'implementation',
+        parseStatus: 'ok',
+        rawPath: files.data.handoff,
+        payload: { summary: 'Codex finished the work.' },
+      },
+    })
+  })
+
+  it('degrades a malformed handoff, keeps the raw file, and still completes the run', async () => {
+    const context = setup()
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    const files = context.paths.runFiles('run-1')
+    if (!files.ok) throw new Error(files.error.message)
+    writeFileSync(files.data.handoff, '{ definitely-not-valid-json', 'utf8')
+
+    exitRun(context, 'run-1')
+
+    expect(context.manager.get('run-1')).toMatchObject({
+      ok: true,
+      data: { status: 'completed' },
+    })
+    expect(context.handoffs.getByRunId('run-1')).toMatchObject({
+      ok: true,
+      data: { parseStatus: 'degraded', rawPath: files.data.handoff },
+    })
+    expect(readFileSync(files.data.handoff, 'utf8')).toBe('{ definitely-not-valid-json')
+  })
+
+  it('falls back to the terminal log summary when the agent writes no handoff', async () => {
+    const context = setup()
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    context.events.emit('process.output', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      data: 'work done without a handoff\r\n',
+    })
+
+    exitRun(context, 'run-1')
+
+    expect(context.manager.get('run-1')).toMatchObject({
+      ok: true,
+      data: { status: 'completed' },
+    })
+    expect(context.handoffs.getByRunId('run-1')).toMatchObject({
+      ok: true,
+      data: {
+        parseStatus: 'missing',
+        payload: {
+          source: 'terminal.log',
+          summary: 'work done without a handoff',
+        },
+      },
+    })
+  })
+
+  it('collects the handoff even when the run failed', async () => {
+    const context = setup()
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    const files = context.paths.runFiles('run-1')
+    if (!files.ok) throw new Error(files.error.message)
+    writeFileSync(
+      files.data.handoff,
+      JSON.stringify({ runId: 'run-1', type: 'blocker', summary: 'Blocked on credentials.' }),
+      'utf8',
+    )
+
+    exitRun(context, 'run-1', 1)
+
+    expect(context.manager.get('run-1')).toMatchObject({
+      ok: true,
+      data: { status: 'failed', exitCode: 1 },
+    })
+    expect(context.handoffs.getByRunId('run-1')).toMatchObject({
+      ok: true,
+      data: { parseStatus: 'ok', type: 'blocker' },
+    })
+  })
+
+  it('never blocks run completion even if handoff collection throws', async () => {
+    const context = setup()
+    context.manager.dispose()
+    const registry = createBuiltInAgentRegistry()
+    if (!registry.ok) throw new Error(registry.error.message)
+    const manager = createAgentManager({
+      registry: registry.data,
+      adapters: [context.adapters.codex, context.adapters.claude],
+      runs: context.runs,
+      agentEvents: context.agentEvents,
+      handoffs: context.handoffs,
+      workspaces: context.workspaces,
+      tasks: context.tasks,
+      worktrees: context.worktrees,
+      events: context.events,
+      paths: context.paths,
+      runLogs: createRunLogStore({ paths: context.paths }),
+      handoffCollector: {
+        collect: () => {
+          throw new Error('collector exploded')
+        },
+      },
+    })
+    contexts.push({ ...context, manager })
+
+    const started = await manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    if (!started.ok) throw new Error(started.error.message)
+    context.events.emit('process.exited', {
+      processId: `codex:${started.data.id}`,
+      agentRunId: started.data.id,
+      exitCode: 0,
+    })
+
+    expect(manager.get(started.data.id)).toMatchObject({
+      ok: true,
+      data: { status: 'completed', exitCode: 0 },
+    })
   })
 })

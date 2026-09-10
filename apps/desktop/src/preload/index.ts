@@ -59,6 +59,9 @@ const bridge: TeskraBridge = {
     get: (request) => invoke(IPC_CHANNELS.artifactGet, request),
     scanRun: (request) => invoke(IPC_CHANNELS.artifactScanRun, request),
   },
+  handoff: {
+    get: (request) => invoke(IPC_CHANNELS.handoffGet, request),
+  },
   terminal: {
     create: (request) => invoke(IPC_CHANNELS.terminalCreate, request),
     write: (request) => invoke(IPC_CHANNELS.terminalWrite, request),

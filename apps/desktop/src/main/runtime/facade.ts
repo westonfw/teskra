@@ -34,6 +34,7 @@ import type {
   GitRawDiff,
   GitStatus,
   GitWorkspaceRequest,
+  HandoffRecord,
   IpcResult,
   ListRecentWorkspacesRequest,
   ListAgentDetectionsRequest,
@@ -159,6 +160,11 @@ export interface ArtifactPort {
   scanRun(request: ScanRunArtifactsRequest): IpcResult<readonly Artifact[]>
 }
 
+/** TASK-051: read access to collected WorkerHandoff rows (ADR-0004). */
+export interface HandoffPort {
+  get(request: AgentRunIdRequest): IpcResult<HandoffRecord | null>
+}
+
 export interface GitPort {
   status(request: GitWorkspaceRequest): Promise<IpcResult<GitStatus>>
   branch(request: GitWorkspaceRequest): Promise<IpcResult<GitBranch>>
@@ -219,6 +225,7 @@ export interface TeskraRuntime {
   readonly task: TaskPort
   readonly criteria: CriteriaPort
   readonly artifact: ArtifactPort
+  readonly handoff: HandoffPort
   readonly agent: AgentCatalogPort
   readonly git: GitPort
   readonly worktree: WorktreePort

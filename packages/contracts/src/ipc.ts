@@ -43,6 +43,7 @@ import {
   type ScanRunArtifactsRequest,
 } from './artifact'
 import { ipcResultSchema, type IpcResult } from './error'
+import { handoffRecordSchema, type HandoffRecord } from './handoff'
 import {
   acceptanceCriteriaSetDetailSchema,
   acceptanceCriteriaSetSchema,
@@ -228,6 +229,7 @@ export const IPC_CHANNELS = {
   artifactList: 'teskra:artifact:list',
   artifactGet: 'teskra:artifact:get',
   artifactScanRun: 'teskra:artifact:scan-run',
+  handoffGet: 'teskra:handoff:get',
   agentListDefinitions: 'teskra:agent:list-definitions',
   agentDetect: 'teskra:agent:detect',
   agentListDetections: 'teskra:agent:list-detections',
@@ -424,6 +426,11 @@ export const artifactScanRunChannel = channel(
   IPC_CHANNELS.artifactScanRun,
   scanRunArtifactsRequestSchema,
   z.array(artifactSchema),
+)
+export const handoffGetChannel = channel(
+  IPC_CHANNELS.handoffGet,
+  agentRunIdRequestSchema,
+  handoffRecordSchema.nullable(),
 )
 export const agentListDefinitionsChannel = channel(
   IPC_CHANNELS.agentListDefinitions,
@@ -694,6 +701,7 @@ export const ipcChannelDefinitions = {
   artifactList: artifactListChannel,
   artifactGet: artifactGetChannel,
   artifactScanRun: artifactScanRunChannel,
+  handoffGet: handoffGetChannel,
   agentListDefinitions: agentListDefinitionsChannel,
   agentDetect: agentDetectChannel,
   agentListDetections: agentListDetectionsChannel,
@@ -789,6 +797,9 @@ export interface TeskraBridge {
     list(request: ListArtifactsRequest): Promise<IpcResult<Artifact[]>>
     get(request: ArtifactIdRequest): Promise<IpcResult<ArtifactContent | null>>
     scanRun(request: ScanRunArtifactsRequest): Promise<IpcResult<Artifact[]>>
+  }
+  readonly handoff: {
+    get(request: AgentRunIdRequest): Promise<IpcResult<HandoffRecord | null>>
   }
   readonly agent: {
     listDefinitions(): Promise<IpcResult<AgentDefinition[]>>

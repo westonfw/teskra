@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { inspectRunWatchdog, isNonEmptyString } from './index'
+import { buildHandoffContext, inspectRunWatchdog, isNonEmptyString } from './index'
 
 describe('isNonEmptyString', () => {
   it('accepts a non-empty string', () => {
@@ -53,5 +53,55 @@ describe('inspectRunWatchdog (TASK-085)', () => {
       inspectRunWatchdog(hangingFakeRun, Date.parse('2026-09-10T00:10:02.000Z'), 600_000)
         .possiblyStalled,
     ).toBe(true)
+  })
+})
+
+describe('buildHandoffContext (TASK-051)', () => {
+  it('returns undefined when a run has no handoff', () => {
+    expect(buildHandoffContext(undefined)).toBeUndefined()
+    expect(buildHandoffContext(null)).toBeUndefined()
+  })
+
+  it('renders a full WorkerHandoff payload as a compact context block', () => {
+    const context = buildHandoffContext({
+      type: 'implementation',
+      parseStatus: 'ok',
+      payload: {
+        summary: 'Implemented the parser.',
+        filesChanged: ['src/parser.ts', 'src/lexer.ts'],
+        tests: [
+          { name: 'parses', passed: true },
+          { name: 'rejects bad input', passed: false },
+        ],
+        blockers: ['unicode edge cases undecided'],
+        suggestedNextAction: 'Review the parser diff.',
+      },
+    })
+
+    expect(context).toBe(
+      [
+        'Implemented the parser.',
+        'Files changed: src/parser.ts, src/lexer.ts',
+        'Tests: 1 passed, 1 failed',
+        'Blockers: unicode edge cases undecided',
+        'Suggested next action: Review the parser diff.',
+      ].join('\n'),
+    )
+  })
+
+  it('renders partial degraded/missing payloads defensively', () => {
+    expect(
+      buildHandoffContext({
+        type: 'analysis',
+        parseStatus: 'missing',
+        payload: { source: 'terminal.log', summary: 'tail of the run output' },
+      }),
+    ).toBe('tail of the run output')
+    expect(
+      buildHandoffContext({ type: 'analysis', parseStatus: 'degraded', payload: { summary: 42 } }),
+    ).toBe('Handoff (parse_status: degraded) contains no summary.')
+    expect(buildHandoffContext({ type: 'review', parseStatus: 'degraded' })).toBe(
+      'Handoff (parse_status: degraded) contains no summary.',
+    )
   })
 })

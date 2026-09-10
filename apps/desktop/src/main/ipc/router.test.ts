@@ -128,6 +128,9 @@ function fakeRuntime(): TeskraRuntime {
       get: vi.fn(() => ok(null)),
       scanRun: vi.fn(() => ok([])),
     },
+    handoff: {
+      get: vi.fn(() => ok(null)),
+    },
     terminal: {
       create: vi.fn(() =>
         ok({
@@ -368,6 +371,22 @@ describe('Typed IPC Router (TASK-020)', () => {
       data: { severity: 'info', issueCount: 0 },
     })
     expect(runtime.system.doctor).toHaveBeenCalledWith({ workspaceId: 'ws1' })
+  })
+
+  it('routes handoff lookups through the runtime facade (TASK-051)', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    expect(await ipc.invoke(IPC_CHANNELS.handoffGet, { runId: 'run-1' })).toEqual({
+      ok: true,
+      data: null,
+    })
+    expect(runtime.handoff.get).toHaveBeenCalledWith({ runId: 'run-1' })
+
+    const invalid = await ipc.invoke(IPC_CHANNELS.handoffGet, {})
+    expect(invalid).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    expect(runtime.handoff.get).toHaveBeenCalledTimes(1)
   })
 
   it('routes validated Task CRUD through the runtime facade', async () => {

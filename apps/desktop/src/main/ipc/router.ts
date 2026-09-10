@@ -183,6 +183,10 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.artifact.scanRun(request)),
   )
   register(
+    ipcChannelDefinitions.handoffGet,
+    withRuntime((runtime, request) => runtime.handoff.get(request)),
+  )
+  register(
     ipcChannelDefinitions.agentListDefinitions,
     withRuntime((runtime) => runtime.agent.listDefinitions()),
   )

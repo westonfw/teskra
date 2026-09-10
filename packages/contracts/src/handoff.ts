@@ -52,3 +52,20 @@ export const workerHandoffSchema = z.strictObject({
   suggestedNextAction: z.string().optional(),
 })
 export type WorkerHandoff = z.infer<typeof workerHandoffSchema>
+
+/**
+ * Public projection of one persisted `handoffs` row (plan §139.1), safe to
+ * return over Typed IPC. `payload` is a full WorkerHandoff when
+ * `parseStatus` is 'ok' and a partial/fallback record otherwise
+ * ('missing' rows carry a terminal.log summary marked with its source).
+ */
+export const handoffRecordSchema = z.strictObject({
+  id: z.string(),
+  runId: z.string(),
+  type: handoffTypeSchema,
+  payload: z.record(z.string(), z.unknown()).optional(),
+  rawPath: z.string().optional(),
+  parseStatus: handoffParseStatusSchema,
+  createdAt: z.string().datetime(),
+})
+export type HandoffRecord = z.infer<typeof handoffRecordSchema>

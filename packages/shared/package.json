@@ -8,6 +8,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "dependencies": {
+    "@teskra/contracts": "0.1.0"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json"
   }
