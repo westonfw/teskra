@@ -375,6 +375,13 @@ export function createDoctorService(deps: DoctorServiceDeps): DoctorService {
               !worktrees.ok ? worktrees.error.message : runs.ok ? undefined : runs.error.message,
             ),
           )
+        } else if (
+          worktrees.data.length === 0 &&
+          runs.data.every((run) => run.worktreeId === undefined)
+        ) {
+          checks.push(
+            skipped('worktree', 'Worktree', 'No worktrees are recorded for this workspace.'),
+          )
         } else {
           const runById = new Map(runs.data.map((run) => [run.id, run]))
           const worktreeById = new Map(worktrees.data.map((worktree) => [worktree.id, worktree]))

@@ -256,4 +256,112 @@ describe('DoctorService (TASK-041)', () => {
       true,
     )
   })
+
+  it('flags missing worktrees and stale on-disk records with their ids (TASK-044)', async () => {
+    const worktree = (id: string, state: 'missing' | 'orphaned' | 'ready') => ({
+      id,
+      workspaceId: workspace.id,
+      branch: `agent/${id}`,
+      baseBranch: 'main',
+      path: `/data/worktrees/workspace-1/${id}`,
+      state,
+      isolation: 'worktree' as const,
+      createdAt: '2026-09-10T00:00:00.000Z',
+      updatedAt: '2026-09-10T00:00:00.000Z',
+    })
+    const { service } = setup({
+      worktrees: {
+        listByWorkspace: vi.fn(() => ({
+          ok: true as const,
+          data: [
+            worktree('worktree-missing', 'missing'),
+            worktree('worktree-orphaned', 'orphaned'),
+            // DB still says ready, but the directory is gone on disk.
+            worktree('worktree-stale', 'ready'),
+          ],
+        })),
+      },
+      pathExists: (path: string) => path !== '/data/worktrees/workspace-1/worktree-stale',
+    })
+
+    const result = await service.run({ workspaceId: workspace.id })
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        checks: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'worktree',
+            outcome: 'issue',
+            relatedIds: expect.arrayContaining([
+              'worktree-missing',
+              'worktree-orphaned',
+              'worktree-stale',
+            ]),
+          }),
+        ]),
+      },
+    })
+  })
+
+  it('passes the worktree check when recorded worktrees are healthy', async () => {
+    const healthy: AgentRun = {
+      id: 'run-healthy',
+      workspaceId: workspace.id,
+      agentType: 'codex',
+      status: 'completed',
+      worktreeId: 'worktree-healthy',
+      executionMode: 'orchestrated',
+      runDir: '/runs/run-healthy',
+      createdAt: '2026-09-10T00:00:00.000Z',
+      updatedAt: '2026-09-10T00:00:00.000Z',
+    }
+    const { service } = setup({
+      worktrees: {
+        listByWorkspace: vi.fn(() => ({
+          ok: true as const,
+          data: [
+            {
+              id: 'worktree-healthy',
+              workspaceId: workspace.id,
+              runId: 'run-healthy',
+              branch: 'agent/run-healthy',
+              baseBranch: 'main',
+              path: '/data/worktrees/workspace-1/run-healthy',
+              state: 'ready' as const,
+              isolation: 'worktree' as const,
+              createdAt: '2026-09-10T00:00:00.000Z',
+              updatedAt: '2026-09-10T00:00:00.000Z',
+            },
+          ],
+        })),
+      },
+      runs: {
+        listActive: vi.fn(() => ({ ok: true as const, data: [] })),
+        listByWorkspace: vi.fn(() => ({ ok: true as const, data: [healthy] })),
+      },
+    })
+
+    const result = await service.run({ workspaceId: workspace.id })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.checks.find(({ id }) => id === 'worktree')).toMatchObject({
+      outcome: 'pass',
+      severity: 'info',
+    })
+  })
+
+  it('skips the worktree check when the workspace has no worktrees', async () => {
+    const { service } = setup()
+
+    const result = await service.run({ workspaceId: workspace.id })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.checks.find(({ id }) => id === 'worktree')).toMatchObject({
+      outcome: 'skipped',
+      severity: 'info',
+    })
+  })
 })

@@ -221,19 +221,19 @@ describe('WorktreeManager (TASK-043)', () => {
       await fixture.manager.create({ workspaceId: 'workspace-1', runId: 'run-1' }),
     )
 
-    expect(
-      requireOk(await fixture.manager.validate({ worktreeId: created.id })),
-    ).toMatchObject({ state: 'ready' })
+    expect(requireOk(await fixture.manager.validate({ worktreeId: created.id }))).toMatchObject({
+      state: 'ready',
+    })
 
     writeFileSync(join(created.path, 'dirty.txt'), 'agent output\n')
-    expect(
-      requireOk(await fixture.manager.validate({ worktreeId: created.id })),
-    ).toMatchObject({ state: 'dirty' })
+    expect(requireOk(await fixture.manager.validate({ worktreeId: created.id }))).toMatchObject({
+      state: 'dirty',
+    })
 
     rmSync(created.path, { recursive: true, force: true })
-    expect(
-      requireOk(await fixture.manager.validate({ worktreeId: created.id })),
-    ).toMatchObject({ state: 'missing' })
+    expect(requireOk(await fixture.manager.validate({ worktreeId: created.id }))).toMatchObject({
+      state: 'missing',
+    })
 
     // A plain directory that is not a git worktree is orphaned.
     const orphanDir = join(fixture.dataRoot, 'worktrees', 'workspace-1', 'run-orphan')
@@ -249,9 +249,9 @@ describe('WorktreeManager (TASK-043)', () => {
       state: 'ready',
     })
     if (!orphan.ok) throw new Error(orphan.error.message)
-    expect(
-      requireOk(await fixture.manager.validate({ worktreeId: orphan.data.id })),
-    ).toMatchObject({ state: 'orphaned' })
+    expect(requireOk(await fixture.manager.validate({ worktreeId: orphan.data.id }))).toMatchObject(
+      { state: 'orphaned' },
+    )
 
     const unknown = await fixture.manager.validate({ worktreeId: 'nope' })
     expect(unknown).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
@@ -463,6 +463,70 @@ describe('WorktreeManager (TASK-043)', () => {
     expect(exclude?.args?.[1]).toContain('.teskra/handoff/')
     expect(exclude?.args?.[1]).toContain('.teskra/artifacts/')
     expect(exclude?.cwd).toBe('/home/wsluser/repo')
+  })
+})
+
+describe('WorktreeManager lifecycle state (TASK-044)', () => {
+  it('validate overrides a stale DB state with the actual git state and persists it', async () => {
+    const fixture = await setup()
+    const created = requireOk(
+      await fixture.manager.create({ workspaceId: 'workspace-1', runId: 'run-1' }),
+    )
+    const persistedState = () => {
+      const row = fixture.worktrees.getById(created.id)
+      if (!row.ok || row.data === null) throw new Error('worktree row vanished')
+      return row.data.state
+    }
+
+    // DB says ready, the worktree holds uncommitted Agent output → dirty.
+    writeFileSync(join(created.path, 'output.txt'), 'agent output\n')
+    expect(requireOk(await fixture.manager.validate({ worktreeId: created.id }))).toMatchObject({
+      state: 'dirty',
+    })
+    expect(persistedState()).toBe('dirty')
+
+    // DB says dirty (stale), the worktree is clean again → ready.
+    rmSync(join(created.path, 'output.txt'))
+    expect(requireOk(await fixture.manager.validate({ worktreeId: created.id }))).toMatchObject({
+      state: 'ready',
+    })
+    expect(persistedState()).toBe('ready')
+
+    // DB says ready, the directory was deleted out of band → missing.
+    rmSync(created.path, { recursive: true, force: true })
+    expect(requireOk(await fixture.manager.validate({ worktreeId: created.id }))).toMatchObject({
+      state: 'missing',
+    })
+    expect(persistedState()).toBe('missing')
+  })
+
+  it('validate settles a crashed creating record without rewriting terminal states', async () => {
+    const fixture = await setup()
+
+    // Crash mid-create: the record is stuck in creating with nothing on disk.
+    const crashed = fixture.worktrees.create({
+      id: 'worktree-creating',
+      workspaceId: 'workspace-1',
+      runId: 'run-creating',
+      branch: 'agent/run-creating',
+      baseBranch: 'main',
+      path: join(fixture.dataRoot, 'worktrees', 'workspace-1', 'run-creating'),
+      isolation: 'worktree',
+      state: 'creating',
+    })
+    if (!crashed.ok) throw new Error(crashed.error.message)
+    expect(
+      requireOk(await fixture.manager.validate({ worktreeId: crashed.data.id })),
+    ).toMatchObject({ state: 'missing' })
+
+    // Terminal/conflict states stick even when the directory is gone: validate
+    // observes but never rewrites them (merge/cleanup are TASK-045/047).
+    for (const state of ['merged', 'discarded', 'conflict'] as const) {
+      const updated = fixture.worktrees.updateState(crashed.data.id, state)
+      if (!updated.ok) throw new Error(updated.error.message)
+      const validated = requireOk(await fixture.manager.validate({ worktreeId: crashed.data.id }))
+      expect(validated.state).toBe(state)
+    }
   })
 })
 
