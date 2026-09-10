@@ -42,6 +42,17 @@ const bridge: TeskraBridge = {
     get: (request) => invoke(IPC_CHANNELS.taskGet, request),
     list: (request) => invoke(IPC_CHANNELS.taskList, request),
   },
+  criteria: {
+    listSets: (request) => invoke(IPC_CHANNELS.criteriaListSets, request),
+    getSet: (request) => invoke(IPC_CHANNELS.criteriaGetSet, request),
+    createSet: (request) => invoke(IPC_CHANNELS.criteriaCreateSet, request),
+    addCriterion: (request) => invoke(IPC_CHANNELS.criteriaAddCriterion, request),
+    updateCriterion: (request) => invoke(IPC_CHANNELS.criteriaUpdateCriterion, request),
+    removeCriterion: (request) => invoke(IPC_CHANNELS.criteriaRemoveCriterion, request),
+    confirmSet: (request) => invoke(IPC_CHANNELS.criteriaConfirmSet, request),
+    supersedeSet: (request) => invoke(IPC_CHANNELS.criteriaSupersedeSet, request),
+    bindRun: (request) => invoke(IPC_CHANNELS.criteriaBindRun, request),
+  },
   terminal: {
     create: (request) => invoke(IPC_CHANNELS.terminalCreate, request),
     write: (request) => invoke(IPC_CHANNELS.terminalWrite, request),

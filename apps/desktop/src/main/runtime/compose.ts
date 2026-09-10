@@ -47,6 +47,7 @@ import { createProcessManager } from '../process/process-manager'
 import { createReconciliationService } from '../recovery/reconciliation-service'
 import { createResumeService } from '../recovery/resume-service'
 import { createTerminalManager } from '../terminal/terminal-manager'
+import { createCriteriaManager } from '../tasks/criteria-manager'
 import { createTaskManager } from '../tasks/task-manager'
 import { createWorkspaceRuntime, type WslEnvironmentInfo } from '../workspace/runtime'
 import { createWorkspaceManager } from '../workspace/workspace-manager'
@@ -173,6 +174,12 @@ export async function composeTeskraRuntime(
   const taskManager = createTaskManager({
     tasks: repositories.tasks,
     workspaces: repositories.workspaces,
+    events,
+  })
+  const criteriaManager = createCriteriaManager({
+    criteria: repositories.criteria,
+    tasks: repositories.tasks,
+    runs: repositories.agentRuns,
     events,
   })
   const gitManager = createGitManager({
@@ -318,6 +325,17 @@ export async function composeTeskraRuntime(
       delete: ({ id }) => taskManager.delete(id),
       get: ({ id }) => taskManager.get(id),
       list: (request) => taskManager.list(request),
+    },
+    criteria: {
+      listSets: (request) => criteriaManager.listSets(request),
+      getSet: (request) => criteriaManager.getSet(request),
+      createSet: (request) => criteriaManager.createSet(request),
+      addCriterion: (request) => criteriaManager.addCriterion(request),
+      updateCriterion: (request) => criteriaManager.updateCriterion(request),
+      removeCriterion: (request) => criteriaManager.removeCriterion(request),
+      confirmSet: (request) => criteriaManager.confirmSet(request),
+      supersedeSet: (request) => criteriaManager.supersedeSet(request),
+      bindRun: (request) => criteriaManager.bindRun(request),
     },
     git: {
       status: ({ workspaceId }) => gitManager.status(workspaceId),

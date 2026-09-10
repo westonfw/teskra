@@ -1,6 +1,7 @@
 export * from './error'
 export * from './workspace'
 export * from './task'
+export * from './criteria'
 export * from './agent'
 export * from './terminal'
 export * from './git'

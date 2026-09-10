@@ -1,4 +1,8 @@
 import type {
+  AcceptanceCriteriaSet,
+  AcceptanceCriteriaSetDetail,
+  AcceptanceCriterion,
+  AddCriterionRequest,
   AgentDefinition,
   AgentDetectionRequest,
   AgentDetectionResult,
@@ -7,9 +11,13 @@ import type {
   AgentHealth,
   AgentExecutableOverrideRequest,
   ArchiveTaskRequest,
+  BindRunCriteriaRequest,
+  CreateCriteriaSetRequest,
   CreateTaskRequest,
   CreateTerminalRequest,
   CreateWorkspaceRequest,
+  CriteriaSetIdRequest,
+  CriterionIdRequest,
   DiffResult,
   DoctorReport,
   FutureRuntimePortName,
@@ -27,6 +35,7 @@ import type {
   ListRecentWorkspacesRequest,
   ListAgentDetectionsRequest,
   ListAgentRunsRequest,
+  ListCriteriaSetsRequest,
   ListTasksRequest,
   ListTerminalsRequest,
   MergePreflightResult,
@@ -51,6 +60,7 @@ import type {
   TerminalSession,
   TerminalWriteRequest,
   UpdateConfigRequest,
+  UpdateCriterionRequest,
   UpdateTaskRequest,
   Workspace,
   WorkspaceIdRequest,
@@ -114,6 +124,18 @@ export interface TaskPort {
   list(request: ListTasksRequest): IpcResult<readonly Task[]>
 }
 
+export interface CriteriaPort {
+  listSets(request: ListCriteriaSetsRequest): IpcResult<readonly AcceptanceCriteriaSet[]>
+  getSet(request: CriteriaSetIdRequest): IpcResult<AcceptanceCriteriaSetDetail | null>
+  createSet(request: CreateCriteriaSetRequest): IpcResult<AcceptanceCriteriaSetDetail>
+  addCriterion(request: AddCriterionRequest): IpcResult<AcceptanceCriterion>
+  updateCriterion(request: UpdateCriterionRequest): IpcResult<AcceptanceCriterion>
+  removeCriterion(request: CriterionIdRequest): IpcResult<boolean>
+  confirmSet(request: CriteriaSetIdRequest): IpcResult<AcceptanceCriteriaSet>
+  supersedeSet(request: CriteriaSetIdRequest): IpcResult<AcceptanceCriteriaSet>
+  bindRun(request: BindRunCriteriaRequest): IpcResult<AgentRun>
+}
+
 export interface GitPort {
   status(request: GitWorkspaceRequest): Promise<IpcResult<GitStatus>>
   branch(request: GitWorkspaceRequest): Promise<IpcResult<GitBranch>>
@@ -171,6 +193,7 @@ export interface TeskraRuntime {
   /** Main-process event source consumed only by RendererEventBridge. */
   readonly events: RuntimeEventSource
   readonly task: TaskPort
+  readonly criteria: CriteriaPort
   readonly agent: AgentCatalogPort
   readonly git: GitPort
   readonly worktree: WorktreePort

@@ -1,7 +1,14 @@
 import type Database from 'better-sqlite3'
-import { z } from 'zod'
 
-import type { IpcResult } from '@teskra/contracts'
+import {
+  acceptanceCriteriaSetSchema,
+  acceptanceCriterionSchema,
+  type AcceptanceCriteriaSet,
+  type AcceptanceCriterion,
+  type CriteriaSetStatus,
+  type CriterionCategory,
+  type IpcResult,
+} from '@teskra/contracts'
 
 import { execute, isoTimestampSchema, mapRows, nowIso, requireFound, validateRow } from './common'
 
@@ -12,48 +19,29 @@ import { execute, isoTimestampSchema, mapRows, nowIso, requireFound, validateRow
  * a referenced set can only be superseded, never deleted (ON DELETE
  * RESTRICT from workflow_runs / agent_runs).
  *
- * The enum values are pinned by the §139.1 column comments; contracts has no
- * schemas for them yet, so they are declared here next to the table mapping.
+ * The canonical enum/record schemas live in @teskra/contracts (TASK-048);
+ * re-exported here so existing Repository-layer imports keep working.
  */
+export {
+  CRITERIA_SET_STATUSES,
+  CRITERION_CATEGORIES,
+  criteriaSetStatusSchema,
+  criterionCategorySchema,
+  type CriteriaSetStatus,
+  type CriterionCategory,
+} from '@teskra/contracts'
 
-/** §139.1 `acceptance_criteria_sets.status` (line 5337). */
-export const CRITERIA_SET_STATUSES = ['draft', 'confirmed', 'superseded'] as const
-export const criteriaSetStatusSchema = z.enum(CRITERIA_SET_STATUSES)
-export type CriteriaSetStatus = z.infer<typeof criteriaSetStatusSchema>
-
-/** §139.1 `acceptance_criteria.category` (line 5349). */
-export const CRITERION_CATEGORIES = [
-  'functional',
-  'test',
-  'performance',
-  'security',
-  'compatibility',
-  'quality',
-] as const
-export const criterionCategorySchema = z.enum(CRITERION_CATEGORIES)
-export type CriterionCategory = z.infer<typeof criterionCategorySchema>
-
-export const acceptanceCriteriaSetRecordSchema = z.strictObject({
-  id: z.string(),
-  taskId: z.string(),
-  version: z.number().int().positive(),
-  status: criteriaSetStatusSchema,
+/** Row-validating record schema (strict ISO-8601 UTC timestamps). */
+export const acceptanceCriteriaSetRecordSchema = acceptanceCriteriaSetSchema.extend({
   confirmedAt: isoTimestampSchema.optional(),
   createdAt: isoTimestampSchema,
 })
-export type AcceptanceCriteriaSet = z.infer<typeof acceptanceCriteriaSetRecordSchema>
+export type { AcceptanceCriteriaSet, AcceptanceCriterion }
 
-export const acceptanceCriterionRecordSchema = z.strictObject({
-  id: z.string(),
-  criteriaSetId: z.string(),
-  ordinal: z.number().int().positive(),
-  description: z.string(),
-  category: criterionCategorySchema.optional(),
-  /** `required` column is INTEGER 0/1; mapped to boolean here. */
-  required: z.boolean(),
+/** Row-validating record schema (strict ISO-8601 UTC timestamps). */
+export const acceptanceCriterionRecordSchema = acceptanceCriterionSchema.extend({
   createdAt: isoTimestampSchema,
 })
-export type AcceptanceCriterion = z.infer<typeof acceptanceCriterionRecordSchema>
 
 interface CriteriaSetRow {
   id: string

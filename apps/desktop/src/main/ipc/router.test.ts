@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   IPC_CHANNELS,
   ipcChannelDefinitions,
+  type AcceptanceCriteriaSet,
+  type AcceptanceCriterion,
   type IpcResult,
   type Task,
   type Workspace,
@@ -50,6 +52,25 @@ const TASK: Task = {
   updatedAt: '2026-09-10T00:00:00.000Z',
 }
 
+const CRITERIA_SET: AcceptanceCriteriaSet = {
+  id: 'set-1',
+  taskId: 'task1',
+  version: 1,
+  status: 'confirmed',
+  confirmedAt: '2026-09-10T00:00:00.000Z',
+  createdAt: '2026-09-10T00:00:00.000Z',
+}
+
+const CRITERION: AcceptanceCriterion = {
+  id: 'criterion-1',
+  criteriaSetId: 'set-1',
+  ordinal: 1,
+  description: 'All unit tests pass',
+  category: 'test',
+  required: true,
+  createdAt: '2026-09-10T00:00:00.000Z',
+}
+
 const WORKTREE: Worktree = {
   id: 'wt1',
   workspaceId: 'ws1',
@@ -85,6 +106,19 @@ function fakeRuntime(): TeskraRuntime {
       delete: vi.fn(() => ok(true)),
       get: vi.fn(() => ok(TASK)),
       list: vi.fn(() => ok([TASK])),
+    },
+    criteria: {
+      listSets: vi.fn(() => ok([CRITERIA_SET])),
+      getSet: vi.fn(() => ok({ set: CRITERIA_SET, criteria: [CRITERION] })),
+      createSet: vi.fn(() => ok({ set: CRITERIA_SET, criteria: [] })),
+      addCriterion: vi.fn(() => ok(CRITERION)),
+      updateCriterion: vi.fn(() => ok(CRITERION)),
+      removeCriterion: vi.fn(() => ok(true)),
+      confirmSet: vi.fn(() => ok(CRITERIA_SET)),
+      supersedeSet: vi.fn(() => ok(CRITERIA_SET)),
+      bindRun: vi.fn(() => {
+        throw new Error('not used')
+      }),
     },
     terminal: {
       create: vi.fn(() =>

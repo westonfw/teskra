@@ -31,6 +31,7 @@ import { useAgentStore } from '../stores/agent-store'
 import { useTaskStore } from '../stores/task-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
 import { RunWorktreePanel } from './run-worktree-panel'
+import { CriteriaPanel } from './criteria-panel'
 
 const ACTIVE_RUN_STATUSES = new Set<AgentRunStatus>([
   'created',
@@ -249,6 +250,8 @@ export function TaskPage() {
                 </Button>
               </div>
             </Card>
+
+            <CriteriaPanel taskId={selected.id} />
 
             <Card className="task-detail-card" title="Start an Agent Run">
               <Alert

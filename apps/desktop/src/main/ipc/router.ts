@@ -131,6 +131,42 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.task.list(request)),
   )
   register(
+    ipcChannelDefinitions.criteriaListSets,
+    withRuntime((runtime, request) => runtime.criteria.listSets(request)),
+  )
+  register(
+    ipcChannelDefinitions.criteriaGetSet,
+    withRuntime((runtime, request) => runtime.criteria.getSet(request)),
+  )
+  register(
+    ipcChannelDefinitions.criteriaCreateSet,
+    withRuntime((runtime, request) => runtime.criteria.createSet(request)),
+  )
+  register(
+    ipcChannelDefinitions.criteriaAddCriterion,
+    withRuntime((runtime, request) => runtime.criteria.addCriterion(request)),
+  )
+  register(
+    ipcChannelDefinitions.criteriaUpdateCriterion,
+    withRuntime((runtime, request) => runtime.criteria.updateCriterion(request)),
+  )
+  register(
+    ipcChannelDefinitions.criteriaRemoveCriterion,
+    withRuntime((runtime, request) => runtime.criteria.removeCriterion(request)),
+  )
+  register(
+    ipcChannelDefinitions.criteriaConfirmSet,
+    withRuntime((runtime, request) => runtime.criteria.confirmSet(request)),
+  )
+  register(
+    ipcChannelDefinitions.criteriaSupersedeSet,
+    withRuntime((runtime, request) => runtime.criteria.supersedeSet(request)),
+  )
+  register(
+    ipcChannelDefinitions.criteriaBindRun,
+    withRuntime((runtime, request) => runtime.criteria.bindRun(request)),
+  )
+  register(
     ipcChannelDefinitions.agentListDefinitions,
     withRuntime((runtime) => runtime.agent.listDefinitions()),
   )

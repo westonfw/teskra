@@ -30,6 +30,28 @@ import {
 } from './agent'
 import { ipcResultSchema, type IpcResult } from './error'
 import {
+  acceptanceCriteriaSetDetailSchema,
+  acceptanceCriteriaSetSchema,
+  acceptanceCriterionSchema,
+  addCriterionRequestSchema,
+  bindRunCriteriaRequestSchema,
+  createCriteriaSetRequestSchema,
+  criteriaSetIdRequestSchema,
+  criterionIdRequestSchema,
+  listCriteriaSetsRequestSchema,
+  updateCriterionRequestSchema,
+  type AcceptanceCriteriaSet,
+  type AcceptanceCriteriaSetDetail,
+  type AcceptanceCriterion,
+  type AddCriterionRequest,
+  type BindRunCriteriaRequest,
+  type CreateCriteriaSetRequest,
+  type CriteriaSetIdRequest,
+  type CriterionIdRequest,
+  type ListCriteriaSetsRequest,
+  type UpdateCriterionRequest,
+} from './criteria'
+import {
   doctorReportSchema,
   runDoctorRequestSchema,
   type DoctorReport,
@@ -169,6 +191,15 @@ export const IPC_CHANNELS = {
   taskDelete: 'teskra:task:delete',
   taskGet: 'teskra:task:get',
   taskList: 'teskra:task:list',
+  criteriaListSets: 'teskra:criteria:list-sets',
+  criteriaGetSet: 'teskra:criteria:get-set',
+  criteriaCreateSet: 'teskra:criteria:create-set',
+  criteriaAddCriterion: 'teskra:criteria:add-criterion',
+  criteriaUpdateCriterion: 'teskra:criteria:update-criterion',
+  criteriaRemoveCriterion: 'teskra:criteria:remove-criterion',
+  criteriaConfirmSet: 'teskra:criteria:confirm-set',
+  criteriaSupersedeSet: 'teskra:criteria:supersede-set',
+  criteriaBindRun: 'teskra:criteria:bind-run',
   agentListDefinitions: 'teskra:agent:list-definitions',
   agentDetect: 'teskra:agent:detect',
   agentListDetections: 'teskra:agent:list-detections',
@@ -298,6 +329,51 @@ export const taskListChannel = channel(
   IPC_CHANNELS.taskList,
   listTasksRequestSchema,
   z.array(taskSchema),
+)
+export const criteriaListSetsChannel = channel(
+  IPC_CHANNELS.criteriaListSets,
+  listCriteriaSetsRequestSchema,
+  z.array(acceptanceCriteriaSetSchema),
+)
+export const criteriaGetSetChannel = channel(
+  IPC_CHANNELS.criteriaGetSet,
+  criteriaSetIdRequestSchema,
+  acceptanceCriteriaSetDetailSchema.nullable(),
+)
+export const criteriaCreateSetChannel = channel(
+  IPC_CHANNELS.criteriaCreateSet,
+  createCriteriaSetRequestSchema,
+  acceptanceCriteriaSetDetailSchema,
+)
+export const criteriaAddCriterionChannel = channel(
+  IPC_CHANNELS.criteriaAddCriterion,
+  addCriterionRequestSchema,
+  acceptanceCriterionSchema,
+)
+export const criteriaUpdateCriterionChannel = channel(
+  IPC_CHANNELS.criteriaUpdateCriterion,
+  updateCriterionRequestSchema,
+  acceptanceCriterionSchema,
+)
+export const criteriaRemoveCriterionChannel = channel(
+  IPC_CHANNELS.criteriaRemoveCriterion,
+  criterionIdRequestSchema,
+  z.boolean(),
+)
+export const criteriaConfirmSetChannel = channel(
+  IPC_CHANNELS.criteriaConfirmSet,
+  criteriaSetIdRequestSchema,
+  acceptanceCriteriaSetSchema,
+)
+export const criteriaSupersedeSetChannel = channel(
+  IPC_CHANNELS.criteriaSupersedeSet,
+  criteriaSetIdRequestSchema,
+  acceptanceCriteriaSetSchema,
+)
+export const criteriaBindRunChannel = channel(
+  IPC_CHANNELS.criteriaBindRun,
+  bindRunCriteriaRequestSchema,
+  agentRunSchema,
 )
 export const agentListDefinitionsChannel = channel(
   IPC_CHANNELS.agentListDefinitions,
@@ -545,6 +621,15 @@ export const ipcChannelDefinitions = {
   taskDelete: taskDeleteChannel,
   taskGet: taskGetChannel,
   taskList: taskListChannel,
+  criteriaListSets: criteriaListSetsChannel,
+  criteriaGetSet: criteriaGetSetChannel,
+  criteriaCreateSet: criteriaCreateSetChannel,
+  criteriaAddCriterion: criteriaAddCriterionChannel,
+  criteriaUpdateCriterion: criteriaUpdateCriterionChannel,
+  criteriaRemoveCriterion: criteriaRemoveCriterionChannel,
+  criteriaConfirmSet: criteriaConfirmSetChannel,
+  criteriaSupersedeSet: criteriaSupersedeSetChannel,
+  criteriaBindRun: criteriaBindRunChannel,
   agentListDefinitions: agentListDefinitionsChannel,
   agentDetect: agentDetectChannel,
   agentListDetections: agentListDetectionsChannel,
@@ -621,6 +706,17 @@ export interface TeskraBridge {
     delete(request: TaskIdRequest): Promise<IpcResult<boolean>>
     get(request: TaskIdRequest): Promise<IpcResult<Task | null>>
     list(request: ListTasksRequest): Promise<IpcResult<Task[]>>
+  }
+  readonly criteria: {
+    listSets(request: ListCriteriaSetsRequest): Promise<IpcResult<AcceptanceCriteriaSet[]>>
+    getSet(request: CriteriaSetIdRequest): Promise<IpcResult<AcceptanceCriteriaSetDetail | null>>
+    createSet(request: CreateCriteriaSetRequest): Promise<IpcResult<AcceptanceCriteriaSetDetail>>
+    addCriterion(request: AddCriterionRequest): Promise<IpcResult<AcceptanceCriterion>>
+    updateCriterion(request: UpdateCriterionRequest): Promise<IpcResult<AcceptanceCriterion>>
+    removeCriterion(request: CriterionIdRequest): Promise<IpcResult<boolean>>
+    confirmSet(request: CriteriaSetIdRequest): Promise<IpcResult<AcceptanceCriteriaSet>>
+    supersedeSet(request: CriteriaSetIdRequest): Promise<IpcResult<AcceptanceCriteriaSet>>
+    bindRun(request: BindRunCriteriaRequest): Promise<IpcResult<AgentRun>>
   }
   readonly agent: {
     listDefinitions(): Promise<IpcResult<AgentDefinition[]>>
