@@ -12,6 +12,7 @@ import { Button, Empty, Layout, Menu, Select, Space, Tag, Typography } from 'ant
 import { useEffect } from 'react'
 
 import { SettingsPage } from '../settings/settings-page'
+import { ChangesPage } from '../git/changes-page'
 import { TaskPage } from '../tasks/task-page'
 import { AgentCatalogPage } from '../agents/agent-catalog-page'
 import type { SettingsSectionRegistry } from '../settings/registry'
@@ -49,28 +50,6 @@ function WorkspaceRequired({ feature }: { readonly feature: string }) {
           Choose workspace
         </Button>
       </Empty>
-    </div>
-  )
-}
-
-function PendingFeature({
-  title,
-  description,
-}: {
-  readonly title: string
-  readonly description: string
-}) {
-  return (
-    <div className="workbench-page centered-empty">
-      <Empty
-        image={Empty.PRESENTED_IMAGE_SIMPLE}
-        description={
-          <Space direction="vertical" size={4}>
-            <Typography.Text strong>{title}</Typography.Text>
-            <Typography.Text type="secondary">{description}</Typography.Text>
-          </Space>
-        }
-      />
     </div>
   )
 }
@@ -140,14 +119,7 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
             {page === 'workspace' && <WorkspacePage />}
             {page === 'tasks' && needsWorkspace('Tasks', <TaskPage />)}
             {page === 'runs' && needsWorkspace('Runs', <AgentCatalogPage />)}
-            {page === 'git' &&
-              needsWorkspace(
-                'Git',
-                <PendingFeature
-                  title="Git status is not connected yet"
-                  description="Repository status, diffs, and review tools arrive with GitManager."
-                />,
-              )}
+            {page === 'git' && needsWorkspace('Git', <ChangesPage />)}
             {page === 'settings' && (
               <SettingsPage registry={settingsRegistry} workspaceId={workspace?.id} />
             )}

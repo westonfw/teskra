@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -64,6 +64,7 @@ describe('GitManager (TASK-035)', () => {
     if (!workspace.ok) throw new Error(workspace.error.message)
     const events = createEventBus<WorkbenchEvents>()
     const changed = vi.fn()
+    const openPath = vi.fn(async () => '')
     events.subscribe('git.changed', changed)
     const manager = createGitManager({
       commands,
@@ -71,13 +72,21 @@ describe('GitManager (TASK-035)', () => {
       events,
       resolveRuntime: (candidate) =>
         createWorkspaceRuntime(candidate.runtime, { hostPlatform: 'linux' }),
+      openPath,
     })
 
     writeFileSync(join(directory, 'hello.txt'), 'hello\n')
+    mkdirSync(join(directory, 'node_modules', 'ignored-package'), { recursive: true })
+    writeFileSync(join(directory, 'node_modules', 'ignored-package', 'index.js'), 'ignored\n')
     expect(await manager.status('workspace-1')).toMatchObject({
       ok: true,
       data: { branch: 'main', clean: false, entries: [{ code: '??', path: 'hello.txt' }] },
     })
+    expect(await manager.openFile({ workspaceId: 'workspace-1', path: 'hello.txt' })).toEqual({
+      ok: true,
+      data: undefined,
+    })
+    expect(openPath).toHaveBeenCalledWith(join(directory, 'hello.txt'))
     const committed = await manager.commit({
       workspaceId: 'workspace-1',
       message: 'feat: initial',
@@ -121,6 +130,7 @@ describe('GitManager (TASK-035)', () => {
         data: { command: 'powershell.exe', args: [] },
       }),
       resolveCwd: (path) => path,
+      resolveHostPath: (path) => ({ ok: true, data: path }),
       resolveDataRoot: () => 'C:\\data',
       validate: () => ({ ok: true, data: { kind: 'windows', hostNative: true } }),
     }
@@ -169,5 +179,11 @@ describe('GitManager (TASK-035)', () => {
       ok: false,
       error: { code: 'VALIDATION_FAILED' },
     })
+    expect(await manager.openFile({ workspaceId: 'workspace-1', path: '../secret' })).toMatchObject(
+      {
+        ok: false,
+        error: { code: 'VALIDATION_FAILED' },
+      },
+    )
   })
 })

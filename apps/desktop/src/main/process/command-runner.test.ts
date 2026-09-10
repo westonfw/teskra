@@ -191,6 +191,7 @@ describe('CommandRunner (TASK-012)', () => {
       }),
       resolveTerminal: () => ({ ok: true, data: { command: 'bash', args: ['-l'] } }),
       resolveCwd: (p) => p,
+      resolveHostPath: (p) => ({ ok: true, data: p }),
       resolveDataRoot: () => '/unused',
       validate: () => ({ ok: true, data: { kind: 'wsl', hostNative: false } }),
     }

@@ -46,6 +46,11 @@ export type DiffResult = z.infer<typeof diffResultSchema>
 export const gitWorkspaceRequestSchema = z.strictObject({ workspaceId: z.string().min(1) })
 export type GitWorkspaceRequest = z.infer<typeof gitWorkspaceRequestSchema>
 
+export const gitOpenFileRequestSchema = gitWorkspaceRequestSchema.extend({
+  path: z.string().min(1),
+})
+export type GitOpenFileRequest = z.infer<typeof gitOpenFileRequestSchema>
+
 export const gitStatusEntrySchema = z.strictObject({
   path: z.string(),
   code: z.string().min(1),

@@ -5,6 +5,7 @@ import type {
   GitCommitResult,
   GitDiffRequest,
   GitLogRequest,
+  GitOpenFileRequest,
   GitRawDiff,
   GitStatus,
   IpcResult,
@@ -27,6 +28,7 @@ export interface GitManager {
   diff(request: GitDiffRequest): Promise<IpcResult<GitRawDiff>>
   log(request: GitLogRequest): Promise<IpcResult<GitCommit[]>>
   commit(request: GitCommitRequest): Promise<IpcResult<GitCommitResult>>
+  openFile(request: GitOpenFileRequest): Promise<IpcResult<void>>
   /** Internal DiffService primitive for files not yet tracked by Git. */
   untrackedDiff(workspaceId: string, path: string): Promise<IpcResult<GitRawDiff>>
 }
@@ -36,6 +38,7 @@ export interface GitManagerDeps {
   readonly workspaces: WorkspaceRepository
   readonly events: EventBus<WorkbenchEvents>
   readonly resolveRuntime: (workspace: Workspace) => IpcResult<WorkspaceRuntime>
+  readonly openPath?: (path: string) => Promise<string>
 }
 
 interface GitContext {
@@ -186,6 +189,10 @@ export function createGitManager(deps: GitManagerDeps): GitManager {
         '--porcelain=v2',
         '--branch',
         '-z',
+        '--',
+        '.',
+        ':(exclude)node_modules',
+        ':(exclude)**/node_modules/**',
       ])
       return result.ok ? { ok: true, data: parseStatus(result.data.stdout) } : result
     },
@@ -255,6 +262,50 @@ export function createGitManager(deps: GitManagerDeps): GitManager {
       return {
         ok: true,
         data: { hash: revision.data.stdout.trim(), output: committed.data.stdout.trim() },
+      }
+    },
+
+    async openFile(request) {
+      if (!validRelativePath(request.path)) {
+        return fail({
+          code: 'VALIDATION_FAILED',
+          message: 'Git file paths must stay inside the workspace.',
+          retryable: false,
+          detail: `rejected path=${JSON.stringify(request.path)}`,
+        })
+      }
+      if (deps.openPath === undefined) {
+        return fail({
+          code: 'CAPABILITY_NOT_AVAILABLE',
+          message: 'Opening files is not available in this environment.',
+          retryable: false,
+          detail: 'GitManager was composed without an openPath adapter',
+        })
+      }
+      const context = contextFor(request.workspaceId)
+      if (!context.ok) return context
+      const runtimePath = context.data.runtime.resolveCwd(
+        `${context.data.cwd}/${request.path.replaceAll('\\', '/')}`,
+      )
+      const hostPath = context.data.runtime.resolveHostPath(runtimePath)
+      if (!hostPath.ok) return hostPath
+      try {
+        const errorMessage = await deps.openPath(hostPath.data)
+        return errorMessage.length === 0
+          ? { ok: true, data: undefined }
+          : fail({
+              code: 'UNKNOWN',
+              message: 'The file could not be opened.',
+              retryable: true,
+              detail: errorMessage,
+            })
+      } catch (cause) {
+        return fail({
+          code: 'UNKNOWN',
+          message: 'The file could not be opened.',
+          retryable: true,
+          cause,
+        })
       }
     },
 

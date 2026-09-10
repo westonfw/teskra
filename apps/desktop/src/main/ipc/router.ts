@@ -207,6 +207,10 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.git.changes(request)),
   )
   register(
+    ipcChannelDefinitions.gitOpenFile,
+    withRuntime((runtime, request) => runtime.git.openFile(request)),
+  )
+  register(
     ipcChannelDefinitions.terminalCreate,
     withRuntime((runtime, request) => runtime.terminal.create(request)),
   )

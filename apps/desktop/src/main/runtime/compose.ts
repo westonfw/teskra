@@ -172,6 +172,7 @@ export async function composeTeskraRuntime(
     workspaces: repositories.workspaces,
     events,
     resolveRuntime: (workspace) => runtimeFor(workspace.runtime),
+    openPath: options.openPath,
   })
   const diffService = createDiffService({ git: gitManager })
   const agentDetector = createAgentDetector({
@@ -235,6 +236,7 @@ export async function composeTeskraRuntime(
       log: (request) => gitManager.log(request),
       commit: (request) => gitManager.commit(request),
       changes: ({ workspaceId }) => diffService.get(workspaceId),
+      openFile: (request) => gitManager.openFile(request),
     },
     agent: {
       listDefinitions: () => ({ ok: true, data: registeredAgents.data.list() }),

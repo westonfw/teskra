@@ -18,6 +18,7 @@ const runtime: WorkspaceRuntime = {
   resolveCommand: (command, args = [], cwd) => ({ executable: command, args, cwd }),
   resolveTerminal: () => ({ ok: true, data: { command: 'bash', args: [] } }),
   resolveCwd: (path) => path,
+  resolveHostPath: (path) => ({ ok: true, data: path }),
   resolveDataRoot: () => '/home/test',
   validate: () => ({ ok: true, data: { kind: 'wsl', hostNative: true } }),
 }

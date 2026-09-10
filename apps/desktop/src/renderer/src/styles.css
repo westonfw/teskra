@@ -390,6 +390,125 @@ body {
   place-items: center;
 }
 
+.changes-heading {
+  align-items: center;
+}
+
+.diff-additions {
+  color: #73d13d !important;
+}
+
+.diff-deletions {
+  color: #ff7875 !important;
+}
+
+.changes-empty,
+.changes-file-card,
+.changes-diff-card {
+  background: rgba(20, 27, 40, 0.86);
+  border-color: rgba(255, 255, 255, 0.065);
+}
+
+.changes-empty {
+  display: grid;
+  min-height: 320px;
+  place-items: center;
+}
+
+.changes-workbench {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.42fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.changes-file-card .ant-card-body {
+  padding: 6px;
+}
+
+.changes-file-list {
+  max-height: calc(100vh - 270px);
+  overflow: auto;
+}
+
+.change-file-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+}
+
+.change-file-row:hover,
+.change-file-row-selected {
+  background: rgba(101, 207, 197, 0.08);
+}
+
+.change-file-row-selected {
+  box-shadow: inset 2px 0 #65cfc5;
+}
+
+.change-file-path {
+  overflow: hidden;
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.change-file-stats {
+  display: flex;
+  gap: 5px;
+  font-size: 11px;
+}
+
+.changes-diff-card .ant-card-body {
+  padding: 0;
+}
+
+.large-diff-notice {
+  padding: 10px 16px;
+  color: #ffd666;
+  font-size: 12px;
+  background: rgba(250, 173, 20, 0.08);
+  border-bottom: 1px solid rgba(250, 173, 20, 0.18);
+}
+
+.diff-patch {
+  min-height: 420px;
+  max-height: calc(100vh - 270px);
+  margin: 0;
+  padding: 18px;
+  overflow: auto;
+  color: #c9d4e2;
+  font:
+    12px/1.58 'Cascadia Mono',
+    Consolas,
+    monospace;
+  white-space: pre;
+  background: #090d14;
+  tab-size: 2;
+}
+
+@media (max-width: 1000px) {
+  .changes-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .changes-file-list,
+  .diff-patch {
+    max-height: 440px;
+  }
+}
+
 .workbench-content > .terminal-keep-alive-visible {
   position: absolute;
   inset: 0;

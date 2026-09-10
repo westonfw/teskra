@@ -60,6 +60,10 @@ describe('WindowsRuntime', () => {
       args: ['codex'],
     })
     expect(runtime.resolveCwd('C:/dev/demo/')).toBe('C:\\dev\\demo\\')
+    expect(runtime.resolveHostPath('C:/dev/demo/file.ts')).toEqual({
+      ok: true,
+      data: 'C:\\dev\\demo\\file.ts',
+    })
     expect(runtime.resolveDataRoot()).toBe(HOST_HOME)
     expect(runtime.validate()).toEqual({
       ok: true,
@@ -93,6 +97,10 @@ describe('WslRuntime (Windows host)', () => {
     expect(runtime.resolveCommand('git', ['status'], '/home/u/demo')).toEqual({
       executable: 'wsl.exe',
       args: ['-d', 'Ubuntu-24.04', '--cd', '/home/u/demo', 'git', 'status'],
+    })
+    expect(runtime.resolveHostPath('/home/u/demo/file.ts')).toEqual({
+      ok: true,
+      data: '\\\\wsl.localhost\\Ubuntu-24.04\\home\\u\\demo\\file.ts',
     })
     expect(resolveExecutableLookup(runtime, 'claude')).toEqual({
       executable: 'wsl.exe',
@@ -219,6 +227,10 @@ describe('NativePosixRuntime (wsl workspace on a Linux/WSL2 dev host)', () => {
     expect(resolveExecutableLookup(runtime, 'claude')).toEqual({
       executable: 'which',
       args: ['claude'],
+    })
+    expect(runtime.resolveHostPath('/home/u/demo/file.ts')).toEqual({
+      ok: true,
+      data: '/home/u/demo/file.ts',
     })
     expect(runtime.resolveDataRoot()).toBe(HOST_HOME)
     expect(runtime.validate().ok).toBe(true)

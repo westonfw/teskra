@@ -36,6 +36,7 @@ import {
   gitCommitSchema,
   gitDiffRequestSchema,
   gitLogRequestSchema,
+  gitOpenFileRequestSchema,
   gitRawDiffSchema,
   gitStatusSchema,
   gitWorkspaceRequestSchema,
@@ -46,6 +47,7 @@ import {
   type GitCommitResult,
   type GitDiffRequest,
   type GitLogRequest,
+  type GitOpenFileRequest,
   type GitRawDiff,
   type GitStatus,
   type GitWorkspaceRequest,
@@ -158,6 +160,7 @@ export const IPC_CHANNELS = {
   gitLog: 'teskra:git:log',
   gitCommit: 'teskra:git:commit',
   gitChanges: 'teskra:git:changes',
+  gitOpenFile: 'teskra:git:open-file',
   terminalCreate: 'teskra:terminal:create',
   terminalWrite: 'teskra:terminal:write',
   terminalResize: 'teskra:terminal:resize',
@@ -349,6 +352,11 @@ export const gitChangesChannel = channel(
   gitWorkspaceRequestSchema,
   diffResultSchema,
 )
+export const gitOpenFileChannel = channel(
+  IPC_CHANNELS.gitOpenFile,
+  gitOpenFileRequestSchema,
+  voidResponseSchema,
+)
 export const terminalCreateChannel = channel(
   IPC_CHANNELS.terminalCreate,
   createTerminalRequestSchema,
@@ -468,6 +476,7 @@ export const ipcChannelDefinitions = {
   gitLog: gitLogChannel,
   gitCommit: gitCommitChannel,
   gitChanges: gitChangesChannel,
+  gitOpenFile: gitOpenFileChannel,
   terminalCreate: terminalCreateChannel,
   terminalWrite: terminalWriteChannel,
   terminalResize: terminalResizeChannel,
@@ -541,6 +550,7 @@ export interface TeskraBridge {
     log(request: GitLogRequest): Promise<IpcResult<GitCommit[]>>
     commit(request: GitCommitRequest): Promise<IpcResult<GitCommitResult>>
     changes(request: GitWorkspaceRequest): Promise<IpcResult<DiffResult>>
+    openFile(request: GitOpenFileRequest): Promise<IpcResult<void>>
   }
   readonly runtime: {
     info(): Promise<IpcResult<SystemInfo>>

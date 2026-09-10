@@ -132,6 +132,7 @@ function fakeRuntime(): TeskraRuntime {
       log: vi.fn(async () => ok([])),
       commit: vi.fn(async () => ok({ hash: 'abc', output: 'committed' })),
       changes: vi.fn(async () => ok({ files: [] })),
+      openFile: vi.fn(async () => ok(undefined)),
     },
     system: {
       info: vi.fn(() => ok({ appVersion: '0.1.0', runtimeVersion: '22.0.0' })),

@@ -72,6 +72,7 @@ const bridge: TeskraBridge = {
     log: (request) => invoke(IPC_CHANNELS.gitLog, request),
     commit: (request) => invoke(IPC_CHANNELS.gitCommit, request),
     changes: (request) => invoke(IPC_CHANNELS.gitChanges, request),
+    openFile: (request) => invoke(IPC_CHANNELS.gitOpenFile, request),
   },
   runtime: {
     info: () => invoke(IPC_CHANNELS.runtimeInfo),

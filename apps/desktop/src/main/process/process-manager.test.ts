@@ -90,6 +90,7 @@ const runtime: WorkspaceRuntime = {
   }),
   resolveTerminal: () => ({ ok: true, data: { command: 'bash', args: ['-l'] } }),
   resolveCwd: (path) => path,
+  resolveHostPath: (path) => ({ ok: true, data: path }),
   resolveDataRoot: () => '/home/test/.teskra',
   validate: () => ({ ok: true, data: { kind: 'wsl', hostNative: false } }),
 }

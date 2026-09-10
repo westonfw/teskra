@@ -18,6 +18,7 @@ import type {
   GitCommitResult,
   GitDiffRequest,
   GitLogRequest,
+  GitOpenFileRequest,
   GitRawDiff,
   GitStatus,
   GitWorkspaceRequest,
@@ -106,6 +107,7 @@ export interface GitPort {
   log(request: GitLogRequest): Promise<IpcResult<readonly GitCommit[]>>
   commit(request: GitCommitRequest): Promise<IpcResult<GitCommitResult>>
   changes(request: GitWorkspaceRequest): Promise<IpcResult<DiffResult>>
+  openFile(request: GitOpenFileRequest): Promise<IpcResult<void>>
 }
 
 export interface AgentCatalogPort {

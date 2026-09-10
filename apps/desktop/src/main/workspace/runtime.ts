@@ -74,6 +74,8 @@ export interface WorkspaceRuntime {
   resolveTerminal(shell: TerminalShell): IpcResult<TerminalLaunchSpec>
   /** Normalizes a runtime-side path into the cwd form resolveCommand expects. */
   resolveCwd(path: string): string
+  /** Maps a runtime-side path into a path that host desktop applications can open. */
+  resolveHostPath(path: string): IpcResult<string>
   /**
    * ADR-0003: the data root inside THIS runtime's filesystem. For WSL
    * workspaces this is the WSL-side `~/.teskra`, not a `C:\…` path.
@@ -163,6 +165,9 @@ function createWindowsRuntime(
     resolveCwd(path) {
       return win32.normalize(path)
     },
+    resolveHostPath(path) {
+      return { ok: true, data: win32.normalize(path) }
+    },
     resolveDataRoot() {
       return paths.home()
     },
@@ -199,6 +204,9 @@ function createNativePosixRuntime(ref: WorkspaceRuntimeRef, paths: TeskraPaths):
     },
     resolveCwd(path) {
       return posix.normalize(path)
+    },
+    resolveHostPath(path) {
+      return { ok: true, data: posix.normalize(path) }
     },
     resolveDataRoot() {
       return paths.home()
@@ -248,6 +256,27 @@ function createWslRuntime(
     },
     resolveCwd(path) {
       return posix.normalize(path)
+    },
+    resolveHostPath(path) {
+      if (distro === undefined || /[\\/]/u.test(distro)) {
+        return fail({
+          code: 'WSL_DISTRO_NOT_FOUND',
+          message: 'Choose a WSL distribution before opening files.',
+          retryable: false,
+          detail: `cannot map WSL path for distro=${JSON.stringify(distro)}`,
+        })
+      }
+      const normalized = posix.normalize(path)
+      if (!normalized.startsWith('/')) {
+        return fail({
+          code: 'VALIDATION_FAILED',
+          message: 'Only absolute WSL paths can be opened by the host.',
+          retryable: false,
+          detail: `cannot map non-absolute WSL path=${JSON.stringify(path)}`,
+        })
+      }
+      const hostTail = normalized.slice(1).replaceAll('/', '\\')
+      return { ok: true, data: `\\\\wsl.localhost\\${distro}\\${hostTail}` }
     },
     resolveDataRoot() {
       // ADR-0003: WSL worktrees must live inside the WSL filesystem, so the
