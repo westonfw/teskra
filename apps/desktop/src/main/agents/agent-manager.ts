@@ -26,6 +26,7 @@ import { getLogger } from '../logger'
 import type { TeskraPaths } from '../paths'
 import type { AgentRegistry } from './agent-registry'
 import { createAgentOutputBatcher } from './agent-output-batcher'
+import type { RunLogStore } from './run-log-store'
 import type { CodingAgentAdapter } from './adapters/coding-agent-adapter'
 
 export interface AgentManager {
@@ -48,6 +49,7 @@ export interface AgentManagerDeps {
   readonly worktrees: WorktreeRepository
   readonly events: EventBus<WorkbenchEvents>
   readonly paths: TeskraPaths
+  readonly runLogs: RunLogStore
   readonly createRunId?: () => string
   readonly now?: () => string
   readonly resolveConcurrency?: (workspaceId: string) => IpcResult<ConcurrencyConfig>
@@ -125,24 +127,46 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     eventType: string,
     payload: Record<string, unknown>,
   ): void => {
-    const next = deps.agentEvents.nextSeq(runId)
-    if (!next.ok) {
-      logger.error({ runId, eventType, error: next.error }, 'Failed to allocate Agent event seq.')
+    const timestamp = now()
+    const durable = deps.runLogs.appendEvent(runId, eventType, payload, timestamp)
+    if (!durable.ok) {
+      logger.error({ runId, eventType, error: durable.error }, 'Failed to persist durable event.')
       return
     }
-    const appended = deps.agentEvents.append({ runId, seq: next.data, eventType, payload }, now())
+    const appended = deps.agentEvents.append(
+      {
+        runId,
+        seq: durable.data.seq,
+        eventType,
+        payload: durable.data.payload,
+      },
+      timestamp,
+    )
     if (!appended.ok) {
       logger.error({ runId, eventType, error: appended.error }, 'Failed to persist Agent event.')
     }
   }
 
+  const persistRunManifest = (run: AgentRun): void => {
+    const written = deps.runLogs.writeRun(run)
+    if (!written.ok) {
+      logger.error({ runId: run.id, error: written.error }, 'Failed to update Run manifest.')
+    }
+  }
+
   const outputBatcher = createAgentOutputBatcher((runId, data) => {
+    const terminal = deps.runLogs.appendTerminal(runId, data)
+    if (!terminal.ok) {
+      logger.error({ runId, error: terminal.error }, 'Failed to append durable terminal output.')
+    }
+    appendEvent(runId, 'agent.output', { data })
     const timestamp = now()
     const updated = deps.runs.update(runId, { lastOutputAt: timestamp }, timestamp)
     if (!updated.ok) {
       logger.error({ runId, error: updated.error }, 'Failed to update Agent output time.')
+    } else if (updated.data !== null) {
+      persistRunManifest(updated.data)
     }
-    appendEvent(runId, 'agent.output', { data })
     deps.events.emit('agent.output', { runId, data })
   })
 
@@ -181,13 +205,14 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
 
   const finishFailed = (runId: string, error: PublicAppError): IpcResult<AgentRun> => {
     const finishedAt = now()
+    appendEvent(runId, 'agent.failed', { error })
     const updated = deps.runs.update(
       runId,
       { status: 'failed', finishedAt, error: { ...error } },
       finishedAt,
     )
     activeAdapters.delete(runId)
-    appendEvent(runId, 'agent.failed', { error })
+    if (updated.ok && updated.data !== null) persistRunManifest(updated.data)
     deps.events.emit('agent.failed', { runId, error })
     if (!updated.ok) return updated
     if (updated.data === null) return missing('Agent run', runId)
@@ -216,6 +241,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     if (afterStart.data !== null && isTerminal(afterStart.data)) {
       return { ok: true, data: afterStart.data }
     }
+    appendEvent(request.runId, 'agent.started', { processId: started.data.processId })
     const running = deps.runs.update(
       request.runId,
       {
@@ -235,7 +261,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       return running
     }
     if (running.data === null) return missing('Agent run', request.runId)
-    appendEvent(request.runId, 'agent.started', { processId: started.data.processId })
+    persistRunManifest(running.data)
     deps.events.emit('agent.started', { runId: request.runId })
     return { ok: true, data: running.data }
   }
@@ -316,6 +342,11 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
             retryable: true,
           }
         : undefined
+    appendEvent(agentRunId, `agent.${status}`, {
+      exitCode,
+      ...(signal === undefined ? {} : { signal }),
+      ...(error === undefined ? {} : { error }),
+    })
     const updated = deps.runs.update(
       agentRunId,
       {
@@ -330,13 +361,9 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     if (!updated.ok) {
       logger.error({ runId: agentRunId, error: updated.error }, 'Failed to finish Agent run.')
     } else if (updated.data !== null) {
+      persistRunManifest(updated.data)
       synchronizeTaskStatus(updated.data)
     }
-    appendEvent(agentRunId, `agent.${status}`, {
-      exitCode,
-      ...(signal === undefined ? {} : { signal }),
-      ...(error === undefined ? {} : { error }),
-    })
     if (status === 'completed') {
       deps.events.emit('agent.completed', { runId: agentRunId, exitCode })
     } else if (status === 'cancelled') {
@@ -475,6 +502,11 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         timestamp,
       )
       if (!created.ok) return created
+      const initialized = deps.runLogs.initialize(created.data)
+      if (!initialized.ok) {
+        deps.runs.delete(runId)
+        return initialized
+      }
       appendEvent(runId, 'agent.created', { agentType: definition.id, executionMode })
       deps.events.emit('agent.created', { runId })
       synchronizeTaskStatus(created.data)
@@ -519,10 +551,11 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       outputBatcher.flush(runId)
       const sent = await adapter.send(runId, data)
       if (!sent.ok) return sent
+      appendEvent(runId, 'agent.input', { data })
       const timestamp = now()
       const updated = deps.runs.update(runId, { lastInputAt: timestamp }, timestamp)
       if (!updated.ok) return updated
-      appendEvent(runId, 'agent.input', { data })
+      if (updated.data !== null) persistRunManifest(updated.data)
       return { ok: true, data: undefined }
     },
 
@@ -534,8 +567,9 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       if (current.data.status === 'queued') {
         pendingRuns.delete(runId)
         const finishedAt = now()
-        const updated = deps.runs.update(runId, { status: 'cancelled', finishedAt }, finishedAt)
         appendEvent(runId, 'agent.cancelled', {})
+        const updated = deps.runs.update(runId, { status: 'cancelled', finishedAt }, finishedAt)
+        if (updated.ok && updated.data !== null) persistRunManifest(updated.data)
         deps.events.emit('agent.cancelled', { runId })
         if (updated.ok && updated.data !== null) synchronizeTaskStatus(updated.data)
         scheduleQueueAdvance()
@@ -568,10 +602,11 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       }
 
       const finishedAt = now()
+      appendEvent(runId, 'agent.cancelled', {})
       const updated = deps.runs.update(runId, { status: 'cancelled', finishedAt }, finishedAt)
       cancelRequested.delete(runId)
       activeAdapters.delete(runId)
-      appendEvent(runId, 'agent.cancelled', {})
+      if (updated.ok && updated.data !== null) persistRunManifest(updated.data)
       deps.events.emit('agent.cancelled', { runId })
       if (updated.ok && updated.data !== null) synchronizeTaskStatus(updated.data)
       if (!updated.ok) return updated

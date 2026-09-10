@@ -18,6 +18,18 @@ function stubPaths(): TeskraPaths {
     db: () => ({ ok: true, data: `${HOST_HOME}/db/teskra.sqlite` }),
     logs: () => ({ ok: true, data: `${HOST_HOME}/logs` }),
     runDir: (runId) => ({ ok: true, data: `${HOST_HOME}/runs/${runId}` }),
+    runFiles: (runId) => ({
+      ok: true,
+      data: {
+        directory: `${HOST_HOME}/runs/${runId}`,
+        manifest: `${HOST_HOME}/runs/${runId}/run.json`,
+        events: `${HOST_HOME}/runs/${runId}/events.jsonl`,
+        terminal: `${HOST_HOME}/runs/${runId}/terminal.log`,
+        handoff: `${HOST_HOME}/runs/${runId}/handoff.json`,
+        diff: `${HOST_HOME}/runs/${runId}/diff.patch`,
+        artifacts: `${HOST_HOME}/runs/${runId}/artifacts`,
+      },
+    }),
     worktreeRoot: (wsId) => ({ ok: true, data: `${HOST_HOME}/worktrees/${wsId}` }),
     config: () => `${HOST_HOME}/config.json`,
     repoConfig: (repoRoot) => `${repoRoot}/.teskra/config.json`,

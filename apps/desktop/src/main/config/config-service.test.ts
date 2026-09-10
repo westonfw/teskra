@@ -21,6 +21,18 @@ function stubPaths(): TeskraPaths {
     db: () => ({ ok: true, data: '/teskra-home/db/teskra.sqlite' }),
     logs: () => ({ ok: true, data: '/teskra-home/logs' }),
     runDir: (runId) => ({ ok: true, data: `/teskra-home/runs/${runId}` }),
+    runFiles: (runId) => ({
+      ok: true,
+      data: {
+        directory: `/teskra-home/runs/${runId}`,
+        manifest: `/teskra-home/runs/${runId}/run.json`,
+        events: `/teskra-home/runs/${runId}/events.jsonl`,
+        terminal: `/teskra-home/runs/${runId}/terminal.log`,
+        handoff: `/teskra-home/runs/${runId}/handoff.json`,
+        diff: `/teskra-home/runs/${runId}/diff.patch`,
+        artifacts: `/teskra-home/runs/${runId}/artifacts`,
+      },
+    }),
     worktreeRoot: (wsId) => ({ ok: true, data: `/teskra-home/worktrees/${wsId}` }),
     config: () => GLOBAL_CONFIG_PATH,
     repoConfig: (repoRoot) => `${repoRoot}/.teskra/config.json`,

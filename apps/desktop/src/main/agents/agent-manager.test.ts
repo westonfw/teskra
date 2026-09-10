@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -27,6 +27,7 @@ import { createAgentManager, type AgentManager } from './agent-manager'
 import { createBuiltInAgentRegistry } from './agent-registry'
 import { CLAUDE_AGENT } from './definitions/claude'
 import { CODEX_AGENT } from './definitions/codex'
+import { createRunLogStore } from './run-log-store'
 
 interface TestContext {
   readonly connection: Database.Database
@@ -86,7 +87,7 @@ function mockAdapter(
   }
 }
 
-function setup(concurrency?: ConcurrencyConfig): TestContext {
+function setup(concurrency?: ConcurrencyConfig, failAgentEventWrites = false): TestContext {
   const connection = new Database(':memory:')
   connection.pragma('foreign_keys = ON')
   const migrated = migrateDatabase(connection)
@@ -118,16 +119,30 @@ function setup(concurrency?: ConcurrencyConfig): TestContext {
   homes.push(home)
   let nextRun = 1
   const paths = createTeskraPaths({ TESKRA_HOME: home })
+  const persistedEvents = failAgentEventWrites
+    ? {
+        ...agentEvents,
+        append: () => ({
+          ok: false as const,
+          error: {
+            code: 'UNKNOWN' as const,
+            message: 'SQLite unavailable.',
+            retryable: true,
+          },
+        }),
+      }
+    : agentEvents
   const manager = createAgentManager({
     registry: registry.data,
     adapters: [codex, claude],
     runs,
-    agentEvents,
+    agentEvents: persistedEvents,
     workspaces,
     tasks,
     worktrees,
     events,
     paths,
+    runLogs: createRunLogStore({ paths }),
     createRunId: () => `run-${String(nextRun++)}`,
     now: () => '2026-09-10T00:00:02.000Z',
     ...(concurrency === undefined
@@ -257,6 +272,13 @@ describe('AgentManager (TASK-028)', () => {
       'agent.input',
       'agent.failed',
     ])
+    const files = context.paths.runFiles('run-1')
+    if (!files.ok) throw new Error(files.error.message)
+    const durableSeq = readFileSync(files.data.events, 'utf8')
+      .trimEnd()
+      .split('\n')
+      .map((line) => (JSON.parse(line) as { seq: number }).seq)
+    expect(history.ok && history.data.map(({ seq }) => seq)).toEqual(durableSeq)
   })
 
   it('persists character-level PTY bursts as one output batch before exit', async () => {
@@ -316,6 +338,7 @@ describe('AgentManager (TASK-028)', () => {
       worktrees: context.worktrees,
       events: createEventBus(),
       paths: context.paths,
+      runLogs: createRunLogStore({ paths: context.paths }),
     })
 
     expect(restarted.list({ workspaceId: 'workspace-1' })).toMatchObject({
@@ -332,6 +355,42 @@ describe('AgentManager (TASK-028)', () => {
       'agent.completed',
     ])
     restarted.dispose()
+  })
+
+  it('keeps the raw JSONL and terminal log when SQLite event writes fail', async () => {
+    const context = setup(undefined, true)
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    context.events.emit('process.output', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      data: 'durable output\r\n',
+    })
+    context.events.emit('process.exited', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      exitCode: 0,
+    })
+
+    const files = context.paths.runFiles('run-1')
+    if (!files.ok) throw new Error(files.error.message)
+    expect(readFileSync(files.data.terminal, 'utf8')).toBe('durable output\r\n')
+    const durableEvents = readFileSync(files.data.events, 'utf8')
+      .trimEnd()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { seq: number; eventType: string })
+    expect(durableEvents.map(({ seq }) => seq)).toEqual([1, 2, 3, 4])
+    expect(durableEvents.map(({ eventType }) => eventType)).toEqual([
+      'agent.created',
+      'agent.started',
+      'agent.output',
+      'agent.completed',
+    ])
+    expect(context.agentEvents.listByRun('run-1')).toEqual({ ok: true, data: [] })
+    expect(JSON.parse(readFileSync(files.data.manifest, 'utf8'))).toMatchObject({
+      id: 'run-1',
+      status: 'completed',
+      exitCode: 0,
+    })
   })
 
   it('links Task history and derives Task status across multiple Runs', async () => {

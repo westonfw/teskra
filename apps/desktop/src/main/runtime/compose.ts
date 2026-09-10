@@ -15,6 +15,7 @@ import { createDefaultAgentRegistry } from '../agents/agent-registry'
 import { createClaudeAdapter } from '../agents/adapters/claude-adapter'
 import { createCodexAdapter } from '../agents/adapters/codex-adapter'
 import { createFakeAgentAdapter } from '../agents/adapters/fake-agent-adapter'
+import { createRunLogStore } from '../agents/run-log-store'
 import { openDatabase, type TeskraDatabase } from '../db'
 import { migrateDatabase } from '../db/migrations'
 import {
@@ -212,6 +213,7 @@ export async function composeTeskraRuntime(
     worktrees: repositories.worktrees,
     events,
     paths,
+    runLogs: createRunLogStore({ paths }),
     resolveConcurrency: (workspaceId) => {
       const resolved = config.resolve({ workspaceId })
       return resolved.ok ? { ok: true, data: resolved.data.config.concurrency } : resolved

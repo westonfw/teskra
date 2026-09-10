@@ -54,6 +54,19 @@ describe('createTeskraPaths (ADR-0003 / TASK-078)', () => {
 
     expect(paths.runDir('run-1')).toEqual({ ok: true, data: join(dir, 'runs', 'run-1') })
     expect(existsSync(join(dir, 'runs', 'run-1'))).toBe(true)
+    expect(paths.runFiles('run-1')).toEqual({
+      ok: true,
+      data: {
+        directory: join(dir, 'runs', 'run-1'),
+        manifest: join(dir, 'runs', 'run-1', 'run.json'),
+        events: join(dir, 'runs', 'run-1', 'events.jsonl'),
+        terminal: join(dir, 'runs', 'run-1', 'terminal.log'),
+        handoff: join(dir, 'runs', 'run-1', 'handoff.json'),
+        diff: join(dir, 'runs', 'run-1', 'diff.patch'),
+        artifacts: join(dir, 'runs', 'run-1', 'artifacts'),
+      },
+    })
+    expect(existsSync(join(dir, 'runs', 'run-1', 'artifacts'))).toBe(true)
 
     expect(paths.worktreeRoot('ws-1')).toEqual({
       ok: true,

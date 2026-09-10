@@ -9,6 +9,16 @@ import { type InternalAppError, toPublicError } from './errors'
 /** The single directory name every Teskra data root is built from. */
 export const TESKRA_DATA_DIR = '.teskra'
 
+export interface RunPaths {
+  readonly directory: string
+  readonly manifest: string
+  readonly events: string
+  readonly terminal: string
+  readonly handoff: string
+  readonly diff: string
+  readonly artifacts: string
+}
+
 /**
  * Central path resolution for the Teskra data root (ADR-0003 / TASK-078).
  *
@@ -31,6 +41,8 @@ export interface TeskraPaths {
   logs(): IpcResult<string>
   /** <home>/runs/<runId> — created on demand. */
   runDir(runId: string): IpcResult<string>
+  /** Every durable path owned by one Agent Run; creates the artifacts directory. */
+  runFiles(runId: string): IpcResult<RunPaths>
   /** <home>/worktrees/<workspaceId>/ — created on demand. */
   worktreeRoot(workspaceId: string): IpcResult<string>
   /** <home>/config.json — resolution only; the file may not exist. */
@@ -83,6 +95,13 @@ export function createTeskraPaths(env: NodeJS.ProcessEnv = process.env): TeskraP
     }
   }
 
+  const runDir = (runId: string): IpcResult<string> => {
+    if (!isValidSegment(runId)) {
+      return { ok: false, error: toPublicError(invalidSegmentError('runId', runId)) }
+    }
+    return ensureDir(join(home(), 'runs', runId))
+  }
+
   return {
     home,
     db() {
@@ -92,11 +111,24 @@ export function createTeskraPaths(env: NodeJS.ProcessEnv = process.env): TeskraP
     logs() {
       return ensureDir(join(home(), 'logs'))
     },
-    runDir(runId: string) {
-      if (!isValidSegment(runId)) {
-        return { ok: false, error: toPublicError(invalidSegmentError('runId', runId)) }
+    runDir,
+    runFiles(runId) {
+      const directory = runDir(runId)
+      if (!directory.ok) return directory
+      const artifacts = ensureDir(join(directory.data, 'artifacts'))
+      if (!artifacts.ok) return artifacts
+      return {
+        ok: true,
+        data: {
+          directory: directory.data,
+          manifest: join(directory.data, 'run.json'),
+          events: join(directory.data, 'events.jsonl'),
+          terminal: join(directory.data, 'terminal.log'),
+          handoff: join(directory.data, 'handoff.json'),
+          diff: join(directory.data, 'diff.patch'),
+          artifacts: artifacts.data,
+        },
       }
-      return ensureDir(join(home(), 'runs', runId))
     },
     worktreeRoot(workspaceId: string) {
       if (!isValidSegment(workspaceId)) {
