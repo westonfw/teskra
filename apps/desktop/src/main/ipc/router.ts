@@ -267,6 +267,10 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => requireRuntimePort(runtime, request.name)),
   )
   register(
+    ipcChannelDefinitions.doctorRun,
+    withRuntime((runtime, request) => runtime.system.doctor(request)),
+  )
+  register(
     ipcChannelDefinitions.settingsResolveConfig,
     withRuntime((runtime, request) => runtime.settings.resolveConfig(request)),
   )

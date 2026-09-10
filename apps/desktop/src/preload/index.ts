@@ -83,6 +83,7 @@ const bridge: TeskraBridge = {
     getDefaultWslDistribution: () => invoke(IPC_CHANNELS.runtimeGetDefaultWsl),
     setDefaultWslDistribution: (request) => invoke(IPC_CHANNELS.runtimeSetDefaultWsl, request),
     requireCapability: (request) => invoke(IPC_CHANNELS.runtimeRequireCapability, request),
+    doctor: (request = {}) => invoke(IPC_CHANNELS.doctorRun, request),
   },
   settings: {
     resolveConfig: (request = {}) => invoke(IPC_CHANNELS.settingsResolveConfig, request),

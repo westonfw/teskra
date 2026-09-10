@@ -6,6 +6,7 @@ import {
   GitlabOutlined,
   PlayCircleOutlined,
   ProjectOutlined,
+  SafetyCertificateOutlined,
   SettingOutlined,
 } from '@ant-design/icons'
 import { Button, Empty, Layout, Menu, Select, Space, Tag, Typography } from 'antd'
@@ -13,6 +14,7 @@ import { useEffect } from 'react'
 
 import { SettingsPage } from '../settings/settings-page'
 import { ChangesPage } from '../git/changes-page'
+import { DoctorPage } from '../doctor/doctor-page'
 import { TaskPage } from '../tasks/task-page'
 import { AgentCatalogPage } from '../agents/agent-catalog-page'
 import type { SettingsSectionRegistry } from '../settings/registry'
@@ -27,6 +29,7 @@ const navigation = [
   { key: 'runs', label: 'Runs', icon: <PlayCircleOutlined /> },
   { key: 'git', label: 'Git', icon: <GitlabOutlined /> },
   { key: 'terminal', label: 'Terminal', icon: <CodeOutlined /> },
+  { key: 'doctor', label: 'Doctor', icon: <SafetyCertificateOutlined /> },
   { key: 'settings', label: 'Settings', icon: <SettingOutlined /> },
 ] satisfies ReadonlyArray<{ key: WorkbenchPage; label: string; icon: React.ReactNode }>
 
@@ -120,6 +123,7 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
             {page === 'tasks' && needsWorkspace('Tasks', <TaskPage />)}
             {page === 'runs' && needsWorkspace('Runs', <AgentCatalogPage />)}
             {page === 'git' && needsWorkspace('Git', <ChangesPage />)}
+            {page === 'doctor' && <DoctorPage />}
             {page === 'settings' && (
               <SettingsPage registry={settingsRegistry} workspaceId={workspace?.id} />
             )}

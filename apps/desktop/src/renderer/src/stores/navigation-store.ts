@@ -6,6 +6,7 @@ export const WORKBENCH_PAGES = [
   'runs',
   'git',
   'terminal',
+  'doctor',
   'settings',
 ] as const
 export type WorkbenchPage = (typeof WORKBENCH_PAGES)[number]

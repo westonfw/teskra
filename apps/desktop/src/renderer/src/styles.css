@@ -624,6 +624,32 @@ body {
   margin-inline-start: 22px;
 }
 
+.doctor-report,
+.doctor-report > .ant-space-item,
+.doctor-check-list,
+.doctor-check-card {
+  width: 100%;
+}
+
+.doctor-check-list .ant-list-item {
+  padding: 6px 0;
+  border: 0;
+}
+
+.doctor-check-card {
+  background: rgba(20, 27, 40, 0.86);
+  border-color: rgba(255, 255, 255, 0.065);
+}
+
+.doctor-check-card .ant-card-body > .ant-typography {
+  margin-bottom: 4px;
+}
+
+.doctor-related-ids {
+  display: flex;
+  margin-top: 10px;
+}
+
 .run-row {
   display: grid;
   min-width: 0;

@@ -148,6 +148,14 @@ function fakeRuntime(): TeskraRuntime {
       listWslDistributions: vi.fn(async () => ok([])),
       getDefaultWslDistribution: vi.fn(async () => ok<string | null>(null)),
       setDefaultWslDistribution: vi.fn(async (name: string | null) => ok(name)),
+      doctor: vi.fn(async () =>
+        ok({
+          generatedAt: '2026-09-10T00:00:00.000Z',
+          severity: 'info' as const,
+          issueCount: 0,
+          checks: [],
+        }),
+      ),
     },
     settings: {
       resolveConfig: vi.fn(() =>
@@ -265,6 +273,18 @@ describe('Typed IPC Router (TASK-020)', () => {
       data: [],
     })
     expect(runtime.agent.list).toHaveBeenCalledWith({ activeOnly: true })
+  })
+
+  it('routes a validated Doctor request through the runtime facade', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    expect(await ipc.invoke(IPC_CHANNELS.doctorRun, { workspaceId: 'ws1' })).toMatchObject({
+      ok: true,
+      data: { severity: 'info', issueCount: 0 },
+    })
+    expect(runtime.system.doctor).toHaveBeenCalledWith({ workspaceId: 'ws1' })
   })
 
   it('routes validated Task CRUD through the runtime facade', async () => {

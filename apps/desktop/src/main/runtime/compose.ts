@@ -35,6 +35,7 @@ import {
 import { createEventBus } from '../events/event-bus'
 import { createDiffService } from '../git/diff-service'
 import { createGitManager } from '../git/git-manager'
+import { createDoctorService } from '../doctor/doctor-service'
 import { getLogger, initializeLogging } from '../logger'
 import { createTeskraPaths, type TeskraPaths } from '../paths'
 import { createCommandRunner, type CommandRunner } from '../process/command-runner'
@@ -186,6 +187,20 @@ export async function composeTeskraRuntime(
   const agentHealth = createAgentHealthManager({
     registry: registeredAgents.data,
     detector: agentDetector,
+  })
+  const doctor = createDoctorService({
+    paths,
+    database,
+    commands,
+    wsl,
+    registry: registeredAgents.data,
+    detector: agentDetector,
+    workspaces: repositories.workspaces,
+    worktrees: repositories.worktrees,
+    runs: repositories.agentRuns,
+    processes: processManager,
+    git: gitManager,
+    resolveRuntime: (workspace) => runtimeFor(workspace.runtime),
   })
   const adapterOptions = {
     processes: processManager,
@@ -357,6 +372,7 @@ export async function composeTeskraRuntime(
       listWslDistributions: () => wsl.listDistributions(),
       getDefaultWslDistribution: () => wsl.getDefaultDistribution(),
       setDefaultWslDistribution: (name) => wsl.setDefaultDistribution(name),
+      doctor: (request) => doctor.run(request),
     },
     settings: {
       resolveConfig: (request = {}) => config.resolve(request),

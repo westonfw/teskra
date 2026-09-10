@@ -11,6 +11,7 @@ import type {
   CreateTerminalRequest,
   CreateWorkspaceRequest,
   DiffResult,
+  DoctorReport,
   FutureRuntimePortName,
   GitBranch,
   GitCommit,
@@ -31,6 +32,7 @@ import type {
   OpenWorkspaceRequest,
   OpenSystemDirectoryRequest,
   ResolveConfigRequest,
+  RunDoctorRequest,
   ResolvedConfig,
   SelectWorkspaceDirectoryRequest,
   SendAgentRunInputRequest,
@@ -83,6 +85,7 @@ export interface SystemPort {
   listWslDistributions(): Promise<IpcResult<readonly WslDistribution[]>>
   getDefaultWslDistribution(): Promise<IpcResult<string | null>>
   setDefaultWslDistribution(name: string | null): Promise<IpcResult<string | null>>
+  doctor(request?: RunDoctorRequest): Promise<IpcResult<DoctorReport>>
 }
 
 export interface SettingsPort {

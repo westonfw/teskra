@@ -27,6 +27,12 @@ import {
   type StartAgentRunRequest,
 } from './agent'
 import { ipcResultSchema, type IpcResult } from './error'
+import {
+  doctorReportSchema,
+  runDoctorRequestSchema,
+  type DoctorReport,
+  type RunDoctorRequest,
+} from './doctor'
 import type { WorkbenchEventName, WorkbenchEvents } from './event'
 import {
   diffResultSchema,
@@ -178,6 +184,7 @@ export const IPC_CHANNELS = {
   settingsResolveConfig: 'teskra:settings:config:resolve',
   settingsUpdateConfig: 'teskra:settings:config:update',
   systemOpenDirectory: 'teskra:system:directory:open',
+  doctorRun: 'teskra:doctor:run',
 } as const
 export type IpcChannelName = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
 
@@ -442,6 +449,11 @@ export const systemOpenDirectoryChannel = channel(
   openSystemDirectoryRequestSchema,
   voidResponseSchema,
 )
+export const doctorRunChannel = channel(
+  IPC_CHANNELS.doctorRun,
+  runDoctorRequestSchema,
+  doctorReportSchema,
+)
 
 export const ipcChannelDefinitions = {
   ping: pingChannel,
@@ -494,6 +506,7 @@ export const ipcChannelDefinitions = {
   settingsResolveConfig: settingsResolveConfigChannel,
   settingsUpdateConfig: settingsUpdateConfigChannel,
   systemOpenDirectory: systemOpenDirectoryChannel,
+  doctorRun: doctorRunChannel,
 } as const
 
 export interface TeskraBridge {
@@ -563,6 +576,7 @@ export interface TeskraBridge {
       request: SetDefaultWslDistributionRequest,
     ): Promise<IpcResult<string | null>>
     requireCapability(request: RequireRuntimePortRequest): Promise<IpcResult<unknown>>
+    doctor(request?: RunDoctorRequest): Promise<IpcResult<DoctorReport>>
   }
   readonly settings: {
     resolveConfig(request?: ResolveConfigRequest): Promise<IpcResult<ResolvedConfig>>
