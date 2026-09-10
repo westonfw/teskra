@@ -840,6 +840,21 @@ body {
   margin-bottom: 0;
 }
 
+.artifact-detail {
+  width: 100%;
+}
+
+.artifact-content {
+  max-height: 50vh;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 6px;
+}
+
 @media (max-width: 1050px) {
   .task-workbench {
     grid-template-columns: 220px minmax(0, 1fr);

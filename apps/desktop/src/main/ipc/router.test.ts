@@ -120,6 +120,14 @@ function fakeRuntime(): TeskraRuntime {
         throw new Error('not used')
       }),
     },
+    artifact: {
+      record: vi.fn(() => {
+        throw new Error('not used')
+      }),
+      list: vi.fn(() => ok([])),
+      get: vi.fn(() => ok(null)),
+      scanRun: vi.fn(() => ok([])),
+    },
     terminal: {
       create: vi.fn(() =>
         ok({

@@ -32,6 +32,7 @@ import { useTaskStore } from '../stores/task-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
 import { RunWorktreePanel } from './run-worktree-panel'
 import { CriteriaPanel } from './criteria-panel'
+import { ArtifactPanel } from './artifact-panel'
 
 const ACTIVE_RUN_STATUSES = new Set<AgentRunStatus>([
   'created',
@@ -322,9 +323,10 @@ export function TaskPage() {
               <Card className="task-detail-card" title="Changes">
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No Git snapshot yet" />
               </Card>
-              <Card className="task-detail-card" title="Artifacts">
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No artifacts yet" />
-              </Card>
+              <ArtifactPanel
+                taskId={selected.id}
+                runIds={taskRuns.map((run) => run.id)}
+              />
             </div>
 
             <Card className="task-detail-card" title="Activity">

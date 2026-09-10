@@ -167,6 +167,22 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.criteria.bindRun(request)),
   )
   register(
+    ipcChannelDefinitions.artifactRecord,
+    withRuntime((runtime, request) => runtime.artifact.record(request)),
+  )
+  register(
+    ipcChannelDefinitions.artifactList,
+    withRuntime((runtime, request) => runtime.artifact.list(request)),
+  )
+  register(
+    ipcChannelDefinitions.artifactGet,
+    withRuntime((runtime, request) => runtime.artifact.get(request)),
+  )
+  register(
+    ipcChannelDefinitions.artifactScanRun,
+    withRuntime((runtime, request) => runtime.artifact.scanRun(request)),
+  )
+  register(
     ipcChannelDefinitions.agentListDefinitions,
     withRuntime((runtime) => runtime.agent.listDefinitions()),
   )

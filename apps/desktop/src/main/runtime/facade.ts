@@ -11,6 +11,9 @@ import type {
   AgentHealth,
   AgentExecutableOverrideRequest,
   ArchiveTaskRequest,
+  Artifact,
+  ArtifactContent,
+  ArtifactIdRequest,
   BindRunCriteriaRequest,
   CreateCriteriaSetRequest,
   CreateTaskRequest,
@@ -35,16 +38,19 @@ import type {
   ListRecentWorkspacesRequest,
   ListAgentDetectionsRequest,
   ListAgentRunsRequest,
+  ListArtifactsRequest,
   ListCriteriaSetsRequest,
   ListTasksRequest,
   ListTerminalsRequest,
   MergePreflightResult,
   OpenWorkspaceRequest,
   OpenSystemDirectoryRequest,
+  RecordArtifactRequest,
   ResolveConfigRequest,
   ResumeAgentRunRequest,
   RunDoctorRequest,
   ResolvedConfig,
+  ScanRunArtifactsRequest,
   SelectWorkspaceDirectoryRequest,
   SendAgentRunInputRequest,
   SetAgentExecutableOverrideRequest,
@@ -136,6 +142,13 @@ export interface CriteriaPort {
   bindRun(request: BindRunCriteriaRequest): IpcResult<AgentRun>
 }
 
+export interface ArtifactPort {
+  record(request: RecordArtifactRequest): IpcResult<Artifact>
+  list(request: ListArtifactsRequest): IpcResult<readonly Artifact[]>
+  get(request: ArtifactIdRequest): IpcResult<ArtifactContent | null>
+  scanRun(request: ScanRunArtifactsRequest): IpcResult<readonly Artifact[]>
+}
+
 export interface GitPort {
   status(request: GitWorkspaceRequest): Promise<IpcResult<GitStatus>>
   branch(request: GitWorkspaceRequest): Promise<IpcResult<GitBranch>>
@@ -194,6 +207,7 @@ export interface TeskraRuntime {
   readonly events: RuntimeEventSource
   readonly task: TaskPort
   readonly criteria: CriteriaPort
+  readonly artifact: ArtifactPort
   readonly agent: AgentCatalogPort
   readonly git: GitPort
   readonly worktree: WorktreePort

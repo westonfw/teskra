@@ -8,6 +8,7 @@ import type {
 } from '@teskra/contracts'
 
 import { createConfigService } from '../config/config-service'
+import { createArtifactStore } from '../artifacts/artifact-store'
 import { createAgentDetector } from '../agents/agent-detector'
 import { createAgentHealthManager } from '../agents/agent-health-manager'
 import { createAgentManager } from '../agents/agent-manager'
@@ -182,6 +183,13 @@ export async function composeTeskraRuntime(
     runs: repositories.agentRuns,
     events,
   })
+  const artifactStore = createArtifactStore({
+    artifacts: repositories.artifacts,
+    tasks: repositories.tasks,
+    runs: repositories.agentRuns,
+    events,
+    paths,
+  })
   const gitManager = createGitManager({
     commands,
     workspaces: repositories.workspaces,
@@ -336,6 +344,12 @@ export async function composeTeskraRuntime(
       confirmSet: (request) => criteriaManager.confirmSet(request),
       supersedeSet: (request) => criteriaManager.supersedeSet(request),
       bindRun: (request) => criteriaManager.bindRun(request),
+    },
+    artifact: {
+      record: (request) => artifactStore.record(request),
+      list: (request) => artifactStore.list(request),
+      get: (request) => artifactStore.get(request),
+      scanRun: (request) => artifactStore.scanRun(request),
     },
     git: {
       status: ({ workspaceId }) => gitManager.status(workspaceId),

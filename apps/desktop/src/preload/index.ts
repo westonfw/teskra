@@ -53,6 +53,12 @@ const bridge: TeskraBridge = {
     supersedeSet: (request) => invoke(IPC_CHANNELS.criteriaSupersedeSet, request),
     bindRun: (request) => invoke(IPC_CHANNELS.criteriaBindRun, request),
   },
+  artifact: {
+    record: (request) => invoke(IPC_CHANNELS.artifactRecord, request),
+    list: (request) => invoke(IPC_CHANNELS.artifactList, request),
+    get: (request) => invoke(IPC_CHANNELS.artifactGet, request),
+    scanRun: (request) => invoke(IPC_CHANNELS.artifactScanRun, request),
+  },
   terminal: {
     create: (request) => invoke(IPC_CHANNELS.terminalCreate, request),
     write: (request) => invoke(IPC_CHANNELS.terminalWrite, request),

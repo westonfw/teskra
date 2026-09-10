@@ -1,8 +1,7 @@
 import type Database from 'better-sqlite3'
-import { z } from 'zod'
 
-import type { ArtifactType, IpcResult } from '@teskra/contracts'
-import { artifactTypeSchema } from '@teskra/contracts'
+import type { Artifact, ArtifactType, IpcResult } from '@teskra/contracts'
+import { artifactSchema } from '@teskra/contracts'
 
 import {
   decodeJson,
@@ -21,20 +20,14 @@ import {
  * ArtifactRepository (TASK-007) — the `artifacts` table (plan §139.1,
  * 004_artifacts_memory.sql lines 5406–5417). Small content is inlined in
  * `content`; large content lives under run_dir/artifacts/ with `file_path`.
+ *
+ * The canonical record schema lives in @teskra/contracts (TASK-050); this
+ * row-validating variant only tightens `created_at` to ISO-8601 UTC.
  */
-
-export const artifactRecordSchema = z.strictObject({
-  id: z.string(),
-  taskId: z.string(),
-  runId: z.string().optional(),
-  type: artifactTypeSchema,
-  name: z.string(),
-  content: z.string().optional(),
-  filePath: z.string().optional(),
-  metadata: jsonRecordSchema.optional(),
+export const artifactRecordSchema = artifactSchema.extend({
   createdAt: isoTimestampSchema,
 })
-export type Artifact = z.infer<typeof artifactRecordSchema>
+export type { Artifact }
 
 interface ArtifactRow {
   id: string

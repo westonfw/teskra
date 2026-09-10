@@ -28,6 +28,20 @@ import {
   type SetAgentExecutableOverrideRequest,
   type StartAgentRunRequest,
 } from './agent'
+import {
+  artifactContentSchema,
+  artifactIdRequestSchema,
+  artifactSchema,
+  listArtifactsRequestSchema,
+  recordArtifactRequestSchema,
+  scanRunArtifactsRequestSchema,
+  type Artifact,
+  type ArtifactContent,
+  type ArtifactIdRequest,
+  type ListArtifactsRequest,
+  type RecordArtifactRequest,
+  type ScanRunArtifactsRequest,
+} from './artifact'
 import { ipcResultSchema, type IpcResult } from './error'
 import {
   acceptanceCriteriaSetDetailSchema,
@@ -200,6 +214,10 @@ export const IPC_CHANNELS = {
   criteriaConfirmSet: 'teskra:criteria:confirm-set',
   criteriaSupersedeSet: 'teskra:criteria:supersede-set',
   criteriaBindRun: 'teskra:criteria:bind-run',
+  artifactRecord: 'teskra:artifact:record',
+  artifactList: 'teskra:artifact:list',
+  artifactGet: 'teskra:artifact:get',
+  artifactScanRun: 'teskra:artifact:scan-run',
   agentListDefinitions: 'teskra:agent:list-definitions',
   agentDetect: 'teskra:agent:detect',
   agentListDetections: 'teskra:agent:list-detections',
@@ -374,6 +392,26 @@ export const criteriaBindRunChannel = channel(
   IPC_CHANNELS.criteriaBindRun,
   bindRunCriteriaRequestSchema,
   agentRunSchema,
+)
+export const artifactRecordChannel = channel(
+  IPC_CHANNELS.artifactRecord,
+  recordArtifactRequestSchema,
+  artifactSchema,
+)
+export const artifactListChannel = channel(
+  IPC_CHANNELS.artifactList,
+  listArtifactsRequestSchema,
+  z.array(artifactSchema),
+)
+export const artifactGetChannel = channel(
+  IPC_CHANNELS.artifactGet,
+  artifactIdRequestSchema,
+  artifactContentSchema.nullable(),
+)
+export const artifactScanRunChannel = channel(
+  IPC_CHANNELS.artifactScanRun,
+  scanRunArtifactsRequestSchema,
+  z.array(artifactSchema),
 )
 export const agentListDefinitionsChannel = channel(
   IPC_CHANNELS.agentListDefinitions,
@@ -630,6 +668,10 @@ export const ipcChannelDefinitions = {
   criteriaConfirmSet: criteriaConfirmSetChannel,
   criteriaSupersedeSet: criteriaSupersedeSetChannel,
   criteriaBindRun: criteriaBindRunChannel,
+  artifactRecord: artifactRecordChannel,
+  artifactList: artifactListChannel,
+  artifactGet: artifactGetChannel,
+  artifactScanRun: artifactScanRunChannel,
   agentListDefinitions: agentListDefinitionsChannel,
   agentDetect: agentDetectChannel,
   agentListDetections: agentListDetectionsChannel,
@@ -717,6 +759,12 @@ export interface TeskraBridge {
     confirmSet(request: CriteriaSetIdRequest): Promise<IpcResult<AcceptanceCriteriaSet>>
     supersedeSet(request: CriteriaSetIdRequest): Promise<IpcResult<AcceptanceCriteriaSet>>
     bindRun(request: BindRunCriteriaRequest): Promise<IpcResult<AgentRun>>
+  }
+  readonly artifact: {
+    record(request: RecordArtifactRequest): Promise<IpcResult<Artifact>>
+    list(request: ListArtifactsRequest): Promise<IpcResult<Artifact[]>>
+    get(request: ArtifactIdRequest): Promise<IpcResult<ArtifactContent | null>>
+    scanRun(request: ScanRunArtifactsRequest): Promise<IpcResult<Artifact[]>>
   }
   readonly agent: {
     listDefinitions(): Promise<IpcResult<AgentDefinition[]>>
