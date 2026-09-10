@@ -5,6 +5,7 @@ import type {
   AgentRun,
   IpcResult,
   PublicAppError,
+  ResumeAgentRunRequest,
   StartAgentRunRequest,
   WorkbenchEvents,
   WorkspaceRuntimeRef,
@@ -35,6 +36,7 @@ export interface AgentStoreBridge {
       path: string | null
     }): Promise<IpcResult<string | null>>
     start(request: StartAgentRunRequest): Promise<IpcResult<AgentRun>>
+    resume(request: ResumeAgentRunRequest): Promise<IpcResult<AgentRun>>
     cancel(request: { runId: string }): Promise<IpcResult<AgentRun>>
     get(request: { runId: string }): Promise<IpcResult<AgentRun | null>>
     list(request?: {
@@ -78,6 +80,7 @@ interface AgentState {
   startSynchronization(workspaceId: string): () => void
   synchronizeRuns(workspaceId: string): Promise<void>
   startRun(request: StartAgentRunRequest): Promise<AgentRun | undefined>
+  resumeRun(runId: string): Promise<AgentRun | undefined>
   cancelRun(runId: string): Promise<boolean>
   loadRunOutput(runId: string): Promise<boolean>
   loadDefinitions(): Promise<void>
@@ -195,6 +198,22 @@ export function createAgentStore(getBridge: () => AgentStoreBridge) {
         return result.data
       } catch {
         set({ starting: false, error: transportError })
+        return undefined
+      }
+    },
+
+    async resumeRun(runId) {
+      set({ error: undefined })
+      try {
+        const result = await getBridge().agent.resume({ runId })
+        if (!result.ok) {
+          set({ error: result.error })
+          return undefined
+        }
+        set((state) => ({ runs: upsertRun(state.runs, result.data) }))
+        return result.data
+      } catch {
+        set({ error: transportError })
         return undefined
       }
     },

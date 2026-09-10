@@ -59,6 +59,7 @@ const bridge: TeskraBridge = {
     getExecutableOverride: (request) => invoke(IPC_CHANNELS.agentGetPathOverride, request),
     setExecutableOverride: (request) => invoke(IPC_CHANNELS.agentSetPathOverride, request),
     start: (request) => invoke(IPC_CHANNELS.agentRunStart, request),
+    resume: (request) => invoke(IPC_CHANNELS.agentRunResume, request),
     send: (request) => invoke(IPC_CHANNELS.agentRunSend, request),
     cancel: (request) => invoke(IPC_CHANNELS.agentRunCancel, request),
     get: (request) => invoke(IPC_CHANNELS.agentRunGet, request),

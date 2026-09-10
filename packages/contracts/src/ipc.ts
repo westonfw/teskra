@@ -10,6 +10,7 @@ import {
   agentExecutableOverrideRequestSchema,
   listAgentDetectionsRequestSchema,
   listAgentRunsRequestSchema,
+  resumeAgentRunRequestSchema,
   sendAgentRunInputRequestSchema,
   setAgentExecutableOverrideRequestSchema,
   startAgentRunRequestSchema,
@@ -22,6 +23,7 @@ import {
   type AgentExecutableOverrideRequest,
   type ListAgentDetectionsRequest,
   type ListAgentRunsRequest,
+  type ResumeAgentRunRequest,
   type SendAgentRunInputRequest,
   type SetAgentExecutableOverrideRequest,
   type StartAgentRunRequest,
@@ -160,6 +162,7 @@ export const IPC_CHANNELS = {
   agentRunGet: 'teskra:agent-run:get',
   agentRunList: 'teskra:agent-run:list',
   agentRunOutput: 'teskra:agent-run:output',
+  agentRunResume: 'teskra:agent-run:resume',
   gitStatus: 'teskra:git:status',
   gitBranch: 'teskra:git:branch',
   gitDiff: 'teskra:git:diff',
@@ -333,6 +336,11 @@ export const agentRunOutputChannel = channel(
   agentRunIdRequestSchema,
   z.string(),
 )
+export const agentRunResumeChannel = channel(
+  IPC_CHANNELS.agentRunResume,
+  resumeAgentRunRequestSchema,
+  agentRunSchema,
+)
 export const gitStatusChannel = channel(
   IPC_CHANNELS.gitStatus,
   gitWorkspaceRequestSchema,
@@ -482,6 +490,7 @@ export const ipcChannelDefinitions = {
   agentRunGet: agentRunGetChannel,
   agentRunList: agentRunListChannel,
   agentRunOutput: agentRunOutputChannel,
+  agentRunResume: agentRunResumeChannel,
   gitStatus: gitStatusChannel,
   gitBranch: gitBranchChannel,
   gitDiff: gitDiffChannel,
@@ -555,6 +564,7 @@ export interface TeskraBridge {
     get(request: AgentRunIdRequest): Promise<IpcResult<AgentRun | null>>
     list(request?: ListAgentRunsRequest): Promise<IpcResult<AgentRun[]>>
     getOutput(request: AgentRunIdRequest): Promise<IpcResult<string>>
+    resume(request: ResumeAgentRunRequest): Promise<IpcResult<AgentRun>>
   }
   readonly git: {
     status(request: GitWorkspaceRequest): Promise<IpcResult<GitStatus>>

@@ -86,6 +86,11 @@ function createBridge(initialRuns: AgentRun[] = []) {
         runs = runs.map((item) => (item.id === runId ? cancelled : item))
         return { ok: true as const, data: cancelled }
       }),
+      resume: vi.fn(async ({ runId }) => {
+        const resumed = run({ id: runId, status: 'running' })
+        runs = runs.map((item) => (item.id === runId ? resumed : item))
+        return { ok: true as const, data: resumed }
+      }),
       get: vi.fn(async ({ runId }) => ({
         ok: true as const,
         data: runs.find(({ id }) => id === runId) ?? null,
@@ -182,6 +187,18 @@ describe('Agent store', () => {
 
     expect(await store.getState().cancelRun('run-started')).toBe(true)
     expect(store.getState().runs[0]?.status).toBe('cancelled')
+  })
+
+  it('resumes an interrupted run through the typed Agent bridge', async () => {
+    const interrupted = run({ id: 'run-interrupted', status: 'interrupted' })
+    const { bridge } = createBridge([interrupted])
+    const store = createAgentStore(() => bridge)
+
+    const resumed = await store.getState().resumeRun('run-interrupted')
+
+    expect(bridge.agent.resume).toHaveBeenCalledWith({ runId: 'run-interrupted' })
+    expect(resumed?.status).toBe('running')
+    expect(store.getState().runs[0]?.status).toBe('running')
   })
 
   it('bounds a 10 MiB-class output history while retaining the newest raw data', async () => {

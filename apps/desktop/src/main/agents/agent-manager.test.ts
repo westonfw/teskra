@@ -16,6 +16,7 @@ import { migrateDatabase } from '../db/migrations'
 import {
   createAgentEventRepository,
   createAgentRunRepository,
+  createHandoffRepository,
   createTaskRepository,
   createWorkspaceRepository,
   createWorktreeRepository,
@@ -35,6 +36,7 @@ interface TestContext {
   readonly manager: AgentManager
   readonly runs: ReturnType<typeof createAgentRunRepository>
   readonly agentEvents: ReturnType<typeof createAgentEventRepository>
+  readonly handoffs: ReturnType<typeof createHandoffRepository>
   readonly workspaces: ReturnType<typeof createWorkspaceRepository>
   readonly worktrees: ReturnType<typeof createWorktreeRepository>
   readonly tasks: ReturnType<typeof createTaskRepository>
@@ -56,7 +58,18 @@ afterEach(() => {
 function mockAdapter(
   definition: AgentDefinition,
   providerSession?: ProviderSessionRef,
+  supportsResume = false,
 ): CodingAgentAdapter {
+  const handle = (request: { runId: string }) => ({
+    ok: true as const,
+    data: {
+      runId: request.runId,
+      processId: `${definition.id}:${request.runId}`,
+      pid: definition.id === 'codex' ? 1001 : 1002,
+      startedAt: '2026-09-10T00:00:01.000Z',
+      ...(providerSession === undefined ? {} : { providerSession }),
+    },
+  })
   return {
     definition,
     detect: vi.fn(async ({ runtime }) => ({
@@ -72,16 +85,10 @@ function mockAdapter(
         checkedAt: '2026-09-10T00:00:00.000Z',
       },
     })),
-    start: vi.fn(async (request) => ({
-      ok: true as const,
-      data: {
-        runId: request.runId,
-        processId: `${definition.id}:${request.runId}`,
-        pid: definition.id === 'codex' ? 1001 : 1002,
-        startedAt: '2026-09-10T00:00:01.000Z',
-        ...(providerSession === undefined ? {} : { providerSession }),
-      },
-    })),
+    start: vi.fn(async (request) => handle(request)),
+    ...(supportsResume
+      ? { resume: vi.fn(async (request: { runId: string }) => handle(request)) }
+      : {}),
     send: vi.fn(async () => ({ ok: true as const, data: undefined })),
     cancel: vi.fn(async () => ({ ok: true as const, data: undefined })),
   }
@@ -96,6 +103,7 @@ function setup(concurrency?: ConcurrencyConfig, failAgentEventWrites = false): T
   const tasks = createTaskRepository(connection)
   const runs = createAgentRunRepository(connection)
   const agentEvents = createAgentEventRepository(connection)
+  const handoffs = createHandoffRepository(connection)
   const worktrees = createWorktreeRepository(connection)
   const workspace = workspaces.create(
     {
@@ -111,10 +119,14 @@ function setup(concurrency?: ConcurrencyConfig, failAgentEventWrites = false): T
   if (!registry.ok) throw new Error(registry.error.message)
   const events = createEventBus<WorkbenchEvents>()
   const codex = mockAdapter(CODEX_AGENT)
-  const claude = mockAdapter(CLAUDE_AGENT, {
-    provider: 'claude',
-    sessionId: '550e8400-e29b-41d4-a716-446655440000',
-  })
+  const claude = mockAdapter(
+    CLAUDE_AGENT,
+    {
+      provider: 'claude',
+      sessionId: '550e8400-e29b-41d4-a716-446655440000',
+    },
+    true,
+  )
   const home = mkdtempSync(join(tmpdir(), 'teskra-agent-manager-'))
   homes.push(home)
   let nextRun = 1
@@ -137,6 +149,7 @@ function setup(concurrency?: ConcurrencyConfig, failAgentEventWrites = false): T
     adapters: [codex, claude],
     runs,
     agentEvents: persistedEvents,
+    handoffs,
     workspaces,
     tasks,
     worktrees,
@@ -155,6 +168,7 @@ function setup(concurrency?: ConcurrencyConfig, failAgentEventWrites = false): T
     manager,
     runs,
     agentEvents,
+    handoffs,
     workspaces,
     worktrees,
     tasks,
@@ -333,6 +347,7 @@ describe('AgentManager (TASK-028)', () => {
       adapters: [context.adapters.codex, context.adapters.claude],
       runs: context.runs,
       agentEvents: context.agentEvents,
+      handoffs: context.handoffs,
       workspaces: context.workspaces,
       tasks: context.tasks,
       worktrees: context.worktrees,
@@ -610,5 +625,120 @@ describe('AgentManager (TASK-028)', () => {
     await vi.waitFor(() => {
       expect(context.manager.list({ activeOnly: true })).toEqual({ ok: true, data: [] })
     })
+  })
+})
+
+describe('AgentManager resume (TASK-042)', () => {
+  const interrupt = (context: TestContext, runId: string) => {
+    const updated = context.runs.update(
+      runId,
+      {
+        status: 'interrupted',
+        processId: null,
+        pid: null,
+        finishedAt: '2026-09-10T00:00:03.000Z',
+        exitCode: 1,
+        error: { message: 'process lost' },
+      },
+      '2026-09-10T00:00:03.000Z',
+    )
+    if (!updated.ok) throw new Error(updated.error.message)
+  }
+
+  it('rejects resuming a run that is not interrupted', async () => {
+    const context = setup()
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+
+    const resumed = await context.manager.resume({ runId: 'run-1' })
+
+    expect(resumed).toMatchObject({
+      ok: false,
+      error: { code: 'VALIDATION_FAILED', message: 'Only interrupted Agent runs can be resumed.' },
+    })
+  })
+
+  it('uses the provider native session when the agent supports resume', async () => {
+    const context = setup()
+    await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'claude',
+      prompt: 'Review the diff',
+    })
+    interrupt(context, 'run-1')
+
+    const resumed = await context.manager.resume({ runId: 'run-1' })
+
+    expect(resumed).toMatchObject({
+      ok: true,
+      data: { id: 'run-1', status: 'running' },
+    })
+    if (resumed.ok) {
+      expect(resumed.data.finishedAt ?? null).toBeNull()
+      expect(resumed.data.exitCode ?? null).toBeNull()
+      expect(resumed.data.error ?? null).toBeNull()
+    }
+    const claude = context.adapters.claude
+    expect(claude.resume).toHaveBeenCalledOnce()
+    expect(claude.resume).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: 'run-1',
+        providerSession: {
+          provider: 'claude',
+          sessionId: '550e8400-e29b-41d4-a716-446655440000',
+        },
+      }),
+    )
+    expect(claude.start).toHaveBeenCalledOnce()
+    const history = context.agentEvents.listByRun('run-1')
+    expect(history.ok && history.data.map(({ eventType }) => eventType)).toEqual([
+      'agent.created',
+      'agent.started',
+      'agent.resume_requested',
+      'agent.resumed',
+    ])
+    expect(
+      history.ok &&
+        history.data.find(({ eventType }) => eventType === 'agent.resumed')?.payload,
+    ).toMatchObject({ nativeSession: true })
+  })
+
+  it('starts a new session with injected context when native resume is unavailable', async () => {
+    const context = setup()
+    await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      prompt: 'Implement the feature',
+    })
+    context.events.emit('process.output', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      data: 'half of the work is done\r\n',
+    })
+    const handoff = context.handoffs.save({
+      id: 'handoff-1',
+      runId: 'run-1',
+      type: 'implementation',
+      payload: { summary: 'finished the parser half' },
+      parseStatus: 'degraded',
+    })
+    if (!handoff.ok) throw new Error(handoff.error.message)
+    interrupt(context, 'run-1')
+
+    const resumed = await context.manager.resume({ runId: 'run-1', prompt: 'Keep going' })
+
+    expect(resumed).toMatchObject({ ok: true, data: { id: 'run-1', status: 'running' } })
+    const codex = context.adapters.codex
+    expect(codex.start).toHaveBeenCalledTimes(2)
+    const relaunched = vi.mocked(codex.start).mock.calls[1]?.[0]
+    expect(relaunched?.prompt).toContain('Resume interrupted Teskra Run run-1')
+    expect(relaunched?.prompt).toContain('Original request:\nImplement the feature')
+    expect(relaunched?.prompt).toContain('Handoff summary:\nfinished the parser half')
+    expect(relaunched?.prompt).toContain('half of the work is done')
+    expect(relaunched?.prompt).toContain('Additional instructions:\nKeep going')
+    const history = context.agentEvents.listByRun('run-1')
+    expect(
+      history.ok &&
+        history.data.find(({ eventType }) => eventType === 'agent.resumed')?.payload,
+    ).toMatchObject({ nativeSession: false })
   })
 })

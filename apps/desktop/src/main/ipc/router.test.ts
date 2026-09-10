@@ -117,6 +117,9 @@ function fakeRuntime(): TeskraRuntime {
       start: vi.fn(async () => {
         throw new Error('not used')
       }),
+      resume: vi.fn(async () => {
+        throw new Error('not used')
+      }),
       send: vi.fn(async () => ok(undefined)),
       cancel: vi.fn(async () => {
         throw new Error('not used')

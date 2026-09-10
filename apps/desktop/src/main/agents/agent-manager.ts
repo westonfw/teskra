@@ -3,12 +3,15 @@ import { randomUUID } from 'node:crypto'
 import {
   approvalModeSchema,
   DEFAULT_CONFIG,
+  providerSessionRefSchema,
   type AgentStartRequest,
   type AgentRun,
   type ConcurrencyConfig,
   type IpcResult,
   type ListAgentRunsRequest,
+  type ProviderSessionRef,
   type PublicAppError,
+  type ResumeAgentRunRequest,
   type SendAgentRunInputRequest,
   type StartAgentRunRequest,
   type TaskStatus,
@@ -17,6 +20,7 @@ import {
 
 import type { AgentEventRepository } from '../db/repositories/agent-event-repository'
 import type { AgentRunRepository } from '../db/repositories/agent-run-repository'
+import type { HandoffRepository } from '../db/repositories/handoff-repository'
 import type { TaskRepository } from '../db/repositories/task-repository'
 import type { WorkspaceRepository } from '../db/repositories/workspace-repository'
 import type { WorktreeRepository } from '../db/repositories/worktree-repository'
@@ -31,6 +35,7 @@ import type { CodingAgentAdapter } from './adapters/coding-agent-adapter'
 
 export interface AgentManager {
   start(request: StartAgentRunRequest): Promise<IpcResult<AgentRun>>
+  resume(request: ResumeAgentRunRequest): Promise<IpcResult<AgentRun>>
   send(request: SendAgentRunInputRequest): Promise<IpcResult<void>>
   cancel(runId: string): Promise<IpcResult<AgentRun>>
   get(runId: string): IpcResult<AgentRun | null>
@@ -44,6 +49,7 @@ export interface AgentManagerDeps {
   readonly adapters: readonly CodingAgentAdapter[]
   readonly runs: AgentRunRepository
   readonly agentEvents: AgentEventRepository
+  readonly handoffs: HandoffRepository
   readonly workspaces: WorkspaceRepository
   readonly tasks: TaskRepository
   readonly worktrees: WorktreeRepository
@@ -107,6 +113,29 @@ function hasCapacity(
 interface PendingRun {
   readonly adapter: CodingAgentAdapter
   readonly request: AgentStartRequest
+  readonly resumed: boolean
+  readonly resumeSession?: ProviderSessionRef
+}
+
+const RESUME_OUTPUT_CONTEXT_CHARS = 6_000
+
+export function buildResumeContext(
+  run: Pick<AgentRun, 'id' | 'prompt'>,
+  recentOutput: string,
+  handoffSummary?: string,
+  additionalPrompt?: string,
+): string {
+  const output = recentOutput.slice(-RESUME_OUTPUT_CONTEXT_CHARS).trim()
+  return [
+    `Resume interrupted Teskra Run ${run.id} from the existing workspace state.`,
+    run.prompt === undefined ? undefined : `Original request:\n${run.prompt}`,
+    handoffSummary === undefined ? undefined : `Handoff summary:\n${handoffSummary}`,
+    output.length === 0 ? undefined : `Recent Agent output:\n${output}`,
+    additionalPrompt === undefined ? undefined : `Additional instructions:\n${additionalPrompt}`,
+    'Inspect the current files before changing them and continue the unfinished work.',
+  ]
+    .filter((part): part is string => part !== undefined)
+    .join('\n\n')
 }
 
 /** TASK-028: owns AgentRun lifecycle, provider routing, process events, and persistence. */
@@ -233,7 +262,10 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     }
 
     activeAdapters.set(request.runId, adapter)
-    const started = await adapter.start(request)
+    const started =
+      pending.resumeSession !== undefined && adapter.resume !== undefined
+        ? await adapter.resume({ ...request, providerSession: pending.resumeSession })
+        : await adapter.start(request)
     if (!started.ok) return finishFailed(request.runId, started.error)
 
     const afterStart = deps.runs.getById(request.runId)
@@ -241,7 +273,10 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     if (afterStart.data !== null && isTerminal(afterStart.data)) {
       return { ok: true, data: afterStart.data }
     }
-    appendEvent(request.runId, 'agent.started', { processId: started.data.processId })
+    appendEvent(request.runId, pending.resumed ? 'agent.resumed' : 'agent.started', {
+      processId: started.data.processId,
+      ...(pending.resumed ? { nativeSession: pending.resumeSession !== undefined } : {}),
+    })
     const running = deps.runs.update(
       request.runId,
       {
@@ -249,6 +284,15 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         processId: started.data.processId,
         pid: started.data.pid,
         startedAt: started.data.startedAt,
+        ...(pending.resumed
+          ? {
+              finishedAt: null,
+              lastOutputAt: null,
+              lastInputAt: null,
+              exitCode: null,
+              error: null,
+            }
+          : {}),
         ...(started.data.providerSession === undefined
           ? {}
           : { providerSession: { ...started.data.providerSession } }),
@@ -317,6 +361,22 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     void advanceQueue().catch((cause: unknown) => {
       logger.error({ cause }, 'Unexpected Agent queue advancement failure.')
     })
+  }
+
+  const readOutput = (runId: string): IpcResult<string> => {
+    outputBatcher.flush(runId)
+    const run = deps.runs.getById(runId)
+    if (!run.ok) return run
+    if (run.data === null) return missing('Agent run', runId)
+    const history = deps.agentEvents.listByRun(runId)
+    if (!history.ok) return history
+    return {
+      ok: true,
+      data: history.data
+        .filter(({ eventType }) => eventType === 'agent.output')
+        .map(({ payload }) => (typeof payload.data === 'string' ? payload.data : ''))
+        .join(''),
+    }
   }
 
   const stopOutput = deps.events.subscribe('process.output', ({ agentRunId, data }) => {
@@ -507,12 +567,18 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         deps.runs.delete(runId)
         return initialized
       }
+      const runFiles = deps.paths.runFiles(runId)
+      if (!runFiles.ok) {
+        deps.runs.delete(runId)
+        return runFiles
+      }
       appendEvent(runId, 'agent.created', { agentType: definition.id, executionMode })
       deps.events.emit('agent.created', { runId })
       synchronizeTaskStatus(created.data)
 
       const pending: PendingRun = {
         adapter,
+        resumed: false,
         request: {
           runId,
           workspace: workspace.data,
@@ -522,6 +588,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           ...(request.model === undefined ? {} : { model: request.model }),
           ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
           ...(worktreePath === undefined ? {} : { worktreePath }),
+          handoffPath: runFiles.data.handoff,
+          artifactDir: runFiles.data.artifacts,
           ...(request.environment === undefined ? {} : { environment: request.environment }),
         },
       }
@@ -536,6 +604,149 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       const launched = await launch(pending)
       if (!launched.ok) scheduleQueueAdvance()
       return launched
+    },
+
+    async resume(request) {
+      const current = deps.runs.getById(request.runId)
+      if (!current.ok) return current
+      if (current.data === null) return missing('Agent run', request.runId)
+      const run = current.data
+      if (run.status !== 'interrupted') {
+        return fail({
+          code: 'VALIDATION_FAILED',
+          message: 'Only interrupted Agent runs can be resumed.',
+          retryable: false,
+          detail: `run=${run.id} status=${run.status}`,
+        })
+      }
+
+      const definition = deps.registry.get(run.agentType)
+      const adapter = adapters.get(run.agentType)
+      if (definition === undefined || adapter === undefined) {
+        return fail({
+          code: 'VALIDATION_FAILED',
+          message: `Agent "${run.agentType}" is not registered.`,
+          retryable: false,
+          detail: `resume run=${run.id}`,
+        })
+      }
+      const workspace = deps.workspaces.getById(run.workspaceId)
+      if (!workspace.ok) return workspace
+      if (workspace.data === null) return missing('workspace', run.workspaceId)
+      const detected = await adapter.detect({ runtime: workspace.data.runtime, refresh: true })
+      if (!detected.ok) return detected
+      if (!detected.data.installed) {
+        return fail({
+          code: 'AGENT_NOT_INSTALLED',
+          message: `${definition.name} is not installed in this workspace runtime.`,
+          retryable: false,
+          detail: `resume run=${run.id} agent=${definition.id}`,
+        })
+      }
+
+      const task = run.taskId === undefined ? undefined : deps.tasks.getById(run.taskId)
+      if (task !== undefined && !task.ok) return task
+      if (task !== undefined && task.data === null) return missing('task', run.taskId as string)
+      const worktree =
+        run.worktreeId === undefined ? undefined : deps.worktrees.getById(run.worktreeId)
+      if (worktree !== undefined && !worktree.ok) return worktree
+      if (worktree !== undefined && worktree.data === null) {
+        return missing('worktree', run.worktreeId as string)
+      }
+
+      const policy = resolveConcurrency(run.workspaceId)
+      if (!policy.ok) return policy
+      const listed = deps.runs.listActive()
+      if (!listed.ok) return listed
+      const active = runningForLimits(listed.data)
+      const conflict = unisolatedWriteConflict(
+        active,
+        run.workspaceId,
+        run.worktreeId,
+        run.approvalMode,
+      )
+      if (conflict !== undefined) {
+        return fail({
+          code: 'VALIDATION_FAILED',
+          message: `Agent run "${conflict.id}" is already modifying this workspace directly.`,
+          retryable: true,
+          detail: `resume run=${run.id} conflict=${conflict.id}`,
+        })
+      }
+      const shouldQueue =
+        listed.data.some((candidate) => candidate.status === 'queued') ||
+        !hasCapacity(active, run, policy.data)
+
+      const parsedSession = providerSessionRefSchema.safeParse(run.providerSession)
+      const resumeSession =
+        definition.capabilities.resume && adapter.resume !== undefined && parsedSession.success
+          ? parsedSession.data
+          : undefined
+      let prompt = request.prompt
+      if (resumeSession === undefined) {
+        const output = readOutput(run.id)
+        if (!output.ok) return output
+        const handoff = deps.handoffs.getByRunId(run.id)
+        if (!handoff.ok) return handoff
+        const summary = handoff.data?.payload?.['summary']
+        prompt = buildResumeContext(
+          run,
+          output.data,
+          typeof summary === 'string' ? summary : undefined,
+          request.prompt,
+        )
+      }
+
+      const runFiles = deps.paths.runFiles(run.id)
+      if (!runFiles.ok) return runFiles
+      const pending: PendingRun = {
+        adapter,
+        resumed: true,
+        ...(resumeSession === undefined ? {} : { resumeSession }),
+        request: {
+          runId: run.id,
+          workspace: workspace.data,
+          ...(task?.data === null || task?.data === undefined ? {} : { task: task.data }),
+          mode: 'interactive',
+          approvalMode: run.approvalMode,
+          model: run.model,
+          prompt,
+          ...(worktree?.data === null || worktree?.data === undefined
+            ? {}
+            : { worktreePath: worktree.data.path }),
+          handoffPath: runFiles.data.handoff,
+          artifactDir: runFiles.data.artifacts,
+        },
+      }
+      const timestamp = now()
+      const prepared = deps.runs.update(
+        run.id,
+        {
+          status: shouldQueue ? 'queued' : 'preparing',
+          processId: null,
+          pid: null,
+          finishedAt: null,
+          exitCode: null,
+          error: null,
+        },
+        timestamp,
+      )
+      if (!prepared.ok) return prepared
+      if (prepared.data === null) return missing('Agent run', run.id)
+      appendEvent(run.id, 'agent.resume_requested', {
+        nativeSession: resumeSession !== undefined,
+      })
+      persistRunManifest(prepared.data)
+      synchronizeTaskStatus(prepared.data)
+
+      if (shouldQueue) {
+        pendingRuns.set(run.id, pending)
+        appendEvent(run.id, 'agent.queued', { resumed: true })
+        deps.events.emit('agent.queued', { runId: run.id })
+        scheduleQueueAdvance()
+        return { ok: true, data: prepared.data }
+      }
+      return launch(pending)
     },
 
     async send({ runId, data }) {
@@ -615,21 +826,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
 
     get: (runId) => deps.runs.getById(runId),
 
-    getOutput(runId) {
-      outputBatcher.flush(runId)
-      const run = deps.runs.getById(runId)
-      if (!run.ok) return run
-      if (run.data === null) return missing('Agent run', runId)
-      const history = deps.agentEvents.listByRun(runId)
-      if (!history.ok) return history
-      return {
-        ok: true,
-        data: history.data
-          .filter(({ eventType }) => eventType === 'agent.output')
-          .map(({ payload }) => (typeof payload.data === 'string' ? payload.data : ''))
-          .join(''),
-      }
-    },
+    getOutput: readOutput,
 
     list(request = {}) {
       if (request.activeOnly === true) {

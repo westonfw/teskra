@@ -41,6 +41,7 @@ import { createTeskraPaths, type TeskraPaths } from '../paths'
 import { createCommandRunner, type CommandRunner } from '../process/command-runner'
 import { createProcessManager } from '../process/process-manager'
 import { createReconciliationService } from '../recovery/reconciliation-service'
+import { createResumeService } from '../recovery/resume-service'
 import { createTerminalManager } from '../terminal/terminal-manager'
 import { createTaskManager } from '../tasks/task-manager'
 import { createWorkspaceRuntime, type WslEnvironmentInfo } from '../workspace/runtime'
@@ -225,6 +226,7 @@ export async function composeTeskraRuntime(
     ],
     runs: repositories.agentRuns,
     agentEvents: repositories.agentEvents,
+    handoffs: repositories.handoffs,
     workspaces: repositories.workspaces,
     tasks: repositories.tasks,
     worktrees: repositories.worktrees,
@@ -235,6 +237,15 @@ export async function composeTeskraRuntime(
       const resolved = config.resolve({ workspaceId })
       return resolved.ok ? { ok: true, data: resolved.data.config.concurrency } : resolved
     },
+  })
+  const resumeService = createResumeService({
+    runs: repositories.agentRuns,
+    workspaces: repositories.workspaces,
+    worktrees: repositories.worktrees,
+    processes: processManager,
+    git: gitManager,
+    agentManager,
+    resolveRuntime: (workspace) => runtimeFor(workspace.runtime),
   })
   const reconciled = await createReconciliationService({
     runs: repositories.agentRuns,
@@ -287,6 +298,7 @@ export async function composeTeskraRuntime(
       getExecutableOverride: (request) => agentDetector.getExecutableOverride(request),
       setExecutableOverride: (request) => agentDetector.setExecutableOverride(request),
       start: (request) => agentManager.start(request),
+      resume: (request) => resumeService.resume(request),
       send: (request) => agentManager.send(request),
       cancel: ({ runId }) => agentManager.cancel(runId),
       get: ({ runId }) => agentManager.get(runId),

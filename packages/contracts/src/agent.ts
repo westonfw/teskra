@@ -249,6 +249,11 @@ export type StartAgentRunRequest = z.infer<typeof startAgentRunRequestSchema>
 export const agentRunIdRequestSchema = z.strictObject({ runId: z.string().min(1) })
 export type AgentRunIdRequest = z.infer<typeof agentRunIdRequestSchema>
 
+export const resumeAgentRunRequestSchema = agentRunIdRequestSchema.extend({
+  prompt: z.string().trim().min(1).optional(),
+})
+export type ResumeAgentRunRequest = z.infer<typeof resumeAgentRunRequestSchema>
+
 export const sendAgentRunInputRequestSchema = agentRunIdRequestSchema.extend({
   data: z.string(),
 })

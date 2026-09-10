@@ -52,7 +52,10 @@ export function createCodexAdapter(options: CodexAdapterOptions): CodingAgentAda
   const adapter = createCliAgentAdapter({
     ...options,
     definition: CODEX_AGENT,
-    buildLaunch: (request) => ({ args: buildCodexArguments(request) }),
+    buildLaunch: (request) => ({
+      args: buildCodexArguments(request),
+      providerSession: { provider: CODEX_AGENT.id },
+    }),
     buildResumeLaunch: (request) => ({ args: buildCodexResumeArguments(request) }),
   })
   const resume = adapter.resume

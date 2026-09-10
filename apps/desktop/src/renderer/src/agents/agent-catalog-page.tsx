@@ -69,6 +69,7 @@ export function AgentCatalogPage() {
   const loadHealth = useAgentStore((state) => state.loadHealth)
   const startSynchronization = useAgentStore((state) => state.startSynchronization)
   const startRun = useAgentStore((state) => state.startRun)
+  const resumeRun = useAgentStore((state) => state.resumeRun)
   const cancelRun = useAgentStore((state) => state.cancelRun)
   const loadRunOutput = useAgentStore((state) => state.loadRunOutput)
   const clearError = useAgentStore((state) => state.clearError)
@@ -140,6 +141,11 @@ export function AgentCatalogPage() {
     if (ACTIVE_STATUSES.has(run.status) && !(await cancelRun(run.id))) return
     const restarted = await startRun(restartAgentRunRequest(run))
     if (restarted !== undefined) setSelectedRunId(restarted.id)
+  }
+
+  const handleResume = async (run: AgentRun): Promise<void> => {
+    const resumed = await resumeRun(run.id)
+    if (resumed !== undefined) setSelectedRunId(resumed.id)
   }
 
   return (
@@ -231,6 +237,7 @@ export function AgentCatalogPage() {
                   onOpen={() => void handleOpenRun(run)}
                   onCancel={() => void cancelRun(run.id)}
                   onRestart={() => void handleRestart(run)}
+                  onResume={() => void handleResume(run)}
                 />
               )}
             />
@@ -290,6 +297,7 @@ export function AgentCatalogPage() {
             watchdog={inspectRunWatchdog(selectedRun, now, stalledThresholdMs)}
             onCancel={() => void cancelRun(selectedRun.id)}
             onRestart={() => void handleRestart(selectedRun)}
+            onResume={() => void handleResume(selectedRun)}
           />
         )}
       </Drawer>
@@ -307,6 +315,7 @@ interface RunListItemProps {
   readonly onOpen: () => void
   readonly onCancel: () => void
   readonly onRestart: () => void
+  readonly onResume: () => void
 }
 
 function RunListItem({
@@ -319,6 +328,7 @@ function RunListItem({
   onOpen,
   onCancel,
   onRestart,
+  onResume,
 }: RunListItemProps) {
   const active = ACTIVE_STATUSES.has(run.status)
   return (
@@ -331,6 +341,11 @@ function RunListItem({
         active ? (
           <Button key="cancel" danger type="link" onClick={onCancel}>
             Interrupt
+          </Button>
+        ) : null,
+        run.status === 'interrupted' ? (
+          <Button key="resume" type="link" onClick={onResume}>
+            Resume
           </Button>
         ) : null,
         watchdog.possiblyStalled ? (
@@ -377,6 +392,7 @@ interface RunDetailProps {
   readonly watchdog: WatchdogInspection
   readonly onCancel: () => void
   readonly onRestart: () => void
+  readonly onResume: () => void
 }
 
 function RunDetail({
@@ -388,11 +404,25 @@ function RunDetail({
   watchdog,
   onCancel,
   onRestart,
+  onResume,
 }: RunDetailProps) {
   return (
     <Space direction="vertical" size={20} className="run-detail">
       {run.executionMode === 'attended' && run.worktreeId === undefined && (
         <Alert type="warning" showIcon message="直接修改主工作区，未做隔离" />
+      )}
+      {run.status === 'interrupted' && (
+        <Alert
+          type="info"
+          showIcon
+          message="This run was interrupted and can be resumed."
+          description="Teskra restores the workspace, branch, and worktree, then resumes the provider session when supported or starts a new session with the previous context."
+          action={
+            <Button size="small" type="primary" onClick={onResume}>
+              Resume
+            </Button>
+          }
+        />
       )}
       {watchdog.possiblyStalled && (
         <Alert
@@ -453,6 +483,7 @@ function defaultActivity(status: AgentRunStatus): string {
   if (status === 'completed') return 'Run completed'
   if (status === 'failed') return 'Run failed'
   if (status === 'cancelled') return 'Run cancelled'
+  if (status === 'interrupted') return 'Run interrupted — resume to continue'
   if (status.startsWith('waiting_')) return `Waiting for ${status.slice(12).replaceAll('_', ' ')}`
   return 'Agent is working'
 }

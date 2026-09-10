@@ -32,6 +32,7 @@ import type {
   OpenWorkspaceRequest,
   OpenSystemDirectoryRequest,
   ResolveConfigRequest,
+  ResumeAgentRunRequest,
   RunDoctorRequest,
   ResolvedConfig,
   SelectWorkspaceDirectoryRequest,
@@ -124,6 +125,7 @@ export interface AgentCatalogPort {
   getExecutableOverride(request: AgentExecutableOverrideRequest): IpcResult<string | null>
   setExecutableOverride(request: SetAgentExecutableOverrideRequest): IpcResult<string | null>
   start(request: StartAgentRunRequest): Promise<IpcResult<AgentRun>>
+  resume(request: ResumeAgentRunRequest): Promise<IpcResult<AgentRun>>
   send(request: SendAgentRunInputRequest): Promise<IpcResult<void>>
   cancel(request: AgentRunIdRequest): Promise<IpcResult<AgentRun>>
   get(request: AgentRunIdRequest): IpcResult<AgentRun | null>
