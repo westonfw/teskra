@@ -73,6 +73,10 @@ export interface WorkbenchEvents {
   'agent.cancelled': {
     runId: string
   }
+  'agent.interrupted': {
+    runId: string
+    reason: 'process_dead' | 'workspace_missing' | 'worktree_broken'
+  }
 
   'task.created': {
     taskId: string
@@ -119,6 +123,7 @@ export const WORKBENCH_EVENT_NAMES = [
   'agent.completed',
   'agent.failed',
   'agent.cancelled',
+  'agent.interrupted',
   'task.created',
   'task.updated',
   'git.changed',

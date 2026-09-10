@@ -17,6 +17,7 @@ type GitRefreshEvent =
   | 'agent.completed'
   | 'agent.failed'
   | 'agent.cancelled'
+  | 'agent.interrupted'
 
 export const GIT_OUTPUT_DEBOUNCE_MS = 1_500
 export const GIT_FOCUS_THROTTLE_MS = 5_000
@@ -97,6 +98,7 @@ export function createGitStore(getBridge: () => GitStoreBridge) {
         bridge.events.subscribe('agent.completed', immediateRefresh),
         bridge.events.subscribe('agent.failed', immediateRefresh),
         bridge.events.subscribe('agent.cancelled', immediateRefresh),
+        bridge.events.subscribe('agent.interrupted', immediateRefresh),
       ]
       lastFocusRefreshAt.set(workspaceId, Date.now())
       void get().refresh(workspaceId)

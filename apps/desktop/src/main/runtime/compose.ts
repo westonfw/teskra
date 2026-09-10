@@ -39,6 +39,7 @@ import { getLogger, initializeLogging } from '../logger'
 import { createTeskraPaths, type TeskraPaths } from '../paths'
 import { createCommandRunner, type CommandRunner } from '../process/command-runner'
 import { createProcessManager } from '../process/process-manager'
+import { createReconciliationService } from '../recovery/reconciliation-service'
 import { createTerminalManager } from '../terminal/terminal-manager'
 import { createTaskManager } from '../tasks/task-manager'
 import { createWorkspaceRuntime, type WslEnvironmentInfo } from '../workspace/runtime'
@@ -191,6 +192,7 @@ export async function composeTeskraRuntime(
     detector: agentDetector,
     resolveRuntime: runtimeFor,
   }
+  const runLogs = createRunLogStore({ paths })
   const agentManager = createAgentManager({
     registry: registeredAgents.data,
     adapters: [
@@ -213,12 +215,33 @@ export async function composeTeskraRuntime(
     worktrees: repositories.worktrees,
     events,
     paths,
-    runLogs: createRunLogStore({ paths }),
+    runLogs,
     resolveConcurrency: (workspaceId) => {
       const resolved = config.resolve({ workspaceId })
       return resolved.ok ? { ok: true, data: resolved.data.config.concurrency } : resolved
     },
   })
+  const reconciled = await createReconciliationService({
+    runs: repositories.agentRuns,
+    agentEvents: repositories.agentEvents,
+    workspaces: repositories.workspaces,
+    worktrees: repositories.worktrees,
+    tasks: repositories.tasks,
+    processes: processManager,
+    commands,
+    events,
+    runLogs,
+    resolveRuntime: (workspace) => runtimeFor(workspace.runtime),
+  }).reconcile()
+  if (!reconciled.ok) {
+    getLogger('runtime').error({ error: reconciled.error }, 'Startup reconciliation failed.')
+  } else if (
+    reconciled.data.missingWorkspaceIds.length > 0 ||
+    reconciled.data.brokenWorktrees.length > 0 ||
+    reconciled.data.interruptedRunIds.length > 0
+  ) {
+    getLogger('runtime').warn(reconciled.data, 'Startup reconciliation repaired stale state.')
+  }
 
   let disposed = false
   const runtime: TeskraRuntime = {

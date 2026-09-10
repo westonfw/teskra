@@ -1,0 +1,257 @@
+import { existsSync } from 'node:fs'
+
+import type { IpcResult, PublicAppError, WorkbenchEvents, Workspace } from '@teskra/contracts'
+
+import type { AgentEventRepository } from '../db/repositories/agent-event-repository'
+import type { AgentRunRepository } from '../db/repositories/agent-run-repository'
+import type { TaskRepository } from '../db/repositories/task-repository'
+import type { Worktree, WorktreeRepository } from '../db/repositories/worktree-repository'
+import type { WorkspaceRepository } from '../db/repositories/workspace-repository'
+import type { EventBus } from '../events/event-bus'
+import { getLogger } from '../logger'
+import type { CommandRunner } from '../process/command-runner'
+import type { ProcessManager } from '../process/process-manager'
+import type { RunLogStore } from '../agents/run-log-store'
+import type { WorkspaceRuntime } from '../workspace/runtime'
+
+const GIT_PROBE_TIMEOUT_MS = 10_000
+const CHECKABLE_WORKTREE_STATES = new Set<Worktree['state']>([
+  'creating',
+  'ready',
+  'dirty',
+  'conflict',
+])
+
+export type InterruptionReason = 'process_dead' | 'workspace_missing' | 'worktree_broken'
+
+export interface BrokenWorktree {
+  readonly id: string
+  readonly state: 'missing' | 'orphaned'
+}
+
+export interface ReconciliationReport {
+  readonly scannedRuns: number
+  readonly missingWorkspaceIds: readonly string[]
+  readonly brokenWorktrees: readonly BrokenWorktree[]
+  readonly interruptedRunIds: readonly string[]
+}
+
+export interface ReconciliationService {
+  reconcile(): Promise<IpcResult<ReconciliationReport>>
+}
+
+export interface ReconciliationServiceDeps {
+  readonly runs: AgentRunRepository
+  readonly agentEvents: AgentEventRepository
+  readonly workspaces: WorkspaceRepository
+  readonly worktrees: WorktreeRepository
+  readonly tasks: TaskRepository
+  readonly processes: Pick<ProcessManager, 'list'>
+  readonly commands: CommandRunner
+  readonly events: EventBus<WorkbenchEvents>
+  readonly runLogs: RunLogStore
+  readonly resolveRuntime: (workspace: Workspace) => IpcResult<WorkspaceRuntime>
+  readonly pathExists?: (path: string) => boolean
+  readonly now?: () => string
+}
+
+interface WorkspaceHealth {
+  readonly workspace: Workspace
+  readonly runtime?: WorkspaceRuntime
+  readonly exists: boolean
+}
+
+function hostPath(runtime: WorkspaceRuntime, path: string): IpcResult<string> {
+  return runtime.resolveHostPath(runtime.resolveCwd(path))
+}
+
+/** TASK-040 startup repair: reconciles persistent intent against live runtime truth. */
+export function createReconciliationService(
+  deps: ReconciliationServiceDeps,
+): ReconciliationService {
+  const logger = getLogger('runtime')
+  const pathExists = deps.pathExists ?? existsSync
+  const now = deps.now ?? (() => new Date().toISOString())
+
+  return {
+    async reconcile() {
+      const listedWorkspaces = deps.workspaces.list()
+      if (!listedWorkspaces.ok) return listedWorkspaces
+
+      const workspaceHealth = new Map<string, WorkspaceHealth>()
+      const missingWorkspaceIds: string[] = []
+      for (const workspace of listedWorkspaces.data) {
+        const resolved = deps.resolveRuntime(workspace)
+        const runtime = resolved.ok ? resolved.data : undefined
+        const validation = runtime?.validate()
+        const path = runtime === undefined ? undefined : hostPath(runtime, workspace.path)
+        let accessible = false
+        if (resolved.ok && validation?.ok === true && path?.ok === true) {
+          try {
+            accessible = pathExists(path.data)
+          } catch {
+            accessible = false
+          }
+        }
+        workspaceHealth.set(workspace.id, { workspace, runtime, exists: accessible })
+        if (!accessible) missingWorkspaceIds.push(workspace.id)
+      }
+
+      const brokenWorktrees: BrokenWorktree[] = []
+      const worktreeHealth = new Map<string, Worktree['state']>()
+      for (const workspace of listedWorkspaces.data) {
+        const listed = deps.worktrees.listByWorkspace(workspace.id)
+        if (!listed.ok) return listed
+        const health = workspaceHealth.get(workspace.id)
+        for (const worktree of listed.data) {
+          if (worktree.state === 'missing' || worktree.state === 'orphaned') {
+            brokenWorktrees.push({ id: worktree.id, state: worktree.state })
+            worktreeHealth.set(worktree.id, worktree.state)
+            continue
+          }
+          worktreeHealth.set(worktree.id, worktree.state)
+          if (!CHECKABLE_WORKTREE_STATES.has(worktree.state) || health?.exists !== true) continue
+          const runtime = health.runtime
+          if (runtime === undefined) continue
+          const path = hostPath(runtime, worktree.path)
+          let exists = false
+          if (path.ok) {
+            try {
+              exists = pathExists(path.data)
+            } catch {
+              exists = false
+            }
+          }
+          let state: BrokenWorktree['state'] | undefined
+          if (!exists) {
+            state = 'missing'
+          } else {
+            const git = await deps.commands.run({
+              command: 'git',
+              args: ['rev-parse', '--is-inside-work-tree'],
+              cwd: runtime.resolveCwd(worktree.path),
+              runtime,
+              timeoutMs: GIT_PROBE_TIMEOUT_MS,
+            })
+            if (!git.ok || git.data.exitCode !== 0 || git.data.stdout.trim() !== 'true') {
+              state = 'orphaned'
+            }
+          }
+          if (state !== undefined) {
+            const updated = deps.worktrees.updateState(worktree.id, state, now())
+            if (!updated.ok) return updated
+            brokenWorktrees.push({ id: worktree.id, state })
+            worktreeHealth.set(worktree.id, state)
+          }
+        }
+      }
+
+      const active = deps.runs.listActive()
+      if (!active.ok) return active
+      const liveProcesses = new Map(
+        deps.processes
+          .list()
+          .filter((process) => process.agentRunId !== undefined)
+          .map((process) => [process.agentRunId as string, process]),
+      )
+      const interruptedRunIds: string[] = []
+      const interruptedTaskIds = new Set<string>()
+
+      for (const run of active.data) {
+        let reason: InterruptionReason | undefined
+        if (workspaceHealth.get(run.workspaceId)?.exists !== true) {
+          reason = 'workspace_missing'
+        } else if (
+          run.worktreeId !== undefined &&
+          (!worktreeHealth.has(run.worktreeId) ||
+            ['missing', 'orphaned'].includes(worktreeHealth.get(run.worktreeId) as string))
+        ) {
+          reason = 'worktree_broken'
+        } else {
+          const live = liveProcesses.get(run.id)
+          const processMatches =
+            live !== undefined &&
+            (run.processId === undefined || live.id === run.processId) &&
+            (run.pid === undefined || live.pid === run.pid)
+          if (!processMatches) reason = 'process_dead'
+        }
+        if (reason === undefined) continue
+
+        const timestamp = now()
+        const error: PublicAppError = {
+          code: 'PROCESS_NOT_FOUND',
+          message: 'The Agent Run was interrupted because its runtime resources are unavailable.',
+          retryable: true,
+        }
+        const initialized = deps.runLogs.initialize(run)
+        if (!initialized.ok) {
+          logger.error({ runId: run.id, error: initialized.error }, 'Run log recovery failed.')
+        }
+        const durable = deps.runLogs.appendEvent(run.id, 'agent.interrupted', { reason }, timestamp)
+        if (!durable.ok) {
+          logger.error(
+            { runId: run.id, error: durable.error },
+            'Interruption event was not durable.',
+          )
+        } else {
+          const persisted = deps.agentEvents.append(
+            {
+              runId: run.id,
+              seq: durable.data.seq,
+              eventType: durable.data.eventType,
+              payload: durable.data.payload,
+            },
+            timestamp,
+          )
+          if (!persisted.ok) {
+            logger.error(
+              { runId: run.id, error: persisted.error },
+              'Interruption event DB write failed.',
+            )
+          }
+        }
+        const updated = deps.runs.update(
+          run.id,
+          { status: 'interrupted', finishedAt: timestamp, error },
+          timestamp,
+        )
+        if (!updated.ok) return updated
+        if (updated.data !== null) {
+          const manifest = deps.runLogs.writeRun(updated.data)
+          if (!manifest.ok) {
+            logger.error({ runId: run.id, error: manifest.error }, 'Run manifest recovery failed.')
+          }
+        }
+        deps.events.emit('agent.interrupted', { runId: run.id, reason })
+        interruptedRunIds.push(run.id)
+        if (run.taskId !== undefined) interruptedTaskIds.add(run.taskId)
+      }
+
+      for (const taskId of interruptedTaskIds) {
+        const taskRuns = deps.runs.listByTask(taskId)
+        if (!taskRuns.ok) return taskRuns
+        if (
+          taskRuns.data.some(({ status }) => ['queued', 'preparing', 'running'].includes(status))
+        ) {
+          continue
+        }
+        const task = deps.tasks.getById(taskId)
+        if (!task.ok) return task
+        if (task.data?.status !== 'running') continue
+        const updated = deps.tasks.updateStatus(taskId, 'blocked', now())
+        if (!updated.ok) return updated
+        deps.events.emit('task.updated', { taskId })
+      }
+
+      return {
+        ok: true,
+        data: {
+          scannedRuns: active.data.length,
+          missingWorkspaceIds: missingWorkspaceIds.sort(),
+          brokenWorktrees: brokenWorktrees.sort((left, right) => left.id.localeCompare(right.id)),
+          interruptedRunIds: interruptedRunIds.sort(),
+        },
+      }
+    },
+  }
+}

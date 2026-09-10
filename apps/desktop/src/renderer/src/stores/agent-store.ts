@@ -54,7 +54,8 @@ export interface AgentStoreBridge {
         | 'agent.waiting'
         | 'agent.completed'
         | 'agent.failed'
-        | 'agent.cancelled',
+        | 'agent.cancelled'
+        | 'agent.interrupted',
     >(
       name: Name,
       handler: (payload: WorkbenchEvents[Name]) => void,
@@ -142,6 +143,7 @@ export function createAgentStore(getBridge: () => AgentStoreBridge) {
         bridge.events.subscribe('agent.completed', refreshRun),
         bridge.events.subscribe('agent.failed', refreshRun),
         bridge.events.subscribe('agent.cancelled', refreshRun),
+        bridge.events.subscribe('agent.interrupted', refreshRun),
         bridge.events.subscribe('agent.output', ({ runId, data }) => {
           if (generation !== synchronizationGeneration) return
           set((state) =>
