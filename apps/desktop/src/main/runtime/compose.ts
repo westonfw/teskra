@@ -37,6 +37,7 @@ import { createTeskraPaths, type TeskraPaths } from '../paths'
 import { createCommandRunner, type CommandRunner } from '../process/command-runner'
 import { createProcessManager } from '../process/process-manager'
 import { createTerminalManager } from '../terminal/terminal-manager'
+import { createTaskManager } from '../tasks/task-manager'
 import { createWorkspaceRuntime, type WslEnvironmentInfo } from '../workspace/runtime'
 import { createWorkspaceManager } from '../workspace/workspace-manager'
 import { createWslManager } from '../workspace/wsl-manager'
@@ -159,6 +160,11 @@ export async function composeTeskraRuntime(
     workspaces: repositories.workspaces,
     resolveRuntime: (workspace) => runtimeFor(workspace.runtime),
   })
+  const taskManager = createTaskManager({
+    tasks: repositories.tasks,
+    workspaces: repositories.workspaces,
+    events,
+  })
   const agentDetector = createAgentDetector({
     registry: registeredAgents.data,
     commands,
@@ -205,6 +211,14 @@ export async function composeTeskraRuntime(
   let disposed = false
   const runtime: TeskraRuntime = {
     events,
+    task: {
+      create: (request) => taskManager.create(request),
+      update: (request) => taskManager.update(request),
+      archive: (request) => taskManager.archive(request),
+      delete: ({ id }) => taskManager.delete(id),
+      get: ({ id }) => taskManager.get(id),
+      list: (request) => taskManager.list(request),
+    },
     agent: {
       listDefinitions: () => ({ ok: true, data: registeredAgents.data.list() }),
       detect: (request) => agentDetector.detect(request),

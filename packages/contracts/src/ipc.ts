@@ -29,6 +29,20 @@ import {
 import { ipcResultSchema, type IpcResult } from './error'
 import type { WorkbenchEventName, WorkbenchEvents } from './event'
 import {
+  archiveTaskRequestSchema,
+  createTaskRequestSchema,
+  listTasksRequestSchema,
+  taskIdRequestSchema,
+  taskSchema,
+  updateTaskRequestSchema,
+  type ArchiveTaskRequest,
+  type CreateTaskRequest,
+  type ListTasksRequest,
+  type Task,
+  type TaskIdRequest,
+  type UpdateTaskRequest,
+} from './task'
+import {
   resolveConfigRequestSchema,
   resolvedConfigSchema,
   updateConfigRequestSchema,
@@ -97,6 +111,12 @@ export const IPC_CHANNELS = {
   workspaceListRecent: 'teskra:workspace:list-recent',
   workspaceValidate: 'teskra:workspace:validate',
   workspaceSelectDirectory: 'teskra:workspace:select-directory',
+  taskCreate: 'teskra:task:create',
+  taskUpdate: 'teskra:task:update',
+  taskArchive: 'teskra:task:archive',
+  taskDelete: 'teskra:task:delete',
+  taskGet: 'teskra:task:get',
+  taskList: 'teskra:task:list',
   agentListDefinitions: 'teskra:agent:list-definitions',
   agentDetect: 'teskra:agent:detect',
   agentListDetections: 'teskra:agent:list-detections',
@@ -182,6 +202,32 @@ export const workspaceSelectDirectoryChannel = channel(
   IPC_CHANNELS.workspaceSelectDirectory,
   selectWorkspaceDirectoryRequestSchema,
   z.string().nullable(),
+)
+export const taskCreateChannel = channel(
+  IPC_CHANNELS.taskCreate,
+  createTaskRequestSchema,
+  taskSchema,
+)
+export const taskUpdateChannel = channel(
+  IPC_CHANNELS.taskUpdate,
+  updateTaskRequestSchema,
+  taskSchema,
+)
+export const taskArchiveChannel = channel(
+  IPC_CHANNELS.taskArchive,
+  archiveTaskRequestSchema,
+  taskSchema,
+)
+export const taskDeleteChannel = channel(IPC_CHANNELS.taskDelete, taskIdRequestSchema, z.boolean())
+export const taskGetChannel = channel(
+  IPC_CHANNELS.taskGet,
+  taskIdRequestSchema,
+  taskSchema.nullable(),
+)
+export const taskListChannel = channel(
+  IPC_CHANNELS.taskList,
+  listTasksRequestSchema,
+  z.array(taskSchema),
 )
 export const agentListDefinitionsChannel = channel(
   IPC_CHANNELS.agentListDefinitions,
@@ -337,6 +383,12 @@ export const ipcChannelDefinitions = {
   workspaceListRecent: workspaceListRecentChannel,
   workspaceValidate: workspaceValidateChannel,
   workspaceSelectDirectory: workspaceSelectDirectoryChannel,
+  taskCreate: taskCreateChannel,
+  taskUpdate: taskUpdateChannel,
+  taskArchive: taskArchiveChannel,
+  taskDelete: taskDeleteChannel,
+  taskGet: taskGetChannel,
+  taskList: taskListChannel,
   agentListDefinitions: agentListDefinitionsChannel,
   agentDetect: agentDetectChannel,
   agentListDetections: agentListDetectionsChannel,
@@ -387,6 +439,14 @@ export interface TeskraBridge {
     close(request: TerminalCloseRequest): Promise<IpcResult<void>>
     get(request: TerminalIdRequest): Promise<IpcResult<TerminalSession | null>>
     list(request?: ListTerminalsRequest): Promise<IpcResult<TerminalSession[]>>
+  }
+  readonly task: {
+    create(request: CreateTaskRequest): Promise<IpcResult<Task>>
+    update(request: UpdateTaskRequest): Promise<IpcResult<Task>>
+    archive(request: ArchiveTaskRequest): Promise<IpcResult<Task>>
+    delete(request: TaskIdRequest): Promise<IpcResult<boolean>>
+    get(request: TaskIdRequest): Promise<IpcResult<Task | null>>
+    list(request: ListTasksRequest): Promise<IpcResult<Task[]>>
   }
   readonly agent: {
     listDefinitions(): Promise<IpcResult<AgentDefinition[]>>

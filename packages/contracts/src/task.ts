@@ -28,3 +28,38 @@ export const taskSchema = z.strictObject({
   updatedAt: z.string(),
 })
 export type Task = z.infer<typeof taskSchema>
+
+export const createTaskRequestSchema = z.strictObject({
+  workspaceId: z.string().min(1),
+  title: z.string().trim().min(1),
+  description: z.string().optional(),
+  status: taskStatusSchema.optional(),
+})
+export type CreateTaskRequest = z.infer<typeof createTaskRequestSchema>
+
+export const updateTaskRequestSchema = z
+  .strictObject({
+    id: z.string().min(1),
+    title: z.string().trim().min(1).optional(),
+    description: z.string().nullable().optional(),
+    status: taskStatusSchema.optional(),
+  })
+  .refine(
+    ({ title, description, status }) =>
+      title !== undefined || description !== undefined || status !== undefined,
+    { message: 'At least one Task field must be updated.' },
+  )
+export type UpdateTaskRequest = z.infer<typeof updateTaskRequestSchema>
+
+export const taskIdRequestSchema = z.strictObject({ id: z.string().min(1) })
+export type TaskIdRequest = z.infer<typeof taskIdRequestSchema>
+
+export const archiveTaskRequestSchema = taskIdRequestSchema.extend({ archived: z.boolean() })
+export type ArchiveTaskRequest = z.infer<typeof archiveTaskRequestSchema>
+
+export const listTasksRequestSchema = z.strictObject({
+  workspaceId: z.string().min(1),
+  status: taskStatusSchema.optional(),
+  includeArchived: z.boolean().optional(),
+})
+export type ListTasksRequest = z.infer<typeof listTasksRequestSchema>

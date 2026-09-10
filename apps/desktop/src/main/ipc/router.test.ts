@@ -4,6 +4,7 @@ import {
   IPC_CHANNELS,
   ipcChannelDefinitions,
   type IpcResult,
+  type Task,
   type Workspace,
 } from '@teskra/contracts'
 
@@ -39,6 +40,15 @@ const WORKSPACE: Workspace = {
   updatedAt: '2026-09-10T00:00:00.000Z',
 }
 
+const TASK: Task = {
+  id: 'task1',
+  workspaceId: 'ws1',
+  title: 'Demo Task',
+  status: 'draft',
+  createdAt: '2026-09-10T00:00:00.000Z',
+  updatedAt: '2026-09-10T00:00:00.000Z',
+}
+
 function ok<T>(data: T): IpcResult<T> {
   return { ok: true, data }
 }
@@ -53,6 +63,14 @@ function fakeRuntime(): TeskraRuntime {
       listRecent: vi.fn(() => ok([WORKSPACE])),
       validate: vi.fn(() => ok({ exists: true })),
       selectDirectory: vi.fn(async () => ok('/repo')),
+    },
+    task: {
+      create: vi.fn(() => ok(TASK)),
+      update: vi.fn(() => ok(TASK)),
+      archive: vi.fn(() => ok(TASK)),
+      delete: vi.fn(() => ok(true)),
+      get: vi.fn(() => ok(TASK)),
+      list: vi.fn(() => ok([TASK])),
     },
     terminal: {
       create: vi.fn(() =>
@@ -237,6 +255,24 @@ describe('Typed IPC Router (TASK-020)', () => {
       data: [],
     })
     expect(runtime.agent.list).toHaveBeenCalledWith({ activeOnly: true })
+  })
+
+  it('routes validated Task CRUD through the runtime facade', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    expect(
+      await ipc.invoke(IPC_CHANNELS.taskCreate, {
+        workspaceId: 'ws1',
+        title: 'Demo Task',
+      }),
+    ).toEqual({ ok: true, data: TASK })
+    expect(await ipc.invoke(IPC_CHANNELS.taskList, { workspaceId: 'ws1' })).toEqual({
+      ok: true,
+      data: [TASK],
+    })
+    expect(runtime.task.create).toHaveBeenCalledWith({ workspaceId: 'ws1', title: 'Demo Task' })
   })
 
   it('validates Facade responses and converts thrown errors', async () => {

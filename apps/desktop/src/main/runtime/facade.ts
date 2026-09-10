@@ -6,6 +6,8 @@ import type {
   AgentRunIdRequest,
   AgentHealth,
   AgentExecutableOverrideRequest,
+  ArchiveTaskRequest,
+  CreateTaskRequest,
   CreateTerminalRequest,
   CreateWorkspaceRequest,
   FutureRuntimePortName,
@@ -13,6 +15,7 @@ import type {
   ListRecentWorkspacesRequest,
   ListAgentDetectionsRequest,
   ListAgentRunsRequest,
+  ListTasksRequest,
   ListTerminalsRequest,
   OpenWorkspaceRequest,
   OpenSystemDirectoryRequest,
@@ -25,12 +28,15 @@ import type {
   SystemInfo,
   SystemPaths,
   StartAgentRunRequest,
+  Task,
+  TaskIdRequest,
   TerminalCloseRequest,
   TerminalIdRequest,
   TerminalResizeRequest,
   TerminalSession,
   TerminalWriteRequest,
   UpdateConfigRequest,
+  UpdateTaskRequest,
   Workspace,
   WorkspaceIdRequest,
   WorkspaceValidationResult,
@@ -74,6 +80,15 @@ export interface SettingsPort {
   openDirectory(request: OpenSystemDirectoryRequest): Promise<IpcResult<void>>
 }
 
+export interface TaskPort {
+  create(request: CreateTaskRequest): IpcResult<Task>
+  update(request: UpdateTaskRequest): IpcResult<Task>
+  archive(request: ArchiveTaskRequest): IpcResult<Task>
+  delete(request: TaskIdRequest): IpcResult<boolean>
+  get(request: TaskIdRequest): IpcResult<Task | null>
+  list(request: ListTasksRequest): IpcResult<readonly Task[]>
+}
+
 export interface AgentCatalogPort {
   listDefinitions(): IpcResult<readonly AgentDefinition[]>
   detect(request: AgentDetectionRequest): Promise<IpcResult<AgentDetectionResult>>
@@ -107,7 +122,7 @@ export interface TeskraRuntime {
   readonly settings: SettingsPort
   /** Main-process event source consumed only by RendererEventBridge. */
   readonly events: RuntimeEventSource
-  readonly task?: FutureRuntimePort
+  readonly task: TaskPort
   readonly agent: AgentCatalogPort
   readonly git?: FutureRuntimePort
   readonly worktree?: FutureRuntimePort

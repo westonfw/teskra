@@ -107,6 +107,30 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.workspace.selectDirectory(request)),
   )
   register(
+    ipcChannelDefinitions.taskCreate,
+    withRuntime((runtime, request) => runtime.task.create(request)),
+  )
+  register(
+    ipcChannelDefinitions.taskUpdate,
+    withRuntime((runtime, request) => runtime.task.update(request)),
+  )
+  register(
+    ipcChannelDefinitions.taskArchive,
+    withRuntime((runtime, request) => runtime.task.archive(request)),
+  )
+  register(
+    ipcChannelDefinitions.taskDelete,
+    withRuntime((runtime, request) => runtime.task.delete(request)),
+  )
+  register(
+    ipcChannelDefinitions.taskGet,
+    withRuntime((runtime, request) => runtime.task.get(request)),
+  )
+  register(
+    ipcChannelDefinitions.taskList,
+    withRuntime((runtime, request) => runtime.task.list(request)),
+  )
+  register(
     ipcChannelDefinitions.agentListDefinitions,
     withRuntime((runtime) => runtime.agent.listDefinitions()),
   )

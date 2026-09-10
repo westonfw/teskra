@@ -80,6 +80,16 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       data: [{ id: 'codex' }, { id: 'claude' }, { id: 'fake' }],
     })
     expect(runtime.agent.list({ activeOnly: true })).toEqual({ ok: true, data: [] })
+    if (!created.ok) throw new Error('expected workspace')
+    const task = runtime.task.create({ workspaceId: created.data.id, title: 'Compose runtime' })
+    expect(task).toMatchObject({
+      ok: true,
+      data: { workspaceId: created.data.id, title: 'Compose runtime', status: 'draft' },
+    })
+    expect(runtime.task.list({ workspaceId: created.data.id })).toMatchObject({
+      ok: true,
+      data: [{ title: 'Compose runtime' }],
+    })
     expect(runtime.system.info()).toEqual({
       ok: true,
       data: { appVersion: '9.8.7', runtimeVersion: '22.test' },
@@ -230,7 +240,9 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     })
     if (!composed.ok) throw new Error('expected runtime')
 
-    for (const name of FUTURE_RUNTIME_PORTS.filter((candidate) => candidate !== 'agent')) {
+    for (const name of FUTURE_RUNTIME_PORTS.filter(
+      (candidate) => candidate !== 'agent' && candidate !== 'task',
+    )) {
       const result = requireRuntimePort(composed.data, name)
       expect(result.ok).toBe(false)
       if (!result.ok) expect(result.error.code).toBe('CAPABILITY_NOT_AVAILABLE')

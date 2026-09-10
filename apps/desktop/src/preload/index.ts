@@ -34,6 +34,14 @@ const bridge: TeskraBridge = {
     validate: (request) => invoke(IPC_CHANNELS.workspaceValidate, request),
     selectDirectory: (request) => invoke(IPC_CHANNELS.workspaceSelectDirectory, request),
   },
+  task: {
+    create: (request) => invoke(IPC_CHANNELS.taskCreate, request),
+    update: (request) => invoke(IPC_CHANNELS.taskUpdate, request),
+    archive: (request) => invoke(IPC_CHANNELS.taskArchive, request),
+    delete: (request) => invoke(IPC_CHANNELS.taskDelete, request),
+    get: (request) => invoke(IPC_CHANNELS.taskGet, request),
+    list: (request) => invoke(IPC_CHANNELS.taskList, request),
+  },
   terminal: {
     create: (request) => invoke(IPC_CHANNELS.terminalCreate, request),
     write: (request) => invoke(IPC_CHANNELS.terminalWrite, request),
