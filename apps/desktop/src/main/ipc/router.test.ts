@@ -266,6 +266,16 @@ function fakeRuntime(): TeskraRuntime {
       ),
       openDirectory: vi.fn(async () => ok(undefined)),
     },
+    prompts: {
+      list: vi.fn(() => ok([{ name: 'plan', source: 'builtin' as const }])),
+      render: vi.fn(() =>
+        ok({
+          name: 'plan',
+          source: 'builtin' as const,
+          content: '# Plan the Task\n\nTitle: Demo Task',
+        }),
+      ),
+    },
     dispose: vi.fn(() => ok(undefined)),
   }
 }
@@ -397,6 +407,29 @@ describe('Typed IPC Router (TASK-020)', () => {
       path: '/repo',
     })
     expect(thrown).toMatchObject({ ok: false, error: { code: 'UNKNOWN' } })
+  })
+
+  it('renders a prompt template through the runtime facade (TASK-079)', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    const request = {
+      name: 'plan',
+      context: {
+        task: { title: 'Demo Task', description: 'Describe it.' },
+        env: { TESKRA_HANDOFF_PATH: '/tmp/handoff.json', TESKRA_ARTIFACT_DIR: '/tmp/artifacts' },
+      },
+    }
+    expect(await ipc.invoke(IPC_CHANNELS.promptRender, request)).toEqual({
+      ok: true,
+      data: { name: 'plan', source: 'builtin', content: '# Plan the Task\n\nTitle: Demo Task' },
+    })
+    expect(runtime.prompts.render).toHaveBeenCalledWith(request)
+
+    const invalid = await ipc.invoke(IPC_CHANNELS.promptRender, { name: 'UPPER CASE' })
+    expect(invalid).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    expect(runtime.prompts.render).toHaveBeenCalledTimes(1)
   })
 
   it('removes all handlers on dispose without touching the runtime', () => {

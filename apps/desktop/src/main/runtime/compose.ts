@@ -45,6 +45,7 @@ import { getLogger, initializeLogging } from '../logger'
 import { createTeskraPaths, type TeskraPaths } from '../paths'
 import { createCommandRunner, type CommandRunner } from '../process/command-runner'
 import { createProcessManager } from '../process/process-manager'
+import { createPromptTemplateService } from '../prompts/prompt-template-service'
 import { createReconciliationService } from '../recovery/reconciliation-service'
 import { createResumeService } from '../recovery/resume-service'
 import { createTerminalManager } from '../terminal/terminal-manager'
@@ -177,6 +178,28 @@ export async function composeTeskraRuntime(
     workspaces: repositories.workspaces,
     events,
   })
+  const promptTemplates = createPromptTemplateService({ paths })
+  /** Maps a Facade workspaceId to its repo path for repo-local overrides. */
+  const repoRootFor = (workspaceId?: string): IpcResult<string | undefined> => {
+    if (workspaceId === undefined) {
+      return { ok: true, data: undefined }
+    }
+    const workspace = repositories.workspaces.getById(workspaceId)
+    if (!workspace.ok) {
+      return workspace
+    }
+    if (workspace.data === null) {
+      return {
+        ok: false,
+        error: {
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The selected workspace no longer exists.',
+          retryable: false,
+        },
+      }
+    }
+    return { ok: true, data: workspace.data.path }
+  }
   const criteriaManager = createCriteriaManager({
     criteria: repositories.criteria,
     tasks: repositories.tasks,
@@ -350,6 +373,18 @@ export async function composeTeskraRuntime(
       list: (request) => artifactStore.list(request),
       get: (request) => artifactStore.get(request),
       scanRun: (request) => artifactStore.scanRun(request),
+    },
+    prompts: {
+      list: (request = {}) => {
+        const repoRoot = repoRootFor(request.workspaceId)
+        return repoRoot.ok ? promptTemplates.listTemplates(repoRoot.data) : repoRoot
+      },
+      render: (request) => {
+        const repoRoot = repoRootFor(request.workspaceId)
+        return repoRoot.ok
+          ? promptTemplates.render({ name: request.name, context: request.context }, repoRoot.data)
+          : repoRoot
+      },
     },
     git: {
       status: ({ workspaceId }) => gitManager.status(workspaceId),

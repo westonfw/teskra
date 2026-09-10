@@ -33,6 +33,7 @@ function stubPaths(): TeskraPaths {
     worktreeRoot: (wsId) => ({ ok: true, data: `${HOST_HOME}/worktrees/${wsId}` }),
     config: () => `${HOST_HOME}/config.json`,
     repoConfig: (repoRoot) => `${repoRoot}/.teskra/config.json`,
+    repoPromptsDir: (repoRoot) => `${repoRoot}/.teskra/prompts`,
   }
 }
 

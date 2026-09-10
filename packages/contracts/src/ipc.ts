@@ -73,6 +73,16 @@ import {
 } from './doctor'
 import type { WorkbenchEventName, WorkbenchEvents } from './event'
 import {
+  listPromptTemplatesRequestSchema,
+  promptTemplateInfoSchema,
+  renderPromptTemplateRequestSchema,
+  renderedPromptSchema,
+  type ListPromptTemplatesRequest,
+  type PromptTemplateInfo,
+  type RenderedPrompt,
+  type RenderPromptTemplateRequest,
+} from './prompt'
+import {
   diffResultSchema,
   gitBranchSchema,
   gitCommitRequestSchema,
@@ -265,6 +275,8 @@ export const IPC_CHANNELS = {
   settingsUpdateConfig: 'teskra:settings:config:update',
   systemOpenDirectory: 'teskra:system:directory:open',
   doctorRun: 'teskra:doctor:run',
+  promptListTemplates: 'teskra:prompt:list-templates',
+  promptRender: 'teskra:prompt:render',
 } as const
 export type IpcChannelName = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
 
@@ -644,6 +656,16 @@ export const doctorRunChannel = channel(
   runDoctorRequestSchema,
   doctorReportSchema,
 )
+export const promptListTemplatesChannel = channel(
+  IPC_CHANNELS.promptListTemplates,
+  listPromptTemplatesRequestSchema,
+  z.array(promptTemplateInfoSchema),
+)
+export const promptRenderChannel = channel(
+  IPC_CHANNELS.promptRender,
+  renderPromptTemplateRequestSchema,
+  renderedPromptSchema,
+)
 
 export const ipcChannelDefinitions = {
   ping: pingChannel,
@@ -719,6 +741,8 @@ export const ipcChannelDefinitions = {
   settingsUpdateConfig: settingsUpdateConfigChannel,
   systemOpenDirectory: systemOpenDirectoryChannel,
   doctorRun: doctorRunChannel,
+  promptListTemplates: promptListTemplatesChannel,
+  promptRender: promptRenderChannel,
 } as const
 
 export interface TeskraBridge {
@@ -822,6 +846,10 @@ export interface TeskraBridge {
     resolveConfig(request?: ResolveConfigRequest): Promise<IpcResult<ResolvedConfig>>
     updateConfig(request: UpdateConfigRequest): Promise<IpcResult<ResolvedConfig>>
     openDirectory(request: OpenSystemDirectoryRequest): Promise<IpcResult<void>>
+  }
+  readonly prompts: {
+    list(request?: ListPromptTemplatesRequest): Promise<IpcResult<PromptTemplateInfo[]>>
+    render(request: RenderPromptTemplateRequest): Promise<IpcResult<RenderedPrompt>>
   }
   readonly events: {
     subscribe<Name extends WorkbenchEventName>(

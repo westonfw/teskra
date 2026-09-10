@@ -54,6 +54,12 @@ export interface TeskraPaths {
    * non-native repoRoot simply yields a path that will not exist on the host.
    */
   repoConfig(repoRoot: string): string
+  /**
+   * <repoRoot>/.teskra/prompts/ (TASK-079 repo-local prompt template
+   * overrides) — resolution only, no I/O. Same host-path caveat as
+   * repoConfig().
+   */
+  repoPromptsDir(repoRoot: string): string
 }
 
 function invalidSegmentError(kind: string, value: string): InternalAppError {
@@ -141,6 +147,9 @@ export function createTeskraPaths(env: NodeJS.ProcessEnv = process.env): TeskraP
     },
     repoConfig(repoRoot: string) {
       return join(repoRoot, TESKRA_DATA_DIR, 'config.json')
+    },
+    repoPromptsDir(repoRoot: string) {
+      return join(repoRoot, TESKRA_DATA_DIR, 'prompts')
     },
   }
 }

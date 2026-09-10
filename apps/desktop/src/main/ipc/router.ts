@@ -359,6 +359,14 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.system.doctor(request)),
   )
   register(
+    ipcChannelDefinitions.promptListTemplates,
+    withRuntime((runtime, request) => runtime.prompts.list(request)),
+  )
+  register(
+    ipcChannelDefinitions.promptRender,
+    withRuntime((runtime, request) => runtime.prompts.render(request)),
+  )
+  register(
     ipcChannelDefinitions.settingsResolveConfig,
     withRuntime((runtime, request) => runtime.settings.resolveConfig(request)),
   )

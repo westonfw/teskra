@@ -40,12 +40,16 @@ import type {
   ListAgentRunsRequest,
   ListArtifactsRequest,
   ListCriteriaSetsRequest,
+  ListPromptTemplatesRequest,
   ListTasksRequest,
   ListTerminalsRequest,
   MergePreflightResult,
   OpenWorkspaceRequest,
   OpenSystemDirectoryRequest,
+  PromptTemplateInfo,
   RecordArtifactRequest,
+  RenderedPrompt,
+  RenderPromptTemplateRequest,
   ResolveConfigRequest,
   ResumeAgentRunRequest,
   RunDoctorRequest,
@@ -119,6 +123,12 @@ export interface SettingsPort {
   resolveConfig(request?: ResolveConfigRequest): IpcResult<ResolvedConfig>
   updateConfig(request: UpdateConfigRequest): IpcResult<ResolvedConfig>
   openDirectory(request: OpenSystemDirectoryRequest): Promise<IpcResult<void>>
+}
+
+/** TASK-079: externalized prompt templates (built-in + repo-local overrides). */
+export interface PromptPort {
+  list(request?: ListPromptTemplatesRequest): IpcResult<readonly PromptTemplateInfo[]>
+  render(request: RenderPromptTemplateRequest): IpcResult<RenderedPrompt>
 }
 
 export interface TaskPort {
@@ -203,6 +213,7 @@ export interface TeskraRuntime {
   readonly terminal: TerminalPort
   readonly system: SystemPort
   readonly settings: SettingsPort
+  readonly prompts: PromptPort
   /** Main-process event source consumed only by RendererEventBridge. */
   readonly events: RuntimeEventSource
   readonly task: TaskPort

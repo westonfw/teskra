@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -229,6 +229,69 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     })
 
     composed.data.dispose()
+  })
+
+  it('renders prompt templates through the facade, honoring repo-local overrides (TASK-079)', async () => {
+    const home = makeHome()
+    const paths = createTeskraPaths({ TESKRA_HOME: home })
+    const composed = await composeTeskraRuntime({
+      paths,
+      commands: wslCommands(),
+      hostPlatform: 'linux',
+      initializeLogs: false,
+    })
+    if (!composed.ok) throw new Error('expected runtime')
+    const runtime = composed.data
+
+    const context = {
+      task: { title: 'Demo Task', description: 'Describe it.' },
+      criteria: ['It works'],
+      role: 'implementer',
+      env: { TESKRA_HANDOFF_PATH: '/tmp/handoff.json', TESKRA_ARTIFACT_DIR: '/tmp/artifacts' },
+    }
+
+    const builtin = runtime.prompts.render({ name: 'implement', context })
+    expect(builtin.ok).toBe(true)
+    if (builtin.ok) {
+      expect(builtin.data.source).toBe('builtin')
+      expect(builtin.data.content).toContain('Demo Task')
+      expect(builtin.data.content).toContain('/tmp/handoff.json')
+      expect(builtin.data.content).not.toMatch(/\{\{[^{}]*\}\}/)
+    }
+
+    const repo = join(home, 'repo')
+    mkdirSync(repo)
+    const workspace = runtime.workspace.create({
+      name: 'Demo',
+      runtime: { kind: 'wsl', distro: 'Ubuntu-24.04' },
+      path: repo,
+    })
+    if (!workspace.ok) throw new Error('expected workspace')
+    mkdirSync(paths.repoPromptsDir(repo), { recursive: true })
+    writeFileSync(join(paths.repoPromptsDir(repo), 'implement.md'), 'OVERRIDE: {{task.title}}')
+
+    const overridden = runtime.prompts.render({
+      name: 'implement',
+      workspaceId: workspace.data.id,
+      context,
+    })
+    expect(overridden.ok).toBe(true)
+    if (overridden.ok) {
+      expect(overridden.data.source).toBe('repo-local')
+      expect(overridden.data.content).toBe('OVERRIDE: Demo Task')
+    }
+
+    const listed = runtime.prompts.list({ workspaceId: workspace.data.id })
+    expect(listed.ok).toBe(true)
+    if (listed.ok) {
+      expect(listed.data.find((info) => info.name === 'implement')?.source).toBe('repo-local')
+      expect(listed.data.find((info) => info.name === 'plan')?.source).toBe('builtin')
+    }
+
+    expect(runtime.prompts.render({ name: 'plan', workspaceId: 'missing', context })).toMatchObject(
+      { ok: false, error: { code: 'WORKSPACE_NOT_FOUND' } },
+    )
+    runtime.dispose()
   })
 
   it('reports every not-yet-mounted port as CAPABILITY_NOT_AVAILABLE', async () => {

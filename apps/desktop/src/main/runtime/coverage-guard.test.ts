@@ -12,11 +12,12 @@ import { describe, expect, it } from 'vitest'
  */
 const mainDir = fileURLToPath(new URL('..', import.meta.url))
 
-const COVERED_MODULES = ['process', 'workspace', 'agents', 'recovery', 'db', 'config']
+const COVERED_MODULES = ['process', 'workspace', 'agents', 'recovery', 'db', 'config', 'prompts']
 
 /** Type declarations and pure data definitions carry no runtime behavior. */
 const EXEMPT = new Set([
   'db/raw-sql.d.ts',
+  'prompts/raw-markdown.d.ts',
   // Pure AgentDefinition data; exercised through the fake agent adapter and
   // registry tests, which import it via the definitions barrel.
   'agents/definitions/fake.ts',

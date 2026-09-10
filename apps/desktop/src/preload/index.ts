@@ -118,6 +118,10 @@ const bridge: TeskraBridge = {
     updateConfig: (request) => invoke(IPC_CHANNELS.settingsUpdateConfig, request),
     openDirectory: (request) => invoke(IPC_CHANNELS.systemOpenDirectory, request),
   },
+  prompts: {
+    list: (request = {}) => invoke(IPC_CHANNELS.promptListTemplates, request),
+    render: (request) => invoke(IPC_CHANNELS.promptRender, request),
+  },
   events: eventSubscriptions,
 }
 
