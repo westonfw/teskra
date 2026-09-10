@@ -113,6 +113,41 @@ describe('WorktreeRepository', () => {
     expect(all.ok && all.data.length).toBe(2)
   })
 
+  it('hides archived worktrees unless includeArchived is set (TASK-047)', () => {
+    setup()
+    repo.create({
+      id: 'wt-1',
+      workspaceId: 'ws-1',
+      branch: 'b1',
+      baseBranch: 'main',
+      path: 'C:\\wt1',
+      isolation: 'worktree',
+      state: 'ready',
+    })
+    repo.create({
+      id: 'wt-2',
+      workspaceId: 'ws-1',
+      branch: 'b2',
+      baseBranch: 'main',
+      path: 'C:\\wt2',
+      isolation: 'worktree',
+      state: 'ready',
+    })
+    const archived = repo.update('wt-2', { archivedAt: '2026-09-10T00:00:00.000Z' })
+    expect(archived.ok && archived.data?.archivedAt).toBe('2026-09-10T00:00:00.000Z')
+
+    const visible = repo.listByWorkspace('ws-1')
+    expect(visible.ok && visible.data.map((wt) => wt.id)).toEqual(['wt-1'])
+    const withArchived = repo.listByWorkspace('ws-1', undefined, true)
+    expect(withArchived.ok && withArchived.data.map((wt) => wt.id).sort()).toEqual([
+      'wt-1',
+      'wt-2',
+    ])
+    // The state filter composes with the archive filter.
+    const archivedReady = repo.listByWorkspace('ws-1', 'ready', true)
+    expect(archivedReady.ok && archivedReady.data.length).toBe(2)
+  })
+
   it('rejects a stored state outside WorktreeState', () => {
     setup()
     repo.create({

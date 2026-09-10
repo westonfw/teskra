@@ -6,7 +6,10 @@ import type {
   IpcResult,
   WorkbenchEvents,
   Workspace,
+  WorktreeCleanupRequest,
+  WorktreeCleanupResult,
   WorktreeCreateRequest,
+  WorktreeDiscardRequest,
   WorktreeIdRequest,
   WorktreeListRequest,
 } from '@teskra/contracts'
@@ -22,12 +25,28 @@ import type { WorkspaceRuntime } from '../workspace/runtime'
 /**
  * WorktreeManager (TASK-043, teskra-tasks.md; ADR-0003).
  *
- * Owns the git-worktree lifecycle for Agent runs: create / list / validate /
- * remove. All git primitives are delegated to CommandRunner (never a direct
- * spawn); GitManager's public interface is left untouched — worktree git
- * commands need a different cwd anchor (the main repository for
- * `git worktree add/remove`, the worktree itself for status probes), so they
- * live here with the same runtime/cwd resolution as GitManager.
+ * Owns the git-worktree lifecycle for Agent runs. All git primitives are
+ * delegated to CommandRunner (never a direct spawn); GitManager's public
+ * interface is left untouched — worktree git commands need a different cwd
+ * anchor (the main repository for `git worktree add/remove`, the worktree
+ * itself for status probes), so they live here with the same runtime/cwd
+ * resolution as GitManager.
+ *
+ * Lifecycle verbs are deliberately separated (TASK-047), never one ambiguous
+ * "remove":
+ *
+ * - Cancel: NOT here — AgentManager.cancel stops the process only and never
+ *   touches the worktree, branch, or files.
+ * - discard(): throws away the worktree and its uncommitted changes. Requires
+ *   an explicit `confirm: true` at the IPC boundary. The agent branch is kept
+ *   by default; `deleteBranch: true` deletes it only when already merged into
+ *   the base branch — unmerged branches are never deleted.
+ * - archive(): writes only the `archived_at` DB marker; git state is
+ *   untouched and list() hides archived records unless `includeArchived`.
+ * - cleanup(): batch-removes only safe leftovers — missing/orphaned records
+ *   (after `git worktree prune`) and leftover directories of merged/discarded
+ *   worktrees. Active states (creating/ready/dirty/conflict) and branches are
+ *   never touched.
  *
  * Naming and placement (ADR-0003, pinned by tests):
  *
@@ -55,7 +74,9 @@ export interface WorktreeManager {
   create(request: WorktreeCreateRequest): Promise<IpcResult<Worktree>>
   list(request: WorktreeListRequest): Promise<IpcResult<Worktree[]>>
   validate(request: WorktreeIdRequest): Promise<IpcResult<Worktree>>
-  remove(request: WorktreeIdRequest): Promise<IpcResult<Worktree>>
+  discard(request: WorktreeDiscardRequest): Promise<IpcResult<Worktree>>
+  archive(request: WorktreeIdRequest): Promise<IpcResult<Worktree>>
+  cleanup(request: WorktreeCleanupRequest): Promise<IpcResult<WorktreeCleanupResult>>
 }
 
 export interface WorktreeManagerDeps {
@@ -351,9 +372,11 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
           detail: `WorktreeManager could not resolve workspace id=${JSON.stringify(request.workspaceId)}`,
         })
       }
-      return request.state === undefined
-        ? deps.worktrees.listByWorkspace(request.workspaceId)
-        : deps.worktrees.listByWorkspace(request.workspaceId, request.state)
+      return deps.worktrees.listByWorkspace(
+        request.workspaceId,
+        request.state,
+        request.includeArchived === true,
+      )
     },
 
     async validate({ worktreeId }) {
@@ -400,33 +423,93 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
       return settle(status.data.stdout.trim().length === 0 ? 'ready' : 'dirty')
     },
 
-    async remove({ worktreeId }) {
+    async discard({ worktreeId, confirm, deleteBranch }) {
+      // TASK-047: discarding throws away uncommitted Agent output, so the IPC
+      // boundary requires an explicit confirmation flag.
+      if (confirm !== true) {
+        return fail({
+          code: 'VALIDATION_FAILED',
+          message:
+            'Discarding a worktree permanently deletes its uncommitted changes; rerun with confirm: true to proceed.',
+          retryable: false,
+          detail: `discard(${JSON.stringify(worktreeId)}) called without confirm: true`,
+        })
+      }
       const found = deps.worktrees.getById(worktreeId)
       if (!found.ok) return found
       if (found.data === null) return missingWorktree(worktreeId)
       const record = found.data
-      if (record.state === 'discarded') return { ok: true, data: record }
 
       const context = contextFor(record.workspaceId)
       if (!context.ok) return context
 
-      const hostPath = hostPathFor(context.data.runtime, record.path)
-      const exists = hostPath.ok && pathExists(hostPath.data)
-      if (exists) {
-        // --force: discarding a worktree intentionally throws away uncommitted
-        // Agent output; the branch (and its commits) is deliberately kept.
-        const removed = await git(context.data, 'worktree-remove', [
-          'worktree',
-          'remove',
-          '--force',
-          context.data.runtime.resolveCwd(record.path),
-        ])
-        if (!removed.ok) return removed
-      } else {
-        // Directory already gone: clear stale administrative files best-effort.
-        await git(context.data, 'worktree-prune', ['worktree', 'prune'])
+      // Branch policy is checked BEFORE anything is torn down: an unmerged
+      // branch is never deleted, and refusing fails the whole call so no
+      // partial state is left behind.
+      let branchExists = false
+      if (deleteBranch === true) {
+        const branchRef = `refs/heads/${record.branch}`
+        const exists = await git(
+          context.data,
+          'branch-exists',
+          ['rev-parse', '--verify', '--quiet', branchRef],
+          context.data.repoCwd,
+          [0, 1],
+        )
+        if (!exists.ok) return exists
+        branchExists = exists.data.exitCode === 0
+        if (branchExists) {
+          const merged = await git(
+            context.data,
+            'branch-merged',
+            ['merge-base', '--is-ancestor', record.branch, record.baseBranch],
+            context.data.repoCwd,
+            [0, 1],
+          )
+          if (!merged.ok) return merged
+          if (merged.data.exitCode !== 0) {
+            return fail({
+              code: 'VALIDATION_FAILED',
+              message: `Branch "${record.branch}" is not merged into "${record.baseBranch}"; unmerged branches are never deleted. Discard without deleteBranch to keep it.`,
+              retryable: false,
+              detail: `refused deleteBranch for unmerged branch=${record.branch} base=${record.baseBranch}`,
+            })
+          }
+        }
       }
 
+      if (record.state !== 'discarded') {
+        const hostPath = hostPathFor(context.data.runtime, record.path)
+        const exists = hostPath.ok && pathExists(hostPath.data)
+        if (exists) {
+          // --force: discarding a worktree intentionally throws away
+          // uncommitted Agent output; the branch (and its commits) is kept
+          // unless the merged check above cleared it for deletion.
+          const removed = await git(context.data, 'worktree-remove', [
+            'worktree',
+            'remove',
+            '--force',
+            context.data.runtime.resolveCwd(record.path),
+          ])
+          if (!removed.ok) return removed
+        } else {
+          // Directory already gone: clear stale administrative files best-effort.
+          await git(context.data, 'worktree-prune', ['worktree', 'prune'])
+        }
+      }
+
+      if (deleteBranch === true && branchExists) {
+        // `git branch -d` (never -D): the merged check above already passed,
+        // so a failure here means git disagrees — surface it, don't force.
+        const deleted = await git(context.data, 'branch-delete', [
+          'branch',
+          '-d',
+          record.branch,
+        ])
+        if (!deleted.ok) return deleted
+      }
+
+      if (record.state === 'discarded') return { ok: true, data: record }
       const updated = deps.worktrees.update(
         record.id,
         { state: 'discarded', discardedAt: now() },
@@ -436,6 +519,70 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
       if (updated.data === null) return missingWorktree(record.id)
       deps.events.emit('git.changed', { workspaceId: record.workspaceId })
       return { ok: true, data: updated.data }
+    },
+
+    async archive({ worktreeId }) {
+      // TASK-047: archive writes only the DB marker — no git state changes, no
+      // state-machine transition; list() hides the record by default.
+      const found = deps.worktrees.getById(worktreeId)
+      if (!found.ok) return found
+      if (found.data === null) return missingWorktree(worktreeId)
+      if (found.data.archivedAt !== undefined) return { ok: true, data: found.data }
+      const updated = deps.worktrees.update(worktreeId, { archivedAt: now() }, now())
+      if (!updated.ok) return updated
+      return updated.data === null ? missingWorktree(worktreeId) : { ok: true, data: updated.data }
+    },
+
+    async cleanup({ workspaceId }) {
+      // TASK-047: cleanup removes only safe leftovers. It never touches
+      // active states (creating/ready/dirty/conflict), never deletes branches,
+      // and never deletes an orphaned directory (it may hold Agent output that
+      // lost its git metadata — only discard() with confirm may destroy that).
+      const context = contextFor(workspaceId)
+      if (!context.ok) return context
+
+      const listed = deps.worktrees.listByWorkspace(workspaceId, undefined, true)
+      if (!listed.ok) return listed
+
+      const prunedRecordIds: string[] = []
+      const removedDirectoryIds: string[] = []
+      const skippedIds: string[] = []
+      let pruned = false
+
+      for (const record of listed.data) {
+        if (record.state === 'missing' || record.state === 'orphaned') {
+          if (!pruned) {
+            const prune = await git(context.data, 'worktree-prune', ['worktree', 'prune'])
+            if (!prune.ok) return prune
+            pruned = true
+          }
+          const deleted = deps.worktrees.delete(record.id)
+          if (!deleted.ok) return deleted
+          prunedRecordIds.push(record.id)
+          continue
+        }
+        if (record.state === 'merged' || record.state === 'discarded') {
+          const hostPath = hostPathFor(context.data.runtime, record.path)
+          const exists = hostPath.ok && pathExists(hostPath.data)
+          if (exists) {
+            const removed = await git(context.data, 'worktree-remove', [
+              'worktree',
+              'remove',
+              '--force',
+              context.data.runtime.resolveCwd(record.path),
+            ])
+            if (!removed.ok) return removed
+            removedDirectoryIds.push(record.id)
+          }
+          continue
+        }
+        skippedIds.push(record.id)
+      }
+
+      if (prunedRecordIds.length > 0 || removedDirectoryIds.length > 0) {
+        deps.events.emit('git.changed', { workspaceId })
+      }
+      return { ok: true, data: { workspaceId, prunedRecordIds, removedDirectoryIds, skippedIds } }
     },
   }
 }

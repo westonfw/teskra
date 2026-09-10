@@ -359,7 +359,8 @@ export function createDoctorService(deps: DoctorServiceDeps): DoctorService {
         )
       } else {
         const [worktrees, runs, branches, status] = await Promise.all([
-          Promise.resolve(deps.worktrees.listByWorkspace(workspace.id)),
+          // includeArchived: Doctor audits every record, hidden ones included.
+          Promise.resolve(deps.worktrees.listByWorkspace(workspace.id, undefined, true)),
           Promise.resolve(deps.runs.listByWorkspace(workspace.id)),
           deps.git.branch(workspace.id),
           deps.git.status(workspace.id),

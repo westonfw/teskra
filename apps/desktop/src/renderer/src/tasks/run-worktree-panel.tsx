@@ -1,5 +1,5 @@
-import { MergeOutlined, NodeExpandOutlined } from '@ant-design/icons'
-import { Alert, Button, Card, Space, Tag, Typography } from 'antd'
+import { DeleteOutlined, MergeOutlined, NodeExpandOutlined } from '@ant-design/icons'
+import { Alert, App as AntApp, Button, Card, Space, Tag, Typography } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
 
 import type { AgentRun, PublicAppError, Workspace, Worktree } from '@teskra/contracts'
@@ -45,7 +45,9 @@ export function RunWorktreePanel({ run, workspace }: RunWorktreePanelProps) {
   const [conflicts, setConflicts] = useState<readonly string[]>([])
   const [error, setError] = useState<PublicAppError>()
   const [merging, setMerging] = useState(false)
+  const [discarding, setDiscarding] = useState(false)
   const [openingTerminal, setOpeningTerminal] = useState(false)
+  const { modal } = AntApp.useApp()
   const createTerminal = useTerminalStore((state) => state.createTerminal)
   const navigate = useNavigationStore((state) => state.navigate)
 
@@ -97,8 +99,37 @@ export function RunWorktreePanel({ run, workspace }: RunWorktreePanelProps) {
     }
   }
 
-  const handleOpenTerminal = async (): Promise<void> => {
+  // TASK-047: discard is destructive (uncommitted changes are thrown away),
+  // so it goes through a confirmation dialog that passes confirm: true.
+  const handleDiscard = (): void => {
     if (worktree === undefined || worktree === null) return
+    const target = worktree
+    modal.confirm({
+      title: 'Discard this worktree?',
+      content: `This permanently deletes the worktree directory and its uncommitted changes. The branch "${target.branch}" and its commits are kept.`,
+      okText: 'Discard',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        setDiscarding(true)
+        setError(undefined)
+        try {
+          const result = await window.teskra.worktree.discard({
+            worktreeId: target.id,
+            confirm: true,
+          })
+          if (!result.ok) {
+            setError(result.error)
+            return
+          }
+          setWorktree(result.data)
+        } finally {
+          setDiscarding(false)
+        }
+      },
+    })
+  }
+
+  const handleOpenTerminal = async (): Promise<void> => {    if (worktree === undefined || worktree === null) return
     setOpeningTerminal(true)
     try {
       const session = await createTerminal({
@@ -194,6 +225,16 @@ export function RunWorktreePanel({ run, workspace }: RunWorktreePanelProps) {
                   onClick={() => void handleOpenTerminal()}
                 >
                   Open terminal in worktree
+                </Button>
+              )}
+              {worktree.state !== 'merged' && worktree.state !== 'discarded' && (
+                <Button
+                  danger
+                  icon={<DeleteOutlined />}
+                  loading={discarding}
+                  onClick={handleDiscard}
+                >
+                  Discard
                 </Button>
               )}
             </Space>

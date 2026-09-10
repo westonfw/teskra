@@ -87,7 +87,7 @@ const SCHEMA: Record<string, TableSpec> = {
     ],
   },
   worktrees: {
-    source: '§139.1 lines 5232–5247 + idx_worktrees_run (line 5518, 循环引用处理)',
+    source: '§139.1 lines 5232–5247 + idx_worktrees_run (line 5518, 循环引用处理) + 006_worktree_archive (TASK-047)',
     columns: [
       ['id', 'TEXT', 0, null, 1],
       ['workspace_id', 'TEXT', 1, null, 0],
@@ -101,6 +101,8 @@ const SCHEMA: Record<string, TableSpec> = {
       ['discarded_at', 'TEXT', 0, null, 0],
       ['created_at', 'TEXT', 1, null, 0],
       ['updated_at', 'TEXT', 1, null, 0],
+      // 006_worktree_archive (TASK-047): ALTER TABLE appends at the end.
+      ['archived_at', 'TEXT', 0, null, 0],
     ],
     // run_id 故意不设 FK（与 agent_runs.worktree_id 的循环引用，§139.1 lines 5493–5516）
     foreignKeys: [{ from: 'workspace_id', table: 'workspaces', to: 'id', onDelete: 'CASCADE' }],
@@ -112,6 +114,12 @@ const SCHEMA: Record<string, TableSpec> = {
         columns: ['workspace_id', 'state'],
       },
       { name: 'idx_worktrees_run', unique: false, partial: false, columns: ['run_id'] },
+      {
+        name: 'idx_worktrees_workspace_archived',
+        unique: false,
+        partial: false,
+        columns: ['workspace_id', 'archived_at'],
+      },
     ],
   },
   workflow_runs: {

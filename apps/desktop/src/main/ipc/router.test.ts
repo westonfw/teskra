@@ -159,7 +159,11 @@ function fakeRuntime(): TeskraRuntime {
       merge: vi.fn(async () =>
         ok({ worktreeId: 'wt1', outcome: 'merged' as const, worktree: WORKTREE }),
       ),
-      remove: vi.fn(async () => ok(WORKTREE)),
+      discard: vi.fn(async () => ok(WORKTREE)),
+      archive: vi.fn(async () => ok(WORKTREE)),
+      cleanup: vi.fn(async () =>
+        ok({ workspaceId: 'ws1', prunedRecordIds: [], removedDirectoryIds: [], skippedIds: [] }),
+      ),
     },
     system: {
       info: vi.fn(() => ok({ appVersion: '0.1.0', runtimeVersion: '22.0.0' })),

@@ -56,7 +56,10 @@ import type {
   WorkspaceIdRequest,
   WorkspaceValidationResult,
   Worktree,
+  WorktreeCleanupRequest,
+  WorktreeCleanupResult,
   WorktreeCreateRequest,
+  WorktreeDiscardRequest,
   WorktreeIdRequest,
   WorktreeListRequest,
   WorktreeMergeRequest,
@@ -146,7 +149,9 @@ export interface WorktreePort {
   validate(request: WorktreeIdRequest): Promise<IpcResult<Worktree>>
   preflight(request: WorktreeIdRequest): Promise<IpcResult<MergePreflightResult>>
   merge(request: WorktreeMergeRequest): Promise<IpcResult<WorktreeMergeResult>>
-  remove(request: WorktreeIdRequest): Promise<IpcResult<Worktree>>
+  discard(request: WorktreeDiscardRequest): Promise<IpcResult<Worktree>>
+  archive(request: WorktreeIdRequest): Promise<IpcResult<Worktree>>
+  cleanup(request: WorktreeCleanupRequest): Promise<IpcResult<WorktreeCleanupResult>>
 }
 
 export type FutureRuntimePort = object

@@ -150,24 +150,28 @@ describe('runMigrations (TASK-006)', () => {
 })
 
 describe('MIGRATIONS registry (TASK-006)', () => {
-  it('is the ordered 001–005 chain', () => {
-    expect(MIGRATIONS.map((m) => m.version)).toEqual([1, 2, 3, 4, 5])
+  it('is the ordered 001–006 chain', () => {
+    expect(MIGRATIONS.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6])
     expect(MIGRATIONS.map((m) => m.name)).toEqual([
       '001_init',
       '002_runs',
       '003_criteria_review',
       '004_artifacts_memory',
       '005_permissions',
+      '006_worktree_archive',
     ])
   })
 
   it('migrates an empty database to the latest version via migrateDatabase', () => {
     const db = memoryDb()
     const result = migrateDatabase(db)
-    expect(result).toEqual({ ok: true, data: { fromVersion: 0, toVersion: 5, applied: [1, 2, 3, 4, 5] } })
-    expect(appliedVersions(db)).toEqual([1, 2, 3, 4, 5])
+    expect(result).toEqual({
+      ok: true,
+      data: { fromVersion: 0, toVersion: 6, applied: [1, 2, 3, 4, 5, 6] },
+    })
+    expect(appliedVersions(db)).toEqual([1, 2, 3, 4, 5, 6])
 
     const second = migrateDatabase(db)
-    expect(second).toEqual({ ok: true, data: { fromVersion: 5, toVersion: 5, applied: [] } })
+    expect(second).toEqual({ ok: true, data: { fromVersion: 6, toVersion: 6, applied: [] } })
   })
 })

@@ -100,7 +100,9 @@ export function createReconciliationService(
       const brokenWorktrees: BrokenWorktree[] = []
       const worktreeHealth = new Map<string, Worktree['state']>()
       for (const workspace of listedWorkspaces.data) {
-        const listed = deps.worktrees.listByWorkspace(workspace.id)
+        // includeArchived: reconciliation repairs git reality regardless of
+        // the TASK-047 display marker.
+        const listed = deps.worktrees.listByWorkspace(workspace.id, undefined, true)
         if (!listed.ok) return listed
         const health = workspaceHealth.get(workspace.id)
         for (const worktree of listed.data) {

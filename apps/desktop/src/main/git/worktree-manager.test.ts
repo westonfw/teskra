@@ -257,14 +257,37 @@ describe('WorktreeManager (TASK-043)', () => {
     expect(unknown).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
   })
 
-  it('remove runs git worktree remove and transitions to discarded (idempotent)', async () => {
+  it('discard refuses without explicit confirmation and leaves everything in place', async () => {
+    const fixture = await setup()
+    const created = requireOk(
+      await fixture.manager.create({ workspaceId: 'workspace-1', runId: 'run-1' }),
+    )
+    writeFileSync(join(created.path, 'uncommitted.txt'), 'still here\n')
+
+    for (const request of [
+      { worktreeId: created.id },
+      { worktreeId: created.id, confirm: false },
+    ]) {
+      const refused = await fixture.manager.discard(request)
+      expect(refused).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+      if (!refused.ok) expect(refused.error.message).toContain('confirm')
+      expect(existsSync(created.path)).toBe(true)
+      const persisted = requireOk(fixture.worktrees.getById(created.id))
+      expect(persisted).toMatchObject({ state: 'ready' })
+      expect(persisted?.discardedAt).toBeUndefined()
+    }
+  })
+
+  it('discard runs git worktree remove and transitions to discarded (idempotent)', async () => {
     const fixture = await setup()
     const created = requireOk(
       await fixture.manager.create({ workspaceId: 'workspace-1', runId: 'run-1' }),
     )
     writeFileSync(join(created.path, 'uncommitted.txt'), 'discarded with the worktree\n')
 
-    const removed = requireOk(await fixture.manager.remove({ worktreeId: created.id }))
+    const removed = requireOk(
+      await fixture.manager.discard({ worktreeId: created.id, confirm: true }),
+    )
     expect(removed).toMatchObject({ state: 'discarded' })
     expect(removed.discardedAt).toBeDefined()
     expect(existsSync(created.path)).toBe(false)
@@ -284,17 +307,21 @@ describe('WorktreeManager (TASK-043)', () => {
     })
     expect(requireOk(branches).stdout).toContain('refs/heads/agent/run-1')
 
-    const again = requireOk(await fixture.manager.remove({ worktreeId: created.id }))
+    const again = requireOk(
+      await fixture.manager.discard({ worktreeId: created.id, confirm: true }),
+    )
     expect(again.state).toBe('discarded')
   })
 
-  it('remove prunes administrative files when the directory is already gone', async () => {
+  it('discard prunes administrative files when the directory is already gone', async () => {
     const fixture = await setup()
     const created = requireOk(
       await fixture.manager.create({ workspaceId: 'workspace-1', runId: 'run-1' }),
     )
     rmSync(created.path, { recursive: true, force: true })
-    const removed = requireOk(await fixture.manager.remove({ worktreeId: created.id }))
+    const removed = requireOk(
+      await fixture.manager.discard({ worktreeId: created.id, confirm: true }),
+    )
     expect(removed.state).toBe('discarded')
     const listed = await fixture.commands.run({
       command: 'git',
@@ -551,5 +578,197 @@ describe('WorktreeManager exclude merge (unit)', () => {
       updatedAt: '2026-09-10T00:00:00.000Z',
     }
     expect(sample.state).toBe('ready')
+  })
+})
+
+describe('WorktreeManager lifecycle verbs (TASK-047)', () => {
+  const gitBranches = async (fixture: Fixture): Promise<string> => {
+    const result = await fixture.commands.run({
+      command: 'git',
+      args: ['branch', '--format=%(refname)'],
+      cwd: fixture.repoDir,
+      timeoutMs: 15_000,
+    })
+    return requireOk(result).stdout
+  }
+
+  const commitInWorktree = async (fixture: Fixture, path: string, message: string) => {
+    writeFileSync(join(path, 'agent-work.txt'), `${message}\n`)
+    for (const args of [
+      ['add', '--all'],
+      ['commit', '--message', message],
+    ]) {
+      const result = await fixture.commands.run({
+        command: 'git',
+        args,
+        cwd: path,
+        timeoutMs: 15_000,
+      })
+      if (!result.ok || result.data.exitCode !== 0) {
+        throw new Error(`git ${args.join(' ')} failed in ${path}`)
+      }
+    }
+  }
+
+  it('discard with deleteBranch refuses an unmerged branch and changes nothing', async () => {
+    const fixture = await setup()
+    const created = requireOk(
+      await fixture.manager.create({ workspaceId: 'workspace-1', runId: 'run-1' }),
+    )
+    await commitInWorktree(fixture, created.path, 'agent: unmerged work')
+
+    const refused = await fixture.manager.discard({
+      worktreeId: created.id,
+      confirm: true,
+      deleteBranch: true,
+    })
+    expect(refused).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    if (!refused.ok) expect(refused.error.message).toContain('not merged')
+
+    // Nothing was torn down: directory, state and branch are all intact.
+    expect(existsSync(created.path)).toBe(true)
+    expect(requireOk(fixture.worktrees.getById(created.id))?.state).toBe('ready')
+    expect(await gitBranches(fixture)).toContain(`refs/heads/${created.branch}`)
+  })
+
+  it('discard with deleteBranch deletes the branch only when merged into base', async () => {
+    const fixture = await setup()
+    const created = requireOk(
+      await fixture.manager.create({ workspaceId: 'workspace-1', runId: 'run-1' }),
+    )
+    await commitInWorktree(fixture, created.path, 'agent: merged work')
+    const merged = await fixture.commands.run({
+      command: 'git',
+      args: ['merge', '--no-edit', created.branch],
+      cwd: fixture.repoDir,
+      timeoutMs: 15_000,
+    })
+    expect(requireOk(merged).exitCode).toBe(0)
+
+    const discarded = requireOk(
+      await fixture.manager.discard({
+        worktreeId: created.id,
+        confirm: true,
+        deleteBranch: true,
+      }),
+    )
+    expect(discarded.state).toBe('discarded')
+    expect(existsSync(created.path)).toBe(false)
+    expect(await gitBranches(fixture)).not.toContain(`refs/heads/${created.branch}`)
+  })
+
+  it('archive writes only the DB marker: git state untouched, hidden from list by default', async () => {
+    const fixture = await setup()
+    const created = requireOk(
+      await fixture.manager.create({ workspaceId: 'workspace-1', runId: 'run-1' }),
+    )
+    writeFileSync(join(created.path, 'uncommitted.txt'), 'kept\n')
+
+    const archived = requireOk(await fixture.manager.archive({ worktreeId: created.id }))
+    expect(archived.archivedAt).toBeDefined()
+    expect(archived.state).toBe('ready')
+
+    // Git reality is unchanged: directory, uncommitted file and branch remain.
+    expect(existsSync(join(created.path, 'uncommitted.txt'))).toBe(true)
+    expect(await gitBranches(fixture)).toContain(`refs/heads/${created.branch}`)
+
+    // list() filters archived records unless includeArchived is set.
+    const visible = requireOk(await fixture.manager.list({ workspaceId: 'workspace-1' }))
+    expect(visible.map((worktree) => worktree.id)).toEqual([])
+    const withArchived = requireOk(
+      await fixture.manager.list({ workspaceId: 'workspace-1', includeArchived: true }),
+    )
+    expect(withArchived.map((worktree) => worktree.id)).toEqual([created.id])
+
+    // Idempotent: a second archive keeps the original marker.
+    const again = requireOk(await fixture.manager.archive({ worktreeId: created.id }))
+    expect(again.archivedAt).toBe(archived.archivedAt)
+  })
+
+  it('cleanup removes only safe leftovers and reports what it did (idempotent)', async () => {
+    const fixture = await setup()
+
+    // Active states that cleanup must never touch.
+    const ready = requireOk(
+      await fixture.manager.create({ workspaceId: 'workspace-1', runId: 'run-ready' }),
+    )
+    const dirty = requireOk(
+      await fixture.manager.create({ workspaceId: 'workspace-1', runId: 'run-dirty' }),
+    )
+    writeFileSync(join(dirty.path, 'dirty.txt'), 'uncommitted\n')
+    const conflict = requireOk(
+      await fixture.manager.create({ workspaceId: 'workspace-1', runId: 'run-conflict' }),
+    )
+    requireOk(fixture.worktrees.updateState(conflict.id, 'conflict'))
+
+    // Safe leftovers: a missing record (directory deleted out of band), an
+    // orphaned record (plain directory, not a git worktree), and terminal
+    // worktrees whose directories are still on disk.
+    const missing = requireOk(
+      await fixture.manager.create({ workspaceId: 'workspace-1', runId: 'run-missing' }),
+    )
+    rmSync(missing.path, { recursive: true, force: true })
+    requireOk(await fixture.manager.validate({ worktreeId: missing.id }))
+
+    const orphanDir = join(fixture.dataRoot, 'worktrees', 'workspace-1', 'run-orphan')
+    mkdirSync(orphanDir, { recursive: true })
+    const orphaned = fixture.worktrees.create({
+      id: 'worktree-orphan',
+      workspaceId: 'workspace-1',
+      runId: 'run-orphan',
+      branch: 'agent/run-orphan',
+      baseBranch: 'main',
+      path: orphanDir,
+      isolation: 'worktree',
+      state: 'orphaned',
+    })
+    if (!orphaned.ok) throw new Error(orphaned.error.message)
+
+    const discarded = requireOk(
+      await fixture.manager.create({ workspaceId: 'workspace-1', runId: 'run-discarded' }),
+    )
+    requireOk(fixture.worktrees.updateState(discarded.id, 'discarded'))
+    const merged = requireOk(
+      await fixture.manager.create({ workspaceId: 'workspace-1', runId: 'run-merged' }),
+    )
+    requireOk(fixture.worktrees.updateState(merged.id, 'merged'))
+
+    const report = requireOk(await fixture.manager.cleanup({ workspaceId: 'workspace-1' }))
+    expect(report.prunedRecordIds.sort()).toEqual([missing.id, 'worktree-orphan'].sort())
+    expect(report.removedDirectoryIds.sort()).toEqual([discarded.id, merged.id].sort())
+    expect(report.skippedIds.sort()).toEqual([ready.id, dirty.id, conflict.id].sort())
+
+    // Missing/orphaned records are gone; terminal records stay as history.
+    expect(requireOk(fixture.worktrees.getById(missing.id))).toBeNull()
+    expect(requireOk(fixture.worktrees.getById('worktree-orphan'))).toBeNull()
+    expect(requireOk(fixture.worktrees.getById(discarded.id))?.state).toBe('discarded')
+    expect(requireOk(fixture.worktrees.getById(merged.id))?.state).toBe('merged')
+
+    // Directories: removed for merged/discarded, untouched for active states,
+    // and the orphaned directory is left alone (it may hold Agent output).
+    expect(existsSync(discarded.path)).toBe(false)
+    expect(existsSync(merged.path)).toBe(false)
+    expect(existsSync(ready.path)).toBe(true)
+    expect(existsSync(join(dirty.path, 'dirty.txt'))).toBe(true)
+    expect(existsSync(conflict.path)).toBe(true)
+    expect(existsSync(orphanDir)).toBe(true)
+
+    // Branches are never deleted by cleanup.
+    const branches = await gitBranches(fixture)
+    for (const worktree of [ready, dirty, conflict, discarded, merged]) {
+      expect(branches).toContain(`refs/heads/${worktree.branch}`)
+    }
+
+    // Idempotent: a second run finds nothing left to clean.
+    const second = requireOk(await fixture.manager.cleanup({ workspaceId: 'workspace-1' }))
+    expect(second.prunedRecordIds).toEqual([])
+    expect(second.removedDirectoryIds).toEqual([])
+    expect(second.skippedIds.sort()).toEqual([ready.id, dirty.id, conflict.id].sort())
+  })
+
+  it('cleanup rejects an unknown workspace', async () => {
+    const fixture = await setup()
+    const result = await fixture.manager.cleanup({ workspaceId: 'nope' })
+    expect(result).toMatchObject({ ok: false, error: { code: 'WORKSPACE_NOT_FOUND' } })
   })
 })

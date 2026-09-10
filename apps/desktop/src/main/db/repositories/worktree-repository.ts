@@ -27,6 +27,7 @@ export const worktreeRecordSchema = z.strictObject({
   isolation: worktreeIsolationSchema,
   mergedAt: isoTimestampSchema.optional(),
   discardedAt: isoTimestampSchema.optional(),
+  archivedAt: isoTimestampSchema.optional(),
   createdAt: isoTimestampSchema,
   updatedAt: isoTimestampSchema,
 })
@@ -43,6 +44,7 @@ interface WorktreeRow {
   isolation: string
   merged_at: string | null
   discarded_at: string | null
+  archived_at: string | null
   created_at: string
   updated_at: string
 }
@@ -66,6 +68,7 @@ export interface UpdateWorktreeInput {
   readonly state?: WorktreeState
   readonly mergedAt?: string | null
   readonly discardedAt?: string | null
+  readonly archivedAt?: string | null
 }
 
 export interface WorktreeRepository {
@@ -75,7 +78,12 @@ export interface WorktreeRepository {
   getByRunId(runId: string): IpcResult<Worktree | null>
   update(id: string, patch: UpdateWorktreeInput, now?: string): IpcResult<Worktree | null>
   updateState(id: string, state: WorktreeState, now?: string): IpcResult<Worktree | null>
-  listByWorkspace(workspaceId: string, state?: WorktreeState): IpcResult<Worktree[]>
+  /** Archived worktrees (TASK-047) are hidden unless `includeArchived` is true. */
+  listByWorkspace(
+    workspaceId: string,
+    state?: WorktreeState,
+    includeArchived?: boolean,
+  ): IpcResult<Worktree[]>
   delete(id: string): IpcResult<boolean>
 }
 
@@ -93,6 +101,7 @@ function toDomain(row: WorktreeRow): IpcResult<Worktree> {
     isolation: row.isolation,
     mergedAt: row.merged_at ?? undefined,
     discardedAt: row.discarded_at ?? undefined,
+    archivedAt: row.archived_at ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   })
@@ -181,6 +190,10 @@ export function createWorktreeRepository(connection: Database.Database): Worktre
         sets.push('discarded_at = ?')
         values.push(patch.discardedAt)
       }
+      if (patch.archivedAt !== undefined) {
+        sets.push('archived_at = ?')
+        values.push(patch.archivedAt)
+      }
       if (sets.length === 0) {
         return repository.getById(id)
       }
@@ -204,12 +217,15 @@ export function createWorktreeRepository(connection: Database.Database): Worktre
       return repository.update(id, { state }, now)
     },
 
-    listByWorkspace(workspaceId, state) {
+    listByWorkspace(workspaceId, state, includeArchived = false) {
       const conditions = ['workspace_id = ?']
       const values: unknown[] = [workspaceId]
       if (state !== undefined) {
         conditions.push('state = ?')
         values.push(state)
+      }
+      if (!includeArchived) {
+        conditions.push('archived_at IS NULL')
       }
       const rows = execute(ENTITY, 'listByWorkspace', () => {
         return connection

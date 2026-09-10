@@ -483,6 +483,32 @@ describe('AgentManager (TASK-028)', () => {
     expect(context.manager.list({ activeOnly: true })).toEqual({ ok: true, data: [] })
   })
 
+  it('cancel stops only the process — the worktree, branch and files are untouched (TASK-047)', async () => {
+    const context = setup()
+    const worktree = context.worktrees.create({
+      id: 'worktree-1',
+      workspaceId: 'workspace-1',
+      branch: 'agent/run-1',
+      baseBranch: 'main',
+      path: '/worktrees/run-1',
+      state: 'dirty',
+      isolation: 'worktree',
+    })
+    if (!worktree.ok) throw new Error(worktree.error.message)
+    await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      worktreeId: 'worktree-1',
+    })
+
+    const result = await context.manager.cancel('run-1')
+    expect(result).toMatchObject({ ok: true, data: { status: 'cancelled' } })
+
+    // The worktree record is byte-identical: no state transition, no
+    // discarded/archived marker — cancel is process-scoped by design.
+    expect(context.worktrees.getById('worktree-1')).toEqual(worktree)
+  })
+
   it.each([
     ['global', { maxGlobalRuns: 1, maxRunsPerWorkspace: 3, maxRunsPerAgent: 2 }],
     ['workspace', { maxGlobalRuns: 4, maxRunsPerWorkspace: 1, maxRunsPerAgent: 2 }],

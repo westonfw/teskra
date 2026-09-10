@@ -8,6 +8,7 @@ import runsSql from './migrations/002_runs.sql?raw'
 import criteriaReviewSql from './migrations/003_criteria_review.sql?raw'
 import artifactsMemorySql from './migrations/004_artifacts_memory.sql?raw'
 import permissionsSql from './migrations/005_permissions.sql?raw'
+import worktreeArchiveSql from './migrations/006_worktree_archive.sql?raw'
 
 /**
  * The canonical migration chain (TASK-006). The .sql files under
@@ -24,6 +25,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 3, name: '003_criteria_review', sql: criteriaReviewSql },
   { version: 4, name: '004_artifacts_memory', sql: artifactsMemorySql },
   { version: 5, name: '005_permissions', sql: permissionsSql },
+  { version: 6, name: '006_worktree_archive', sql: worktreeArchiveSql },
 ]
 
 /** Brings the database schema up to the latest known version. */

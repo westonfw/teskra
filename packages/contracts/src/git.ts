@@ -40,6 +40,8 @@ export const worktreeSchema = z.strictObject({
   isolation: worktreeIsolationSchema,
   mergedAt: z.string().datetime().optional(),
   discardedAt: z.string().datetime().optional(),
+  /** TASK-047 archive marker; affects list visibility only, never git state. */
+  archivedAt: z.string().datetime().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 })
@@ -64,11 +66,48 @@ export type WorktreeCreateRequest = z.infer<typeof worktreeCreateRequestSchema>
 export const worktreeListRequestSchema = z.strictObject({
   workspaceId: z.string().min(1),
   state: worktreeStateSchema.optional(),
+  /** TASK-047: archived worktrees are hidden unless explicitly requested. */
+  includeArchived: z.boolean().optional(),
 })
 export type WorktreeListRequest = z.infer<typeof worktreeListRequestSchema>
 
 export const worktreeIdRequestSchema = z.strictObject({ worktreeId: z.string().min(1) })
 export type WorktreeIdRequest = z.infer<typeof worktreeIdRequestSchema>
+
+/**
+ * TASK-047 discard semantics: discarding throws away uncommitted changes, so
+ * the IPC layer requires an explicit `confirm: true`. The agent branch is kept
+ * by default; `deleteBranch: true` additionally deletes it, but only when it is
+ * already merged into the base branch — unmerged branches are never deleted.
+ */
+export const worktreeDiscardRequestSchema = z.strictObject({
+  worktreeId: z.string().min(1),
+  confirm: z.boolean().optional(),
+  deleteBranch: z.boolean().optional(),
+})
+export type WorktreeDiscardRequest = z.infer<typeof worktreeDiscardRequestSchema>
+
+/**
+ * TASK-047 cleanup: removes only safe leftovers — records whose worktree is
+ * already 'missing'/'orphaned' (plus a `git worktree prune`) and leftover
+ * directories of 'merged'/'discarded' worktrees. Active states
+ * (creating/ready/dirty/conflict) and branches are never touched.
+ */
+export const worktreeCleanupRequestSchema = z.strictObject({
+  workspaceId: z.string().min(1),
+})
+export type WorktreeCleanupRequest = z.infer<typeof worktreeCleanupRequestSchema>
+
+export const worktreeCleanupResultSchema = z.strictObject({
+  workspaceId: z.string(),
+  /** missing/orphaned records deleted after `git worktree prune`. */
+  prunedRecordIds: z.array(z.string()),
+  /** merged/discarded worktrees whose leftover directories were removed. */
+  removedDirectoryIds: z.array(z.string()),
+  /** Active worktrees (creating/ready/dirty/conflict) left untouched. */
+  skippedIds: z.array(z.string()),
+})
+export type WorktreeCleanupResult = z.infer<typeof worktreeCleanupResultSchema>
 
 /**
  * TASK-045 merge-preflight check identifiers. Stable ids (not labels) are the

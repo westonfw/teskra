@@ -334,7 +334,9 @@ export async function composeTeskraRuntime(
       validate: (request) => worktreeManager.validate(request),
       preflight: (request) => mergePreflight.check(request),
       merge: (request) => mergeService.merge(request),
-      remove: (request) => worktreeManager.remove(request),
+      discard: (request) => worktreeManager.discard(request),
+      archive: (request) => worktreeManager.archive(request),
+      cleanup: (request) => worktreeManager.cleanup(request),
     },
     agent: {
       listDefinitions: () => ({ ok: true, data: registeredAgents.data.list() }),
