@@ -75,6 +75,12 @@ const bridge: TeskraBridge = {
     changes: (request) => invoke(IPC_CHANNELS.gitChanges, request),
     openFile: (request) => invoke(IPC_CHANNELS.gitOpenFile, request),
   },
+  worktree: {
+    create: (request) => invoke(IPC_CHANNELS.worktreeCreate, request),
+    list: (request) => invoke(IPC_CHANNELS.worktreeList, request),
+    validate: (request) => invoke(IPC_CHANNELS.worktreeValidate, request),
+    remove: (request) => invoke(IPC_CHANNELS.worktreeRemove, request),
+  },
   runtime: {
     info: () => invoke(IPC_CHANNELS.runtimeInfo),
     paths: () => invoke(IPC_CHANNELS.runtimePaths),

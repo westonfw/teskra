@@ -215,6 +215,22 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.git.openFile(request)),
   )
   register(
+    ipcChannelDefinitions.worktreeCreate,
+    withRuntime((runtime, request) => runtime.worktree.create(request)),
+  )
+  register(
+    ipcChannelDefinitions.worktreeList,
+    withRuntime((runtime, request) => runtime.worktree.list(request)),
+  )
+  register(
+    ipcChannelDefinitions.worktreeValidate,
+    withRuntime((runtime, request) => runtime.worktree.validate(request)),
+  )
+  register(
+    ipcChannelDefinitions.worktreeRemove,
+    withRuntime((runtime, request) => runtime.worktree.remove(request)),
+  )
+  register(
     ipcChannelDefinitions.terminalCreate,
     withRuntime((runtime, request) => runtime.terminal.create(request)),
   )

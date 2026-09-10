@@ -6,6 +6,7 @@ import {
   type IpcResult,
   type Task,
   type Workspace,
+  type Worktree,
 } from '@teskra/contracts'
 
 import type { TeskraRuntime } from '../runtime/facade'
@@ -45,6 +46,19 @@ const TASK: Task = {
   workspaceId: 'ws1',
   title: 'Demo Task',
   status: 'draft',
+  createdAt: '2026-09-10T00:00:00.000Z',
+  updatedAt: '2026-09-10T00:00:00.000Z',
+}
+
+const WORKTREE: Worktree = {
+  id: 'wt1',
+  workspaceId: 'ws1',
+  runId: 'run-1',
+  branch: 'agent/run-1',
+  baseBranch: 'main',
+  path: '/data/worktrees/ws1/run-1',
+  state: 'ready',
+  isolation: 'worktree',
   createdAt: '2026-09-10T00:00:00.000Z',
   updatedAt: '2026-09-10T00:00:00.000Z',
 }
@@ -136,6 +150,12 @@ function fakeRuntime(): TeskraRuntime {
       commit: vi.fn(async () => ok({ hash: 'abc', output: 'committed' })),
       changes: vi.fn(async () => ok({ files: [] })),
       openFile: vi.fn(async () => ok(undefined)),
+    },
+    worktree: {
+      create: vi.fn(async () => ok(WORKTREE)),
+      list: vi.fn(async () => ok([WORKTREE])),
+      validate: vi.fn(async () => ok(WORKTREE)),
+      remove: vi.fn(async () => ok(WORKTREE)),
     },
     system: {
       info: vi.fn(() => ok({ appVersion: '0.1.0', runtimeVersion: '22.0.0' })),

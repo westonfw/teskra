@@ -241,7 +241,11 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     if (!composed.ok) throw new Error('expected runtime')
 
     for (const name of FUTURE_RUNTIME_PORTS.filter(
-      (candidate) => candidate !== 'agent' && candidate !== 'task' && candidate !== 'git',
+      (candidate) =>
+        candidate !== 'agent' &&
+        candidate !== 'task' &&
+        candidate !== 'git' &&
+        candidate !== 'worktree',
     )) {
       const result = requireRuntimePort(composed.data, name)
       expect(result.ok).toBe(false)

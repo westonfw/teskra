@@ -35,6 +35,7 @@ import {
 import { createEventBus } from '../events/event-bus'
 import { createDiffService } from '../git/diff-service'
 import { createGitManager } from '../git/git-manager'
+import { createWorktreeManager } from '../git/worktree-manager'
 import { createDoctorService } from '../doctor/doctor-service'
 import { getLogger, initializeLogging } from '../logger'
 import { createTeskraPaths, type TeskraPaths } from '../paths'
@@ -179,6 +180,13 @@ export async function composeTeskraRuntime(
     openPath: options.openPath,
   })
   const diffService = createDiffService({ git: gitManager })
+  const worktreeManager = createWorktreeManager({
+    commands,
+    workspaces: repositories.workspaces,
+    worktrees: repositories.worktrees,
+    events,
+    resolveRuntime: (workspace) => runtimeFor(workspace.runtime),
+  })
   const agentDetector = createAgentDetector({
     registry: registeredAgents.data,
     commands,
@@ -288,6 +296,12 @@ export async function composeTeskraRuntime(
       commit: (request) => gitManager.commit(request),
       changes: ({ workspaceId }) => diffService.get(workspaceId),
       openFile: (request) => gitManager.openFile(request),
+    },
+    worktree: {
+      create: (request) => worktreeManager.create(request),
+      list: (request) => worktreeManager.list(request),
+      validate: (request) => worktreeManager.validate(request),
+      remove: (request) => worktreeManager.remove(request),
     },
     agent: {
       listDefinitions: () => ({ ok: true, data: registeredAgents.data.list() }),

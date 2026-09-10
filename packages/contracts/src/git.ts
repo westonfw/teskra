@@ -24,6 +24,52 @@ export const WORKTREE_ISOLATIONS = [
 export const worktreeIsolationSchema = z.enum(WORKTREE_ISOLATIONS)
 export type WorktreeIsolation = z.infer<typeof worktreeIsolationSchema>
 
+/**
+ * Worktree record crossing IPC (TASK-043). Fields mirror the §139.1
+ * `worktrees` table; the Main-side repository validates against its own
+ * stricter copy (ISO-8601 UTC timestamps with ms precision).
+ */
+export const worktreeSchema = z.strictObject({
+  id: z.string(),
+  workspaceId: z.string(),
+  runId: z.string().optional(),
+  branch: z.string(),
+  baseBranch: z.string(),
+  path: z.string(),
+  state: worktreeStateSchema,
+  isolation: worktreeIsolationSchema,
+  mergedAt: z.string().datetime().optional(),
+  discardedAt: z.string().datetime().optional(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+})
+export type Worktree = z.infer<typeof worktreeSchema>
+
+/**
+ * TASK-043 branch naming (ADR-0003): `agent/<taskId>/<agentId>/<runId>` when
+ * the run belongs to a task, otherwise the fixed fallback `agent/<runId>`.
+ */
+export const worktreeCreateRequestSchema = z.strictObject({
+  workspaceId: z.string().min(1),
+  runId: z.string().min(1),
+  taskId: z.string().min(1).optional(),
+  agentId: z.string().min(1).optional(),
+  /** Defaults to the repository's current branch. */
+  baseBranch: z.string().min(1).optional(),
+  /** Defaults to 'worktree'. */
+  isolation: worktreeIsolationSchema.optional(),
+})
+export type WorktreeCreateRequest = z.infer<typeof worktreeCreateRequestSchema>
+
+export const worktreeListRequestSchema = z.strictObject({
+  workspaceId: z.string().min(1),
+  state: worktreeStateSchema.optional(),
+})
+export type WorktreeListRequest = z.infer<typeof worktreeListRequestSchema>
+
+export const worktreeIdRequestSchema = z.strictObject({ worktreeId: z.string().min(1) })
+export type WorktreeIdRequest = z.infer<typeof worktreeIdRequestSchema>
+
 /** plan §40. */
 export const DIFF_FILE_STATUSES = ['added', 'modified', 'deleted', 'renamed'] as const
 export const diffFileStatusSchema = z.enum(DIFF_FILE_STATUSES)

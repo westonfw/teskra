@@ -54,6 +54,10 @@ import type {
   Workspace,
   WorkspaceIdRequest,
   WorkspaceValidationResult,
+  Worktree,
+  WorktreeCreateRequest,
+  WorktreeIdRequest,
+  WorktreeListRequest,
   WslDistribution,
   WslEnvironment,
   WorkbenchEventName,
@@ -133,6 +137,13 @@ export interface AgentCatalogPort {
   getOutput(request: AgentRunIdRequest): IpcResult<string>
 }
 
+export interface WorktreePort {
+  create(request: WorktreeCreateRequest): Promise<IpcResult<Worktree>>
+  list(request: WorktreeListRequest): Promise<IpcResult<readonly Worktree[]>>
+  validate(request: WorktreeIdRequest): Promise<IpcResult<Worktree>>
+  remove(request: WorktreeIdRequest): Promise<IpcResult<Worktree>>
+}
+
 export type FutureRuntimePort = object
 
 export interface RuntimeEventSource {
@@ -152,7 +163,7 @@ export interface TeskraRuntime {
   readonly task: TaskPort
   readonly agent: AgentCatalogPort
   readonly git: GitPort
-  readonly worktree?: FutureRuntimePort
+  readonly worktree: WorktreePort
   readonly workflow?: FutureRuntimePort
   dispose(): IpcResult<void>
 }

@@ -48,6 +48,10 @@ import {
   gitRawDiffSchema,
   gitStatusSchema,
   gitWorkspaceRequestSchema,
+  worktreeCreateRequestSchema,
+  worktreeIdRequestSchema,
+  worktreeListRequestSchema,
+  worktreeSchema,
   type DiffResult,
   type GitBranch,
   type GitCommit,
@@ -59,6 +63,10 @@ import {
   type GitRawDiff,
   type GitStatus,
   type GitWorkspaceRequest,
+  type Worktree,
+  type WorktreeCreateRequest,
+  type WorktreeIdRequest,
+  type WorktreeListRequest,
 } from './git'
 import {
   archiveTaskRequestSchema,
@@ -170,6 +178,10 @@ export const IPC_CHANNELS = {
   gitCommit: 'teskra:git:commit',
   gitChanges: 'teskra:git:changes',
   gitOpenFile: 'teskra:git:open-file',
+  worktreeCreate: 'teskra:worktree:create',
+  worktreeList: 'teskra:worktree:list',
+  worktreeValidate: 'teskra:worktree:validate',
+  worktreeRemove: 'teskra:worktree:remove',
   terminalCreate: 'teskra:terminal:create',
   terminalWrite: 'teskra:terminal:write',
   terminalResize: 'teskra:terminal:resize',
@@ -372,6 +384,26 @@ export const gitOpenFileChannel = channel(
   gitOpenFileRequestSchema,
   voidResponseSchema,
 )
+export const worktreeCreateChannel = channel(
+  IPC_CHANNELS.worktreeCreate,
+  worktreeCreateRequestSchema,
+  worktreeSchema,
+)
+export const worktreeListChannel = channel(
+  IPC_CHANNELS.worktreeList,
+  worktreeListRequestSchema,
+  z.array(worktreeSchema),
+)
+export const worktreeValidateChannel = channel(
+  IPC_CHANNELS.worktreeValidate,
+  worktreeIdRequestSchema,
+  worktreeSchema,
+)
+export const worktreeRemoveChannel = channel(
+  IPC_CHANNELS.worktreeRemove,
+  worktreeIdRequestSchema,
+  worktreeSchema,
+)
 export const terminalCreateChannel = channel(
   IPC_CHANNELS.terminalCreate,
   createTerminalRequestSchema,
@@ -498,6 +530,10 @@ export const ipcChannelDefinitions = {
   gitCommit: gitCommitChannel,
   gitChanges: gitChangesChannel,
   gitOpenFile: gitOpenFileChannel,
+  worktreeCreate: worktreeCreateChannel,
+  worktreeList: worktreeListChannel,
+  worktreeValidate: worktreeValidateChannel,
+  worktreeRemove: worktreeRemoveChannel,
   terminalCreate: terminalCreateChannel,
   terminalWrite: terminalWriteChannel,
   terminalResize: terminalResizeChannel,
@@ -574,6 +610,12 @@ export interface TeskraBridge {
     commit(request: GitCommitRequest): Promise<IpcResult<GitCommitResult>>
     changes(request: GitWorkspaceRequest): Promise<IpcResult<DiffResult>>
     openFile(request: GitOpenFileRequest): Promise<IpcResult<void>>
+  }
+  readonly worktree: {
+    create(request: WorktreeCreateRequest): Promise<IpcResult<Worktree>>
+    list(request: WorktreeListRequest): Promise<IpcResult<Worktree[]>>
+    validate(request: WorktreeIdRequest): Promise<IpcResult<Worktree>>
+    remove(request: WorktreeIdRequest): Promise<IpcResult<Worktree>>
   }
   readonly runtime: {
     info(): Promise<IpcResult<SystemInfo>>
