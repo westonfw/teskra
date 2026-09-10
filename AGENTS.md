@@ -106,7 +106,7 @@ teskra/
 ├─ apps/desktop/           # Electron 应用
 │  └─ src/
 │     ├─ main/             # Electron 主进程：agents/ process/ terminal/ workspace/
-│     │                    #   git/ tasks/ permissions/ memory/ db/ ipc/ events/ security/
+│     │                    #   git/ tasks/ workflows/ permissions/ memory/ db/ ipc/ events/ security/
 │     ├─ preload/          # contextBridge，暴露全局对象 window.teskra
 │     └─ renderer/         # React UI：pages/ components/ stores/ hooks/ services/ types/
 ├─ packages/contracts/     # 跨进程共享类型 + Zod Schema（唯一 allowed shared types 位置）

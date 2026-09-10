@@ -9,6 +9,8 @@ export function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0
 }
 
+export * from './workflow'
+
 const WATCHDOG_ACTIVE_STATUSES = new Set([
   'running',
   'waiting_for_user',
@@ -116,7 +118,9 @@ export function computeCriteriaReviewOutcome(
   scores: readonly { readonly criterionId: string; readonly result: CriterionResult }[],
 ): CriteriaReviewOutcome {
   const byCriterion = new Map(scores.map((score) => [score.criterionId, score.result]))
-  if (criteria.some((criterion) => criterion.required && byCriterion.get(criterion.id) === 'fail')) {
+  if (
+    criteria.some((criterion) => criterion.required && byCriterion.get(criterion.id) === 'fail')
+  ) {
     return 'fail'
   }
   if (

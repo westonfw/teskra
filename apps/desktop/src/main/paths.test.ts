@@ -144,6 +144,9 @@ describe('createTeskraPaths (ADR-0003 / TASK-078)', () => {
     expect(paths.config()).toBe(join(dir, 'config.json'))
     expect(paths.repoConfig(join(dir, 'repo'))).toBe(join(dir, 'repo', '.teskra', 'config.json'))
     expect(paths.repoPromptsDir(join(dir, 'repo'))).toBe(join(dir, 'repo', '.teskra', 'prompts'))
+    expect(paths.repoWorkflowsDir(join(dir, 'repo'))).toBe(
+      join(dir, 'repo', '.teskra', 'workflows'),
+    )
     const run = paths.runDir('r')
     expect(run.ok && run.data).toBe(join(dir, 'runs', 'r'))
     // [Windows 验证] separator correctness on win32 is asserted structurally

@@ -130,6 +130,10 @@ const bridge: TeskraBridge = {
     list: (request = {}) => invoke(IPC_CHANNELS.promptListTemplates, request),
     render: (request) => invoke(IPC_CHANNELS.promptRender, request),
   },
+  workflow: {
+    listDefinitions: (request) => invoke(IPC_CHANNELS.workflowListDefinitions, request),
+    loadDefinition: (request) => invoke(IPC_CHANNELS.workflowLoadDefinition, request),
+  },
   events: eventSubscriptions,
 }
 

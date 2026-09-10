@@ -47,6 +47,8 @@ import type {
   ListReviewFindingsRequest,
   ListTasksRequest,
   ListTerminalsRequest,
+  ListWorkflowDefinitionsRequest,
+  LoadWorkflowDefinitionRequest,
   MergePreflightResult,
   OpenWorkspaceRequest,
   OpenSystemDirectoryRequest,
@@ -82,6 +84,8 @@ import type {
   Workspace,
   WorkspaceIdRequest,
   WorkspaceValidationResult,
+  WorkflowDefinition,
+  WorkflowDefinitionFileInfo,
   Worktree,
   WorktreeCleanupRequest,
   WorktreeCleanupResult,
@@ -220,6 +224,14 @@ export interface WorktreePort {
   cleanup(request: WorktreeCleanupRequest): Promise<IpcResult<WorktreeCleanupResult>>
 }
 
+/** TASK-055: repo-local WorkflowDefinition loading (ADR-0005 workflows dir). */
+export interface WorkflowPort {
+  listDefinitions(
+    request: ListWorkflowDefinitionsRequest,
+  ): IpcResult<readonly WorkflowDefinitionFileInfo[]>
+  loadDefinition(request: LoadWorkflowDefinitionRequest): IpcResult<WorkflowDefinition>
+}
+
 export type FutureRuntimePort = object
 
 export interface RuntimeEventSource {
@@ -245,7 +257,7 @@ export interface TeskraRuntime {
   readonly agent: AgentCatalogPort
   readonly git: GitPort
   readonly worktree: WorktreePort
-  readonly workflow?: FutureRuntimePort
+  readonly workflow: WorkflowPort
   dispose(): IpcResult<void>
 }
 

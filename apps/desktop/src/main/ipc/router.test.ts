@@ -300,6 +300,22 @@ function fakeRuntime(): TeskraRuntime {
         }),
       ),
     },
+    workflow: {
+      listDefinitions: vi.fn(() => ok([])),
+      loadDefinition: vi.fn(() =>
+        ok({
+          id: 'full-review',
+          steps: [
+            {
+              id: 'implement',
+              type: 'agent' as const,
+              agent: 'codex',
+              runOn: 'always' as const,
+            },
+          ],
+        }),
+      ),
+    },
     dispose: vi.fn(() => ok(undefined)),
   }
 }
@@ -526,6 +542,32 @@ describe('Typed IPC Router (TASK-020)', () => {
     const invalid = await ipc.invoke(IPC_CHANNELS.promptRender, { name: 'UPPER CASE' })
     expect(invalid).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
     expect(runtime.prompts.render).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes workflow definition queries through the runtime facade (TASK-055)', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    expect(await ipc.invoke(IPC_CHANNELS.workflowListDefinitions, { workspaceId: 'ws1' })).toEqual({
+      ok: true,
+      data: [],
+    })
+    expect(runtime.workflow.listDefinitions).toHaveBeenCalledWith({ workspaceId: 'ws1' })
+
+    const loaded = await ipc.invoke(IPC_CHANNELS.workflowLoadDefinition, {
+      workspaceId: 'ws1',
+      definitionId: 'full-review',
+    })
+    expect(loaded).toMatchObject({ ok: true, data: { id: 'full-review' } })
+    expect(runtime.workflow.loadDefinition).toHaveBeenCalledWith({
+      workspaceId: 'ws1',
+      definitionId: 'full-review',
+    })
+
+    const invalid = await ipc.invoke(IPC_CHANNELS.workflowLoadDefinition, { workspaceId: 'ws1' })
+    expect(invalid).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    expect(runtime.workflow.loadDefinition).toHaveBeenCalledTimes(1)
   })
 
   it('removes all handlers on dispose without touching the runtime', () => {

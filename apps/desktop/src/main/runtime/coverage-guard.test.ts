@@ -12,7 +12,16 @@ import { describe, expect, it } from 'vitest'
  */
 const mainDir = fileURLToPath(new URL('..', import.meta.url))
 
-const COVERED_MODULES = ['process', 'workspace', 'agents', 'recovery', 'db', 'config', 'prompts']
+const COVERED_MODULES = [
+  'process',
+  'workspace',
+  'agents',
+  'recovery',
+  'db',
+  'config',
+  'prompts',
+  'workflows',
+]
 
 /** Type declarations and pure data definitions carry no runtime behavior. */
 const EXEMPT = new Set([

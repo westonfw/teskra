@@ -37,6 +37,7 @@ function stubPaths(): TeskraPaths {
     config: () => GLOBAL_CONFIG_PATH,
     repoConfig: (repoRoot) => `${repoRoot}/.teskra/config.json`,
     repoPromptsDir: (repoRoot) => `${repoRoot}/.teskra/prompts`,
+    repoWorkflowsDir: (repoRoot) => `${repoRoot}/.teskra/workflows`,
   }
 }
 

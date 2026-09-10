@@ -392,12 +392,15 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
         candidate !== 'agent' &&
         candidate !== 'task' &&
         candidate !== 'git' &&
-        candidate !== 'worktree',
+        candidate !== 'worktree' &&
+        candidate !== 'workflow',
     )) {
       const result = requireRuntimePort(composed.data, name)
       expect(result.ok).toBe(false)
       if (!result.ok) expect(result.error.code).toBe('CAPABILITY_NOT_AVAILABLE')
     }
+    // TASK-055: the workflow port is mounted (repo-local definition loading).
+    expect(requireRuntimePort(composed.data, 'workflow').ok).toBe(true)
     composed.data.dispose()
   })
 })

@@ -53,6 +53,7 @@ import { createReviewerService } from '../agents/reviewer-service'
 import { createTerminalManager } from '../terminal/terminal-manager'
 import { createCriteriaManager } from '../tasks/criteria-manager'
 import { createTaskManager } from '../tasks/task-manager'
+import { createWorkflowDefinitionLoader } from '../workflows/definition-loader'
 import { createWorkspaceRuntime, type WslEnvironmentInfo } from '../workspace/runtime'
 import { createWorkspaceManager } from '../workspace/workspace-manager'
 import { createWslManager } from '../workspace/wsl-manager'
@@ -181,6 +182,7 @@ export async function composeTeskraRuntime(
     events,
   })
   const promptTemplates = createPromptTemplateService({ paths })
+  const workflowDefinitions = createWorkflowDefinitionLoader({ paths })
   /** Maps a Facade workspaceId to its repo path for repo-local overrides. */
   const repoRootFor = (workspaceId?: string): IpcResult<string | undefined> => {
     if (workspaceId === undefined) {
@@ -437,6 +439,19 @@ export async function composeTeskraRuntime(
         return repoRoot.ok
           ? promptTemplates.render({ name: request.name, context: request.context }, repoRoot.data)
           : repoRoot
+      },
+    },
+    workflow: {
+      listDefinitions: (request) => {
+        const repoRoot = repoRootFor(request.workspaceId)
+        if (!repoRoot.ok) return repoRoot
+        // request.workspaceId is required, so repoRootFor resolved a path.
+        return workflowDefinitions.list(repoRoot.data as string)
+      },
+      loadDefinition: (request) => {
+        const repoRoot = repoRootFor(request.workspaceId)
+        if (!repoRoot.ok) return repoRoot
+        return workflowDefinitions.load(repoRoot.data as string, request.definitionId)
       },
     },
     git: {
