@@ -11,6 +11,7 @@ import {
   type PublicAppError,
   type SendAgentRunInputRequest,
   type StartAgentRunRequest,
+  type TaskStatus,
   type WorkbenchEvents,
 } from '@teskra/contracts'
 
@@ -144,6 +145,39 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     deps.events.emit('agent.output', { runId, data })
   })
 
+  const synchronizeTaskStatus = (run: AgentRun): void => {
+    if (run.taskId === undefined) return
+    const taskRuns = deps.runs.listByTask(run.taskId)
+    if (!taskRuns.ok) {
+      logger.error({ taskId: run.taskId, error: taskRuns.error }, 'Failed to read Task runs.')
+      return
+    }
+    const hasActiveRun = taskRuns.data.some((candidate) => !isTerminal(candidate))
+    const terminalStatus: Partial<Record<AgentRun['status'], TaskStatus>> = {
+      completed: 'needs_review',
+      failed: 'failed',
+      cancelled: 'cancelled',
+      interrupted: 'blocked',
+    }
+    const status = hasActiveRun ? 'running' : terminalStatus[run.status]
+    if (status === undefined) return
+    const task = deps.tasks.getById(run.taskId)
+    if (!task.ok || task.data === null) {
+      logger.error(
+        { taskId: run.taskId, error: task.ok ? undefined : task.error },
+        'Failed to resolve Task for Agent lifecycle update.',
+      )
+      return
+    }
+    if (task.data.status === status) return
+    const updated = deps.tasks.updateStatus(run.taskId, status, now())
+    if (!updated.ok) {
+      logger.error({ taskId: run.taskId, error: updated.error }, 'Failed to update Task status.')
+      return
+    }
+    deps.events.emit('task.updated', { taskId: run.taskId })
+  }
+
   const finishFailed = (runId: string, error: PublicAppError): IpcResult<AgentRun> => {
     const finishedAt = now()
     const updated = deps.runs.update(
@@ -155,7 +189,9 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     appendEvent(runId, 'agent.failed', { error })
     deps.events.emit('agent.failed', { runId, error })
     if (!updated.ok) return updated
-    return updated.data === null ? missing('Agent run', runId) : { ok: true, data: updated.data }
+    if (updated.data === null) return missing('Agent run', runId)
+    synchronizeTaskStatus(updated.data)
+    return { ok: true, data: updated.data }
   }
 
   const launch = async (pending: PendingRun): Promise<IpcResult<AgentRun>> => {
@@ -288,6 +324,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     activeAdapters.delete(agentRunId)
     if (!updated.ok) {
       logger.error({ runId: agentRunId, error: updated.error }, 'Failed to finish Agent run.')
+    } else if (updated.data !== null) {
+      synchronizeTaskStatus(updated.data)
     }
     appendEvent(agentRunId, `agent.${status}`, {
       exitCode,
@@ -434,6 +472,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       if (!created.ok) return created
       appendEvent(runId, 'agent.created', { agentType: definition.id, executionMode })
       deps.events.emit('agent.created', { runId })
+      synchronizeTaskStatus(created.data)
 
       const pending: PendingRun = {
         adapter,
@@ -493,6 +532,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         const updated = deps.runs.update(runId, { status: 'cancelled', finishedAt }, finishedAt)
         appendEvent(runId, 'agent.cancelled', {})
         deps.events.emit('agent.cancelled', { runId })
+        if (updated.ok && updated.data !== null) synchronizeTaskStatus(updated.data)
         scheduleQueueAdvance()
         if (!updated.ok) return updated
         return updated.data === null
@@ -528,6 +568,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       activeAdapters.delete(runId)
       appendEvent(runId, 'agent.cancelled', {})
       deps.events.emit('agent.cancelled', { runId })
+      if (updated.ok && updated.data !== null) synchronizeTaskStatus(updated.data)
       if (!updated.ok) return updated
       return updated.data === null ? missing('Agent run', runId) : { ok: true, data: updated.data }
     },
@@ -537,10 +578,22 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     list(request = {}) {
       if (request.activeOnly === true) {
         const active = deps.runs.listActive()
-        if (!active.ok || request.workspaceId === undefined) return active
+        if (!active.ok) return active
         return {
           ok: true,
-          data: active.data.filter((run) => run.workspaceId === request.workspaceId),
+          data: active.data.filter(
+            (run) =>
+              (request.workspaceId === undefined || run.workspaceId === request.workspaceId) &&
+              (request.taskId === undefined || run.taskId === request.taskId),
+          ),
+        }
+      }
+      if (request.taskId !== undefined) {
+        const taskRuns = deps.runs.listByTask(request.taskId)
+        if (!taskRuns.ok || request.workspaceId === undefined) return taskRuns
+        return {
+          ok: true,
+          data: taskRuns.data.filter((run) => run.workspaceId === request.workspaceId),
         }
       }
       if (request.workspaceId === undefined) {

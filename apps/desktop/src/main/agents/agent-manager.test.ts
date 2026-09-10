@@ -36,6 +36,7 @@ interface TestContext {
   readonly agentEvents: ReturnType<typeof createAgentEventRepository>
   readonly workspaces: ReturnType<typeof createWorkspaceRepository>
   readonly worktrees: ReturnType<typeof createWorktreeRepository>
+  readonly tasks: ReturnType<typeof createTaskRepository>
   readonly adapters: Record<'codex' | 'claude', CodingAgentAdapter>
 }
 
@@ -139,6 +140,7 @@ function setup(concurrency?: ConcurrencyConfig): TestContext {
     agentEvents,
     workspaces,
     worktrees,
+    tasks,
     adapters: { codex, claude },
   }
   contexts.push(context)
@@ -280,6 +282,60 @@ describe('AgentManager (TASK-028)', () => {
     expect(
       history.ok && history.data.filter(({ eventType }) => eventType === 'agent.output'),
     ).toHaveLength(1)
+  })
+
+  it('links Task history and derives Task status across multiple Runs', async () => {
+    const context = setup()
+    const task = context.tasks.create({
+      id: 'task-1',
+      workspaceId: 'workspace-1',
+      title: 'Implement and review',
+      status: 'ready',
+    })
+    if (!task.ok) throw new Error(task.error.message)
+
+    const first = await context.manager.start({
+      workspaceId: 'workspace-1',
+      taskId: 'task-1',
+      agentType: 'codex',
+      approvalMode: 'read-only',
+    })
+    const second = await context.manager.start({
+      workspaceId: 'workspace-1',
+      taskId: 'task-1',
+      agentType: 'claude',
+      approvalMode: 'read-only',
+    })
+    expect(first).toMatchObject({ ok: true, data: { taskId: 'task-1' } })
+    expect(second).toMatchObject({ ok: true, data: { taskId: 'task-1' } })
+    expect(context.tasks.getById('task-1')).toMatchObject({
+      ok: true,
+      data: { status: 'running' },
+    })
+
+    context.events.emit('process.exited', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      exitCode: 0,
+    })
+    expect(context.tasks.getById('task-1')).toMatchObject({
+      ok: true,
+      data: { status: 'running' },
+    })
+    context.events.emit('process.exited', {
+      processId: 'claude:run-2',
+      agentRunId: 'run-2',
+      exitCode: 0,
+    })
+
+    expect(context.tasks.getById('task-1')).toMatchObject({
+      ok: true,
+      data: { status: 'needs_review' },
+    })
+    expect(context.manager.list({ taskId: 'task-1' })).toMatchObject({
+      ok: true,
+      data: [{ taskId: 'task-1' }, { taskId: 'task-1' }],
+    })
   })
 
   it('marks a stopped process as cancelled instead of failed', async () => {

@@ -37,7 +37,11 @@ export interface AgentStoreBridge {
     start(request: StartAgentRunRequest): Promise<IpcResult<AgentRun>>
     cancel(request: { runId: string }): Promise<IpcResult<AgentRun>>
     get(request: { runId: string }): Promise<IpcResult<AgentRun | null>>
-    list(request?: { workspaceId?: string; activeOnly?: boolean }): Promise<IpcResult<AgentRun[]>>
+    list(request?: {
+      workspaceId?: string
+      taskId?: string
+      activeOnly?: boolean
+    }): Promise<IpcResult<AgentRun[]>>
   }
   readonly events: {
     subscribe<

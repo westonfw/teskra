@@ -256,6 +256,7 @@ export type SendAgentRunInputRequest = z.infer<typeof sendAgentRunInputRequestSc
 
 export const listAgentRunsRequestSchema = z.strictObject({
   workspaceId: z.string().min(1).optional(),
+  taskId: z.string().min(1).optional(),
   activeOnly: z.boolean().optional(),
 })
 export type ListAgentRunsRequest = z.infer<typeof listAgentRunsRequestSchema>
