@@ -49,6 +49,12 @@ import {
 import { ipcResultSchema, type IpcResult } from './error'
 import { handoffRecordSchema, type HandoffRecord } from './handoff'
 import {
+  listReviewFindingsRequestSchema,
+  reviewFindingRecordSchema,
+  type ListReviewFindingsRequest,
+  type ReviewFindingRecord,
+} from './review'
+import {
   acceptanceCriteriaSetDetailSchema,
   acceptanceCriteriaSetSchema,
   acceptanceCriterionSchema,
@@ -234,6 +240,7 @@ export const IPC_CHANNELS = {
   artifactGet: 'teskra:artifact:get',
   artifactScanRun: 'teskra:artifact:scan-run',
   handoffGet: 'teskra:handoff:get',
+  reviewListFindings: 'teskra:review:findings:list',
   agentListDefinitions: 'teskra:agent:list-definitions',
   agentDetect: 'teskra:agent:detect',
   agentListDetections: 'teskra:agent:list-detections',
@@ -436,6 +443,11 @@ export const handoffGetChannel = channel(
   IPC_CHANNELS.handoffGet,
   agentRunIdRequestSchema,
   handoffRecordSchema.nullable(),
+)
+export const reviewListFindingsChannel = channel(
+  IPC_CHANNELS.reviewListFindings,
+  listReviewFindingsRequestSchema,
+  z.array(reviewFindingRecordSchema),
 )
 export const agentListDefinitionsChannel = channel(
   IPC_CHANNELS.agentListDefinitions,
@@ -712,6 +724,7 @@ export const ipcChannelDefinitions = {
   artifactGet: artifactGetChannel,
   artifactScanRun: artifactScanRunChannel,
   handoffGet: handoffGetChannel,
+  reviewListFindings: reviewListFindingsChannel,
   agentListDefinitions: agentListDefinitionsChannel,
   agentDetect: agentDetectChannel,
   agentListDetections: agentListDetectionsChannel,
@@ -811,6 +824,9 @@ export interface TeskraBridge {
   }
   readonly handoff: {
     get(request: AgentRunIdRequest): Promise<IpcResult<HandoffRecord | null>>
+  }
+  readonly review: {
+    listFindings(request: ListReviewFindingsRequest): Promise<IpcResult<ReviewFindingRecord[]>>
   }
   readonly agent: {
     listDefinitions(): Promise<IpcResult<AgentDefinition[]>>

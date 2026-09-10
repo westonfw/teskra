@@ -108,16 +108,37 @@ describe('ReviewRepository', () => {
       file: 'src/index.ts',
       line: 42,
       criterionId: 'crit-1',
-      evidence: { snippet: 'x()' },
+      evidence: ['src/index.ts:42 returns undefined', 'diff hunk +42'],
     })
     expect(finding.ok).toBe(true)
     if (!finding.ok) return
     expect(finding.data.severity).toBe('high')
-    expect(finding.data.evidence).toEqual({ snippet: 'x()' })
+    expect(finding.data.evidence).toEqual(['src/index.ts:42 returns undefined', 'diff hunk +42'])
 
     expect(repo.listFindingsByPanel('panel-1')).toMatchObject({ ok: true })
     const byRun = repo.listFindingsByRun('run-1')
     expect(byRun.ok && byRun.data.length).toBe(1)
+  })
+
+  it('lists findings by task via the owning runs and deletes them per run', () => {
+    setup()
+    connection
+      .prepare(
+        `INSERT INTO agent_runs (id, workspace_id, task_id, agent_type, status, execution_mode, run_dir, created_at, updated_at)
+         VALUES ('run-2', 'ws-1', 'task-1', 'claude', 'completed', 'attended', 'runs/run-2', '2026-09-09T00:00:00.000Z', '2026-09-09T00:00:00.000Z')`,
+      )
+      .run()
+    repo.addFinding({ id: 'f-1', runId: 'run-1', severity: 'low', title: 'first' })
+    repo.addFinding({ id: 'f-2', runId: 'run-2', severity: 'critical', title: 'second' })
+
+    const byTask = repo.listFindingsByTask('task-1')
+    expect(byTask.ok && byTask.data.map((finding) => finding.id)).toEqual(['f-1', 'f-2'])
+    expect(repo.listFindingsByTask('task-unknown')).toMatchObject({ ok: true, data: [] })
+
+    expect(repo.deleteFindingsByRun('run-1')).toMatchObject({ ok: true, data: true })
+    expect(repo.deleteFindingsByRun('run-1')).toMatchObject({ ok: true, data: false })
+    const remaining = repo.listFindingsByTask('task-1')
+    expect(remaining.ok && remaining.data.map((finding) => finding.id)).toEqual(['f-2'])
   })
 
   it('upserts criterion scores on (run_id, criterion_id)', () => {

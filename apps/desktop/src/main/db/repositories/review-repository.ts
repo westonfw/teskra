@@ -1,8 +1,8 @@
 import type Database from 'better-sqlite3'
 import { z } from 'zod'
 
-import type { IpcResult, ReviewSeverity } from '@teskra/contracts'
-import { reviewSeveritySchema } from '@teskra/contracts'
+import type { IpcResult, ReviewFindingRecord, ReviewSeverity } from '@teskra/contracts'
+import { reviewFindingRecordSchema } from '@teskra/contracts'
 
 import {
   decodeJson,
@@ -70,21 +70,14 @@ export const reviewPanelMemberRecordSchema = z.strictObject({
 })
 export type ReviewPanelMember = z.infer<typeof reviewPanelMemberRecordSchema>
 
-export const reviewFindingRecordSchema = z.strictObject({
-  id: z.string(),
-  runId: z.string(),
-  panelId: z.string().optional(),
-  severity: reviewSeveritySchema,
-  title: z.string(),
-  description: z.string().optional(),
-  file: z.string().optional(),
-  line: z.number().int().optional(),
-  criterionId: z.string().optional(),
-  evidence: jsonRecordSchema.optional(),
-  createdAt: isoTimestampSchema,
-})
-/** Distinct from contracts `ReviewFinding` (the handoff payload shape). */
-export type ReviewFindingRecord = z.infer<typeof reviewFindingRecordSchema>
+/**
+ * The persisted finding record shape is the contracts `ReviewFindingRecord`
+ * (packages/contracts/src/review.ts) — the same projection that crosses Typed
+ * IPC, so the Repository validates rows against the public schema directly.
+ * `evidence` mirrors plan §143: an array of Evidence-First strings, stored as
+ * a JSON array in `evidence_json`.
+ */
+export type { ReviewFindingRecord } from '@teskra/contracts'
 
 export const criterionScoreRecordSchema = z.strictObject({
   id: z.string(),
@@ -176,7 +169,8 @@ export interface AddFindingInput {
   readonly file?: string
   readonly line?: number
   readonly criterionId?: string
-  readonly evidence?: JsonRecord
+  /** plan §143 Evidence-First strings; persisted as a JSON array. */
+  readonly evidence?: readonly string[]
 }
 
 export interface RecordScoreInput {
@@ -198,6 +192,10 @@ export interface ReviewRepository {
   addFinding(input: AddFindingInput, now?: string): IpcResult<ReviewFindingRecord>
   listFindingsByPanel(panelId: string): IpcResult<ReviewFindingRecord[]>
   listFindingsByRun(runId: string): IpcResult<ReviewFindingRecord[]>
+  /** Findings of every Run belonging to the Task (join via agent_runs). */
+  listFindingsByTask(taskId: string): IpcResult<ReviewFindingRecord[]>
+  /** Removes a run's findings; returns true when at least one row existed. */
+  deleteFindingsByRun(runId: string): IpcResult<boolean>
   /** (run_id, criterion_id) is unique — re-scoring overwrites in place. */
   recordScore(input: RecordScoreInput, now?: string): IpcResult<CriterionScore>
   listScoresByRun(runId: string): IpcResult<CriterionScore[]>
@@ -207,6 +205,9 @@ const PANEL = 'review-panel'
 const MEMBER = 'review-panel-member'
 const FINDING = 'review-finding'
 const SCORE = 'criterion-score'
+
+/** plan §143: finding evidence is an array of strings (JSON array on disk). */
+const findingEvidenceSchema = z.array(z.string())
 
 function panelToDomain(row: PanelRow): IpcResult<ReviewPanel> {
   const aggregate = decodeJson(jsonRecordSchema, PANEL, 'aggregate_json', row.aggregate_json)
@@ -239,7 +240,7 @@ function memberToDomain(row: MemberRow): IpcResult<ReviewPanelMember> {
 }
 
 function findingToDomain(row: FindingRow): IpcResult<ReviewFindingRecord> {
-  const evidence = decodeJson(jsonRecordSchema, FINDING, 'evidence_json', row.evidence_json)
+  const evidence = decodeJson(findingEvidenceSchema, FINDING, 'evidence_json', row.evidence_json)
   if (!evidence.ok) {
     return evidence
   }
@@ -476,6 +477,29 @@ export function createReviewRepository(connection: Database.Database): ReviewRep
         return rows
       }
       return mapRows(rows.data, findingToDomain)
+    },
+
+    listFindingsByTask(taskId) {
+      const rows = execute(FINDING, 'listFindingsByTask', () => {
+        return connection
+          .prepare(
+            `SELECT f.* FROM review_findings f
+             JOIN agent_runs r ON r.id = f.run_id
+             WHERE r.task_id = ? ORDER BY f.created_at ASC`,
+          )
+          .all(taskId) as FindingRow[]
+      })
+      if (!rows.ok) {
+        return rows
+      }
+      return mapRows(rows.data, findingToDomain)
+    },
+
+    deleteFindingsByRun(runId) {
+      return execute(FINDING, 'deleteFindingsByRun', () => {
+        return connection.prepare('DELETE FROM review_findings WHERE run_id = ?').run(runId)
+          .changes > 0
+      })
     },
 
     recordScore(input, now = nowIso()) {

@@ -42,6 +42,7 @@ import type {
   ListArtifactsRequest,
   ListCriteriaSetsRequest,
   ListPromptTemplatesRequest,
+  ListReviewFindingsRequest,
   ListTasksRequest,
   ListTerminalsRequest,
   MergePreflightResult,
@@ -53,6 +54,7 @@ import type {
   RenderPromptTemplateRequest,
   ResolveConfigRequest,
   ResumeAgentRunRequest,
+  ReviewFindingRecord,
   ReviewRunStartResult,
   RunDoctorRequest,
   ResolvedConfig,
@@ -167,6 +169,11 @@ export interface HandoffPort {
   get(request: AgentRunIdRequest): IpcResult<HandoffRecord | null>
 }
 
+/** TASK-053: read access to persisted review findings (ADR-0004). */
+export interface ReviewPort {
+  listFindings(request: ListReviewFindingsRequest): IpcResult<readonly ReviewFindingRecord[]>
+}
+
 export interface GitPort {
   status(request: GitWorkspaceRequest): Promise<IpcResult<GitStatus>>
   branch(request: GitWorkspaceRequest): Promise<IpcResult<GitBranch>>
@@ -229,6 +236,7 @@ export interface TeskraRuntime {
   readonly criteria: CriteriaPort
   readonly artifact: ArtifactPort
   readonly handoff: HandoffPort
+  readonly review: ReviewPort
   readonly agent: AgentCatalogPort
   readonly git: GitPort
   readonly worktree: WorktreePort

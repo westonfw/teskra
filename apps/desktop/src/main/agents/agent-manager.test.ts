@@ -17,6 +17,7 @@ import {
   createAgentEventRepository,
   createAgentRunRepository,
   createHandoffRepository,
+  createReviewRepository,
   createTaskRepository,
   createWorkspaceRepository,
   createWorktreeRepository,
@@ -26,6 +27,7 @@ import { createTeskraPaths, type TeskraPaths } from '../paths'
 import type { CodingAgentAdapter } from './adapters/coding-agent-adapter'
 import { createAgentManager, type AgentManager } from './agent-manager'
 import { createBuiltInAgentRegistry } from './agent-registry'
+import { createReviewCollector } from './review-collector'
 import { CLAUDE_AGENT } from './definitions/claude'
 import { CODEX_AGENT } from './definitions/codex'
 import { createRunLogStore } from './run-log-store'
@@ -37,6 +39,7 @@ interface TestContext {
   readonly runs: ReturnType<typeof createAgentRunRepository>
   readonly agentEvents: ReturnType<typeof createAgentEventRepository>
   readonly handoffs: ReturnType<typeof createHandoffRepository>
+  readonly reviews: ReturnType<typeof createReviewRepository>
   readonly workspaces: ReturnType<typeof createWorkspaceRepository>
   readonly worktrees: ReturnType<typeof createWorktreeRepository>
   readonly tasks: ReturnType<typeof createTaskRepository>
@@ -104,6 +107,7 @@ function setup(concurrency?: ConcurrencyConfig, failAgentEventWrites = false): T
   const runs = createAgentRunRepository(connection)
   const agentEvents = createAgentEventRepository(connection)
   const handoffs = createHandoffRepository(connection)
+  const reviews = createReviewRepository(connection)
   const worktrees = createWorktreeRepository(connection)
   const workspace = workspaces.create(
     {
@@ -150,6 +154,7 @@ function setup(concurrency?: ConcurrencyConfig, failAgentEventWrites = false): T
     runs,
     agentEvents: persistedEvents,
     handoffs,
+    reviewCollector: createReviewCollector({ reviews }),
     workspaces,
     tasks,
     worktrees,
@@ -169,6 +174,7 @@ function setup(concurrency?: ConcurrencyConfig, failAgentEventWrites = false): T
     runs,
     agentEvents,
     handoffs,
+    reviews,
     workspaces,
     worktrees,
     tasks,
@@ -807,6 +813,50 @@ describe('AgentManager handoff collection (TASK-051, ADR-0004)', () => {
         rawPath: files.data.handoff,
         payload: { summary: 'Codex finished the work.' },
       },
+    })
+  })
+
+  it('persists review findings from a completed run handoff (TASK-053)', async () => {
+    const context = setup()
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    const files = context.paths.runFiles('run-1')
+    if (!files.ok) throw new Error(files.error.message)
+    writeFileSync(
+      files.data.handoff,
+      JSON.stringify({
+        runId: 'run-1',
+        type: 'review',
+        summary: 'Reviewed the change.',
+        findings: [
+          {
+            severity: 'high',
+            title: 'Missing null check',
+            file: 'src/api.ts',
+            line: 12,
+            evidence: ['src/api.ts:12 dereferences user.name'],
+          },
+        ],
+      }),
+      'utf8',
+    )
+
+    exitRun(context, 'run-1')
+
+    expect(context.manager.get('run-1')).toMatchObject({
+      ok: true,
+      data: { status: 'completed' },
+    })
+    expect(context.reviews.listFindingsByRun('run-1')).toMatchObject({
+      ok: true,
+      data: [
+        {
+          runId: 'run-1',
+          severity: 'high',
+          title: 'Missing null check',
+          file: 'src/api.ts',
+          line: 12,
+        },
+      ],
     })
   })
 

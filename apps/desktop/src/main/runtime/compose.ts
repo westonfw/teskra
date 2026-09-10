@@ -48,6 +48,7 @@ import { createProcessManager } from '../process/process-manager'
 import { createPromptTemplateService } from '../prompts/prompt-template-service'
 import { createReconciliationService } from '../recovery/reconciliation-service'
 import { createResumeService } from '../recovery/resume-service'
+import { createReviewCollector } from '../agents/review-collector'
 import { createReviewerService } from '../agents/reviewer-service'
 import { createTerminalManager } from '../terminal/terminal-manager'
 import { createCriteriaManager } from '../tasks/criteria-manager'
@@ -278,6 +279,7 @@ export async function composeTeskraRuntime(
     resolveRuntime: runtimeFor,
   }
   const runLogs = createRunLogStore({ paths })
+  const reviewCollector = createReviewCollector({ reviews: repositories.reviews })
   const agentManager = createAgentManager({
     registry: registeredAgents.data,
     adapters: [
@@ -296,6 +298,7 @@ export async function composeTeskraRuntime(
     runs: repositories.agentRuns,
     agentEvents: repositories.agentEvents,
     handoffs: repositories.handoffs,
+    reviewCollector,
     workspaces: repositories.workspaces,
     tasks: repositories.tasks,
     worktrees: repositories.worktrees,
@@ -385,6 +388,24 @@ export async function composeTeskraRuntime(
     },
     handoff: {
       get: ({ runId }) => repositories.handoffs.getByRunId(runId),
+    },
+    review: {
+      listFindings: (request) => {
+        if (request.runId !== undefined) {
+          return repositories.reviews.listFindingsByRun(request.runId)
+        }
+        if (request.taskId !== undefined) {
+          return repositories.reviews.listFindingsByTask(request.taskId)
+        }
+        return {
+          ok: false,
+          error: {
+            code: 'VALIDATION_FAILED',
+            message: 'Exactly one of runId / taskId is required.',
+            retryable: false,
+          },
+        }
+      },
     },
     prompts: {
       list: (request = {}) => {

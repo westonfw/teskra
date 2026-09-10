@@ -31,12 +31,20 @@ export const testEvidenceSchema = z.strictObject({
 })
 export type TestEvidence = z.infer<typeof testEvidenceSchema>
 
+/**
+ * plan §143 ReviewFinding — the shape a reviewer Agent reports inside the
+ * WorkerHandoff `findings` array (TASK-053). `criterionId` links a finding to
+ * an Acceptance Criterion; `evidence` carries the plan's Evidence-First
+ * strings (command output, test results, diff hunks).
+ */
 export const reviewFindingSchema = z.strictObject({
   severity: reviewSeveritySchema,
   title: z.string(),
   description: z.string().optional(),
   file: z.string().optional(),
   line: z.number().int().optional(),
+  criterionId: z.string().optional(),
+  evidence: z.array(z.string()).optional(),
 })
 export type ReviewFinding = z.infer<typeof reviewFindingSchema>
 

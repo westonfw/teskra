@@ -33,6 +33,7 @@ import { useWorkspaceStore } from '../stores/workspace-store'
 import { RunWorktreePanel } from './run-worktree-panel'
 import { CriteriaPanel } from './criteria-panel'
 import { ArtifactPanel } from './artifact-panel'
+import { FindingsPanel } from './findings-panel'
 
 const ACTIVE_RUN_STATUSES = new Set<AgentRunStatus>([
   'created',
@@ -388,6 +389,7 @@ export function TaskPage() {
               <Typography.Text code>{openRun.id}</Typography.Text>
             </Space>
             <RunWorktreePanel run={openRun} workspace={workspace} />
+            <FindingsPanel runId={openRun.id} />
             <AgentRunTerminal key={openRun.id} run={openRun} initialData={output[openRun.id]} />
           </Space>
         )}

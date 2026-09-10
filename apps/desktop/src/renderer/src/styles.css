@@ -844,6 +844,19 @@ body {
   width: 100%;
 }
 
+.finding-item {
+  width: 100%;
+}
+
+.finding-detail {
+  margin-bottom: 0;
+}
+
+.finding-evidence {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .artifact-content {
   max-height: 50vh;
   margin: 0;

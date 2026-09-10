@@ -32,6 +32,7 @@ import { buildHandoffContext } from '@teskra/shared'
 import type { AgentRegistry } from './agent-registry'
 import { createAgentOutputBatcher } from './agent-output-batcher'
 import { createHandoffCollector, type HandoffCollector } from './handoff-collector'
+import type { ReviewCollector } from './review-collector'
 import type { RunLogStore } from './run-log-store'
 import type { CodingAgentAdapter } from './adapters/coding-agent-adapter'
 
@@ -59,6 +60,8 @@ export interface AgentManagerDeps {
   readonly paths: TeskraPaths
   readonly runLogs: RunLogStore
   readonly handoffCollector?: HandoffCollector
+  /** TASK-053: persists review findings from collected handoffs (ADR-0004). */
+  readonly reviewCollector?: ReviewCollector
   readonly createRunId?: () => string
   readonly now?: () => string
   readonly resolveConcurrency?: (workspaceId: string) => IpcResult<ConcurrencyConfig>
@@ -201,7 +204,11 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           { runId, error: collected.error },
           'Handoff collection failed; the Run result is unaffected.',
         )
+        return
       }
+      // TASK-053: findings ride along with collection; ingest is best-effort
+      // and never blocks Run completion either.
+      if (collected.data !== null) deps.reviewCollector?.ingest(runId, collected.data)
     } catch (cause) {
       logger.error({ runId, cause }, 'Handoff collection threw; the Run result is unaffected.')
     }

@@ -145,6 +145,9 @@ function fakeRuntime(): TeskraRuntime {
     handoff: {
       get: vi.fn(() => ok(null)),
     },
+    review: {
+      listFindings: vi.fn(() => ok([])),
+    },
     terminal: {
       create: vi.fn(() =>
         ok({
@@ -404,6 +407,23 @@ describe('Typed IPC Router (TASK-020)', () => {
     const invalid = await ipc.invoke(IPC_CHANNELS.handoffGet, {})
     expect(invalid).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
     expect(runtime.handoff.get).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes review finding lookups through the runtime facade (TASK-053)', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    expect(await ipc.invoke(IPC_CHANNELS.reviewListFindings, { runId: 'run-1' })).toEqual({
+      ok: true,
+      data: [],
+    })
+    expect(runtime.review.listFindings).toHaveBeenCalledWith({ runId: 'run-1' })
+
+    // The request must select exactly one scope.
+    const invalid = await ipc.invoke(IPC_CHANNELS.reviewListFindings, {})
+    expect(invalid).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    expect(runtime.review.listFindings).toHaveBeenCalledTimes(1)
   })
 
   it('routes reviewer launches through the runtime facade (TASK-052)', async () => {
