@@ -10,6 +10,7 @@ import type {
   CreateTaskRequest,
   CreateTerminalRequest,
   CreateWorkspaceRequest,
+  DiffResult,
   FutureRuntimePortName,
   GitBranch,
   GitCommit,
@@ -104,6 +105,7 @@ export interface GitPort {
   diff(request: GitDiffRequest): Promise<IpcResult<GitRawDiff>>
   log(request: GitLogRequest): Promise<IpcResult<readonly GitCommit[]>>
   commit(request: GitCommitRequest): Promise<IpcResult<GitCommitResult>>
+  changes(request: GitWorkspaceRequest): Promise<IpcResult<DiffResult>>
 }
 
 export interface AgentCatalogPort {

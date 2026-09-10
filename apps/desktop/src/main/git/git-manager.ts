@@ -27,6 +27,8 @@ export interface GitManager {
   diff(request: GitDiffRequest): Promise<IpcResult<GitRawDiff>>
   log(request: GitLogRequest): Promise<IpcResult<GitCommit[]>>
   commit(request: GitCommitRequest): Promise<IpcResult<GitCommitResult>>
+  /** Internal DiffService primitive for files not yet tracked by Git. */
+  untrackedDiff(workspaceId: string, path: string): Promise<IpcResult<GitRawDiff>>
 }
 
 export interface GitManagerDeps {
@@ -160,6 +162,7 @@ export function createGitManager(deps: GitManagerDeps): GitManager {
     operation: string,
     args: readonly string[],
     timeoutMs = READ_TIMEOUT_MS,
+    successExitCodes: readonly number[] = [0],
   ): Promise<IpcResult<CommandResult>> => {
     const context = contextFor(workspaceId)
     if (!context.ok) return context
@@ -171,7 +174,9 @@ export function createGitManager(deps: GitManagerDeps): GitManager {
       timeoutMs,
     })
     if (!result.ok) return result
-    return result.data.exitCode === 0 ? result : commandFailed(operation, result.data)
+    return successExitCodes.includes(result.data.exitCode)
+      ? result
+      : commandFailed(operation, result.data)
   }
 
   return {
@@ -251,6 +256,25 @@ export function createGitManager(deps: GitManagerDeps): GitManager {
         ok: true,
         data: { hash: revision.data.stdout.trim(), output: committed.data.stdout.trim() },
       }
+    },
+
+    async untrackedDiff(workspaceId, path) {
+      if (!validRelativePath(path)) {
+        return fail({
+          code: 'VALIDATION_FAILED',
+          message: 'Git diff paths must stay inside the workspace.',
+          retryable: false,
+          detail: `rejected path=${JSON.stringify(path)}`,
+        })
+      }
+      const result = await run(
+        workspaceId,
+        'diff',
+        ['diff', '--no-index', '--no-ext-diff', '--no-color', '--', '/dev/null', path],
+        READ_TIMEOUT_MS,
+        [0, 1],
+      )
+      return result.ok ? { ok: true, data: { patch: result.data.stdout } } : result
     },
   }
 }

@@ -29,6 +29,7 @@ import {
 import { ipcResultSchema, type IpcResult } from './error'
 import type { WorkbenchEventName, WorkbenchEvents } from './event'
 import {
+  diffResultSchema,
   gitBranchSchema,
   gitCommitRequestSchema,
   gitCommitResultSchema,
@@ -38,6 +39,7 @@ import {
   gitRawDiffSchema,
   gitStatusSchema,
   gitWorkspaceRequestSchema,
+  type DiffResult,
   type GitBranch,
   type GitCommit,
   type GitCommitRequest,
@@ -155,6 +157,7 @@ export const IPC_CHANNELS = {
   gitDiff: 'teskra:git:diff',
   gitLog: 'teskra:git:log',
   gitCommit: 'teskra:git:commit',
+  gitChanges: 'teskra:git:changes',
   terminalCreate: 'teskra:terminal:create',
   terminalWrite: 'teskra:terminal:write',
   terminalResize: 'teskra:terminal:resize',
@@ -341,6 +344,11 @@ export const gitCommitChannel = channel(
   gitCommitRequestSchema,
   gitCommitResultSchema,
 )
+export const gitChangesChannel = channel(
+  IPC_CHANNELS.gitChanges,
+  gitWorkspaceRequestSchema,
+  diffResultSchema,
+)
 export const terminalCreateChannel = channel(
   IPC_CHANNELS.terminalCreate,
   createTerminalRequestSchema,
@@ -459,6 +467,7 @@ export const ipcChannelDefinitions = {
   gitDiff: gitDiffChannel,
   gitLog: gitLogChannel,
   gitCommit: gitCommitChannel,
+  gitChanges: gitChangesChannel,
   terminalCreate: terminalCreateChannel,
   terminalWrite: terminalWriteChannel,
   terminalResize: terminalResizeChannel,
@@ -531,6 +540,7 @@ export interface TeskraBridge {
     diff(request: GitDiffRequest): Promise<IpcResult<GitRawDiff>>
     log(request: GitLogRequest): Promise<IpcResult<GitCommit[]>>
     commit(request: GitCommitRequest): Promise<IpcResult<GitCommitResult>>
+    changes(request: GitWorkspaceRequest): Promise<IpcResult<DiffResult>>
   }
   readonly runtime: {
     info(): Promise<IpcResult<SystemInfo>>
