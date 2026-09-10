@@ -37,6 +37,7 @@ import { createAutoCommitService } from '../git/auto-commit-service'
 import { createDiffService } from '../git/diff-service'
 import { createGitManager } from '../git/git-manager'
 import { createMergePreflightService } from '../git/merge-preflight-service'
+import { createMergeService } from '../git/merge-service'
 import { createWorktreeManager } from '../git/worktree-manager'
 import { createDoctorService } from '../doctor/doctor-service'
 import { getLogger, initializeLogging } from '../logger'
@@ -198,6 +199,16 @@ export async function composeTeskraRuntime(
     reviews: repositories.reviews,
     resolveRuntime: (workspace) => runtimeFor(workspace.runtime),
   })
+  const mergeService = createMergeService({
+    commands,
+    workspaces: repositories.workspaces,
+    worktrees: repositories.worktrees,
+    runs: repositories.agentRuns,
+    tasks: repositories.tasks,
+    events,
+    preflight: mergePreflight,
+    resolveRuntime: (workspace) => runtimeFor(workspace.runtime),
+  })
   const agentDetector = createAgentDetector({
     registry: registeredAgents.data,
     commands,
@@ -322,6 +333,7 @@ export async function composeTeskraRuntime(
       list: (request) => worktreeManager.list(request),
       validate: (request) => worktreeManager.validate(request),
       preflight: (request) => mergePreflight.check(request),
+      merge: (request) => mergeService.merge(request),
       remove: (request) => worktreeManager.remove(request),
     },
     agent: {

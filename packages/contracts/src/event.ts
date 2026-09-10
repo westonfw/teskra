@@ -100,6 +100,24 @@ export interface WorkbenchEvents {
     diff: DiffResult
   }
 
+  /** TASK-046: merge kept the conflict scene; worktree state is 'conflict'. */
+  'worktree.merge_conflict': {
+    worktreeId: string
+    workspaceId: string
+    runId?: string
+    branch: string
+    baseBranch: string
+    conflicts: string[]
+  }
+  /** TASK-046: the agent branch merged into its base; the branch is kept. */
+  'worktree.merged': {
+    worktreeId: string
+    workspaceId: string
+    runId?: string
+    branch: string
+    baseBranch: string
+  }
+
   'permission.requested': {
     runId: string
     command: string
@@ -135,6 +153,8 @@ export const WORKBENCH_EVENT_NAMES = [
   'task.updated',
   'git.changed',
   'git.diff.updated',
+  'worktree.merge_conflict',
+  'worktree.merged',
   'permission.requested',
   'permission.resolved',
 ] as const satisfies readonly WorkbenchEventName[]

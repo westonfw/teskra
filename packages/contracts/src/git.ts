@@ -118,6 +118,30 @@ export const mergePreflightResultSchema = z.strictObject({
 })
 export type MergePreflightResult = z.infer<typeof mergePreflightResultSchema>
 
+/**
+ * TASK-046 merge request. `force` only overrides preflight blockers whose
+ * `overridable` flag is true (TASK-045); hard blockers always refuse the merge.
+ */
+export const worktreeMergeRequestSchema = z.strictObject({
+  worktreeId: z.string().min(1),
+  force: z.boolean().optional(),
+})
+export type WorktreeMergeRequest = z.infer<typeof worktreeMergeRequestSchema>
+
+export const WORKTREE_MERGE_OUTCOMES = ['merged', 'conflict'] as const
+export const worktreeMergeOutcomeSchema = z.enum(WORKTREE_MERGE_OUTCOMES)
+export type WorktreeMergeOutcome = z.infer<typeof worktreeMergeOutcomeSchema>
+
+export const worktreeMergeResultSchema = z.strictObject({
+  worktreeId: z.string(),
+  outcome: worktreeMergeOutcomeSchema,
+  /** The worktree record after the attempt (state 'merged' or 'conflict'). */
+  worktree: worktreeSchema,
+  /** Unmerged paths when outcome is 'conflict'; the scene is left in place. */
+  conflicts: z.array(z.string()).optional(),
+})
+export type WorktreeMergeResult = z.infer<typeof worktreeMergeResultSchema>
+
 /** plan §40. */
 export const DIFF_FILE_STATUSES = ['added', 'modified', 'deleted', 'renamed'] as const
 export const diffFileStatusSchema = z.enum(DIFF_FILE_STATUSES)

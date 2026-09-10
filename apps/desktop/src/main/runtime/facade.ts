@@ -59,6 +59,8 @@ import type {
   WorktreeCreateRequest,
   WorktreeIdRequest,
   WorktreeListRequest,
+  WorktreeMergeRequest,
+  WorktreeMergeResult,
   WslDistribution,
   WslEnvironment,
   WorkbenchEventName,
@@ -143,6 +145,7 @@ export interface WorktreePort {
   list(request: WorktreeListRequest): Promise<IpcResult<readonly Worktree[]>>
   validate(request: WorktreeIdRequest): Promise<IpcResult<Worktree>>
   preflight(request: WorktreeIdRequest): Promise<IpcResult<MergePreflightResult>>
+  merge(request: WorktreeMergeRequest): Promise<IpcResult<WorktreeMergeResult>>
   remove(request: WorktreeIdRequest): Promise<IpcResult<Worktree>>
 }
 

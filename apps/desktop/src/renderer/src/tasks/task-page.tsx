@@ -30,6 +30,7 @@ import { AppErrorAlert } from '../components/app-error-alert'
 import { useAgentStore } from '../stores/agent-store'
 import { useTaskStore } from '../stores/task-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
+import { RunWorktreePanel } from './run-worktree-panel'
 
 const ACTIVE_RUN_STATUSES = new Set<AgentRunStatus>([
   'created',
@@ -381,6 +382,7 @@ export function TaskPage() {
               <Tag>{label(openRun.status)}</Tag>
               <Typography.Text code>{openRun.id}</Typography.Text>
             </Space>
+            <RunWorktreePanel run={openRun} workspace={workspace} />
             <AgentRunTerminal key={openRun.id} run={openRun} initialData={output[openRun.id]} />
           </Space>
         )}
