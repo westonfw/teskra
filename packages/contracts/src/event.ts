@@ -44,6 +44,9 @@ export interface WorkbenchEvents {
   'agent.created': {
     runId: string
   }
+  'agent.queued': {
+    runId: string
+  }
   'agent.started': {
     runId: string
   }
@@ -108,6 +111,7 @@ export const WORKBENCH_EVENT_NAMES = [
   'terminal.output',
   'terminal.closed',
   'agent.created',
+  'agent.queued',
   'agent.started',
   'agent.output',
   'agent.command',

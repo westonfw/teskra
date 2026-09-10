@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto'
 
 import {
   approvalModeSchema,
+  DEFAULT_CONFIG,
+  type AgentStartRequest,
   type AgentRun,
+  type ConcurrencyConfig,
   type IpcResult,
   type ListAgentRunsRequest,
   type PublicAppError,
@@ -44,6 +47,7 @@ export interface AgentManagerDeps {
   readonly paths: TeskraPaths
   readonly createRunId?: () => string
   readonly now?: () => string
+  readonly resolveConcurrency?: (workspaceId: string) => IpcResult<ConcurrencyConfig>
 }
 
 function fail<T>(error: InternalAppError): IpcResult<T> {
@@ -63,14 +67,55 @@ function isTerminal(run: AgentRun): boolean {
   return ['completed', 'failed', 'cancelled', 'interrupted'].includes(run.status)
 }
 
+function runningForLimits(runs: readonly AgentRun[]): AgentRun[] {
+  return runs.filter((run) => run.status !== 'queued')
+}
+
+function unisolatedWriteConflict(
+  runs: readonly AgentRun[],
+  workspaceId: string,
+  worktreeId: string | undefined,
+  approvalMode: AgentRun['approvalMode'],
+): AgentRun | undefined {
+  if (worktreeId !== undefined || approvalMode === 'read-only') return undefined
+  return runs.find(
+    (run) =>
+      run.workspaceId === workspaceId &&
+      run.worktreeId === undefined &&
+      run.approvalMode !== 'read-only',
+  )
+}
+
+function hasCapacity(
+  runs: readonly AgentRun[],
+  candidate: { workspaceId: string; agentType: string },
+  policy: ConcurrencyConfig,
+): boolean {
+  return (
+    runs.length < policy.maxGlobalRuns &&
+    runs.filter((run) => run.workspaceId === candidate.workspaceId).length <
+      policy.maxRunsPerWorkspace &&
+    runs.filter((run) => run.agentType === candidate.agentType).length < policy.maxRunsPerAgent
+  )
+}
+
+interface PendingRun {
+  readonly adapter: CodingAgentAdapter
+  readonly request: AgentStartRequest
+}
+
 /** TASK-028: owns AgentRun lifecycle, provider routing, process events, and persistence. */
 export function createAgentManager(deps: AgentManagerDeps): AgentManager {
   const logger = getLogger('agent')
   const adapters = new Map(deps.adapters.map((adapter) => [adapter.definition.id, adapter]))
   const activeAdapters = new Map<string, CodingAgentAdapter>()
+  const pendingRuns = new Map<string, PendingRun>()
   const cancelRequested = new Set<string>()
   const createRunId = deps.createRunId ?? randomUUID
   const now = deps.now ?? (() => new Date().toISOString())
+  const resolveConcurrency =
+    deps.resolveConcurrency ?? (() => ({ ok: true, data: DEFAULT_CONFIG.concurrency }))
+  let advancingQueue = false
 
   const appendEvent = (
     runId: string,
@@ -100,6 +145,104 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     deps.events.emit('agent.failed', { runId, error })
     if (!updated.ok) return updated
     return updated.data === null ? missing('Agent run', runId) : { ok: true, data: updated.data }
+  }
+
+  const launch = async (pending: PendingRun): Promise<IpcResult<AgentRun>> => {
+    const { adapter, request } = pending
+    const current = deps.runs.getById(request.runId)
+    if (!current.ok) return current
+    if (current.data === null) return missing('Agent run', request.runId)
+    if (current.data.status === 'queued') {
+      const timestamp = now()
+      const preparing = deps.runs.update(request.runId, { status: 'preparing' }, timestamp)
+      if (!preparing.ok) return preparing
+      if (preparing.data === null) return missing('Agent run', request.runId)
+    }
+
+    activeAdapters.set(request.runId, adapter)
+    const started = await adapter.start(request)
+    if (!started.ok) return finishFailed(request.runId, started.error)
+
+    const afterStart = deps.runs.getById(request.runId)
+    if (!afterStart.ok) return afterStart
+    if (afterStart.data !== null && isTerminal(afterStart.data)) {
+      return { ok: true, data: afterStart.data }
+    }
+    const running = deps.runs.update(
+      request.runId,
+      {
+        status: 'running',
+        processId: started.data.processId,
+        pid: started.data.pid,
+        startedAt: started.data.startedAt,
+        ...(started.data.providerSession === undefined
+          ? {}
+          : { providerSession: { ...started.data.providerSession } }),
+      },
+      started.data.startedAt,
+    )
+    if (!running.ok) {
+      await adapter.cancel(request.runId)
+      activeAdapters.delete(request.runId)
+      return running
+    }
+    if (running.data === null) return missing('Agent run', request.runId)
+    appendEvent(request.runId, 'agent.started', { processId: started.data.processId })
+    deps.events.emit('agent.started', { runId: request.runId })
+    return { ok: true, data: running.data }
+  }
+
+  const advanceQueue = async (): Promise<void> => {
+    if (advancingQueue) return
+    advancingQueue = true
+    try {
+      while (true) {
+        const listed = deps.runs.listActive()
+        if (!listed.ok) {
+          logger.error({ error: listed.error }, 'Failed to read queued Agent runs.')
+          return
+        }
+        const active = runningForLimits(listed.data)
+        let selected: { run: AgentRun; pending: PendingRun } | undefined
+        for (const run of listed.data.filter((candidate) => candidate.status === 'queued')) {
+          const pending = pendingRuns.get(run.id)
+          if (pending === undefined) continue
+          const policy = resolveConcurrency(run.workspaceId)
+          if (!policy.ok) {
+            logger.error(
+              { runId: run.id, error: policy.error },
+              'Failed to resolve Agent concurrency policy.',
+            )
+            continue
+          }
+          if (
+            unisolatedWriteConflict(active, run.workspaceId, run.worktreeId, run.approvalMode) ===
+              undefined &&
+            hasCapacity(active, run, policy.data)
+          ) {
+            selected = { run, pending }
+            break
+          }
+        }
+        if (selected === undefined) return
+        pendingRuns.delete(selected.run.id)
+        const launched = await launch(selected.pending)
+        if (!launched.ok) {
+          logger.error(
+            { runId: selected.run.id, error: launched.error },
+            'Queued Agent run failed to launch.',
+          )
+        }
+      }
+    } finally {
+      advancingQueue = false
+    }
+  }
+
+  const scheduleQueueAdvance = (): void => {
+    void advanceQueue().catch((cause: unknown) => {
+      logger.error({ cause }, 'Unexpected Agent queue advancement failure.')
+    })
   }
 
   const stopOutput = deps.events.subscribe('process.output', ({ agentRunId, data }) => {
@@ -155,6 +298,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     } else if (error !== undefined) {
       deps.events.emit('agent.failed', { runId: agentRunId, error })
     }
+    scheduleQueueAdvance()
   })
 
   return {
@@ -237,6 +381,32 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       const defaultApproval = approvalModeSchema.safeParse(definition.defaults.permissionProfile)
       const approvalMode =
         request.approvalMode ?? (defaultApproval.success ? defaultApproval.data : 'manual')
+      const policy = resolveConcurrency(workspace.data.id)
+      if (!policy.ok) return policy
+      const listed = deps.runs.listActive()
+      if (!listed.ok) return listed
+      const active = runningForLimits(listed.data)
+      const conflict = unisolatedWriteConflict(
+        active,
+        workspace.data.id,
+        request.worktreeId,
+        approvalMode,
+      )
+      if (conflict !== undefined) {
+        return fail({
+          code: 'VALIDATION_FAILED',
+          message: `Agent run "${conflict.id}" is already modifying this workspace directly. Stop it before starting another writable Agent, or use an isolated worktree.`,
+          retryable: true,
+          detail: `workspace=${workspace.data.id} conflicting run=${conflict.id}`,
+        })
+      }
+      const shouldQueue =
+        listed.data.some((run) => run.status === 'queued') ||
+        !hasCapacity(
+          active,
+          { workspaceId: workspace.data.id, agentType: definition.id },
+          policy.data,
+        )
       const runId = createRunId()
       const runDirectory = deps.paths.runDir(runId)
       if (!runDirectory.ok) return runDirectory
@@ -248,7 +418,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           agentType: definition.id,
           executionMode,
           runDir: runDirectory.data,
-          status: 'preparing',
+          status: shouldQueue ? 'queued' : 'preparing',
           role: request.role ?? definition.defaults.role,
           approvalMode,
           ...(request.taskId === undefined ? {} : { taskId: request.taskId }),
@@ -262,47 +432,31 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       appendEvent(runId, 'agent.created', { agentType: definition.id, executionMode })
       deps.events.emit('agent.created', { runId })
 
-      activeAdapters.set(runId, adapter)
-      const started = await adapter.start({
-        runId,
-        workspace: workspace.data,
-        ...(task === undefined ? {} : { task }),
-        mode,
-        approvalMode,
-        ...(request.model === undefined ? {} : { model: request.model }),
-        ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
-        ...(worktreePath === undefined ? {} : { worktreePath }),
-        ...(request.environment === undefined ? {} : { environment: request.environment }),
-      })
-      if (!started.ok) return finishFailed(runId, started.error)
-
-      const current = deps.runs.getById(runId)
-      if (!current.ok) return current
-      if (current.data !== null && isTerminal(current.data)) {
-        return { ok: true, data: current.data }
-      }
-      const running = deps.runs.update(
-        runId,
-        {
-          status: 'running',
-          processId: started.data.processId,
-          pid: started.data.pid,
-          startedAt: started.data.startedAt,
-          ...(started.data.providerSession === undefined
-            ? {}
-            : { providerSession: { ...started.data.providerSession } }),
+      const pending: PendingRun = {
+        adapter,
+        request: {
+          runId,
+          workspace: workspace.data,
+          ...(task === undefined ? {} : { task }),
+          mode,
+          approvalMode,
+          ...(request.model === undefined ? {} : { model: request.model }),
+          ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
+          ...(worktreePath === undefined ? {} : { worktreePath }),
+          ...(request.environment === undefined ? {} : { environment: request.environment }),
         },
-        started.data.startedAt,
-      )
-      if (!running.ok) {
-        await adapter.cancel(runId)
-        activeAdapters.delete(runId)
-        return running
       }
-      if (running.data === null) return missing('Agent run', runId)
-      appendEvent(runId, 'agent.started', { processId: started.data.processId })
-      deps.events.emit('agent.started', { runId })
-      return { ok: true, data: running.data }
+      if (shouldQueue) {
+        pendingRuns.set(runId, pending)
+        appendEvent(runId, 'agent.queued', {})
+        deps.events.emit('agent.queued', { runId })
+        scheduleQueueAdvance()
+        return created
+      }
+
+      const launched = await launch(pending)
+      if (!launched.ok) scheduleQueueAdvance()
+      return launched
     },
 
     async send({ runId, data }) {
@@ -329,6 +483,18 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       if (!current.ok) return current
       if (current.data === null) return missing('Agent run', runId)
       if (isTerminal(current.data)) return { ok: true, data: current.data }
+      if (current.data.status === 'queued') {
+        pendingRuns.delete(runId)
+        const finishedAt = now()
+        const updated = deps.runs.update(runId, { status: 'cancelled', finishedAt }, finishedAt)
+        appendEvent(runId, 'agent.cancelled', {})
+        deps.events.emit('agent.cancelled', { runId })
+        scheduleQueueAdvance()
+        if (!updated.ok) return updated
+        return updated.data === null
+          ? missing('Agent run', runId)
+          : { ok: true, data: updated.data }
+      }
       const adapter = activeAdapters.get(runId)
       if (adapter === undefined) {
         return fail({
@@ -387,6 +553,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       stopOutput()
       stopExited()
       activeAdapters.clear()
+      pendingRuns.clear()
       cancelRequested.clear()
     },
   }

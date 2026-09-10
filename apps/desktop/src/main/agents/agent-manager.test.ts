@@ -5,7 +5,12 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { AgentDefinition, ProviderSessionRef, WorkbenchEvents } from '@teskra/contracts'
+import type {
+  AgentDefinition,
+  ConcurrencyConfig,
+  ProviderSessionRef,
+  WorkbenchEvents,
+} from '@teskra/contracts'
 
 import { migrateDatabase } from '../db/migrations'
 import {
@@ -29,6 +34,8 @@ interface TestContext {
   readonly manager: AgentManager
   readonly runs: ReturnType<typeof createAgentRunRepository>
   readonly agentEvents: ReturnType<typeof createAgentEventRepository>
+  readonly workspaces: ReturnType<typeof createWorkspaceRepository>
+  readonly worktrees: ReturnType<typeof createWorktreeRepository>
   readonly adapters: Record<'codex' | 'claude', CodingAgentAdapter>
 }
 
@@ -77,7 +84,7 @@ function mockAdapter(
   }
 }
 
-function setup(): TestContext {
+function setup(concurrency?: ConcurrencyConfig): TestContext {
   const connection = new Database(':memory:')
   connection.pragma('foreign_keys = ON')
   const migrated = migrateDatabase(connection)
@@ -120,6 +127,9 @@ function setup(): TestContext {
     paths: createTeskraPaths({ TESKRA_HOME: home }),
     createRunId: () => `run-${String(nextRun++)}`,
     now: () => '2026-09-10T00:00:02.000Z',
+    ...(concurrency === undefined
+      ? {}
+      : { resolveConcurrency: () => ({ ok: true as const, data: concurrency }) }),
   })
   const context = {
     connection,
@@ -127,6 +137,8 @@ function setup(): TestContext {
     manager,
     runs,
     agentEvents,
+    workspaces,
+    worktrees,
     adapters: { codex, claude },
   }
   contexts.push(context)
@@ -261,5 +273,149 @@ describe('AgentManager (TASK-028)', () => {
       data: { status: 'cancelled', exitCode: 130 },
     })
     expect(context.manager.list({ activeOnly: true })).toEqual({ ok: true, data: [] })
+  })
+
+  it.each([
+    ['global', { maxGlobalRuns: 1, maxRunsPerWorkspace: 3, maxRunsPerAgent: 2 }],
+    ['workspace', { maxGlobalRuns: 4, maxRunsPerWorkspace: 1, maxRunsPerAgent: 2 }],
+    ['agent', { maxGlobalRuns: 4, maxRunsPerWorkspace: 3, maxRunsPerAgent: 1 }],
+  ] as const)('queues runs at the %s concurrency limit and advances FIFO', async (kind, policy) => {
+    const context = setup(policy)
+    if (kind === 'agent') {
+      const secondWorkspace = context.workspaces.create({
+        id: 'workspace-2',
+        name: 'Second',
+        runtime: { kind: 'wsl', distro: 'Ubuntu' },
+        path: '/repo-2',
+      })
+      if (!secondWorkspace.ok) throw new Error(secondWorkspace.error.message)
+    }
+    const first = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      approvalMode: 'read-only',
+    })
+    const secondAgent = kind === 'agent' ? 'codex' : 'claude'
+    const second = await context.manager.start({
+      workspaceId: kind === 'agent' ? 'workspace-2' : 'workspace-1',
+      agentType: secondAgent,
+      approvalMode: 'read-only',
+    })
+    expect(first).toMatchObject({ ok: true, data: { status: 'running' } })
+    expect(second).toMatchObject({ ok: true, data: { status: 'queued' } })
+
+    context.events.emit('process.exited', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      exitCode: 0,
+    })
+    await vi.waitFor(() => {
+      expect(context.manager.get('run-2')).toMatchObject({
+        ok: true,
+        data: { status: 'running' },
+      })
+    })
+  })
+
+  it('rejects a second direct writable run but permits read-only and isolated runs', async () => {
+    const context = setup()
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+
+    const conflicting = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'claude',
+    })
+    expect(conflicting).toMatchObject({
+      ok: false,
+      error: { code: 'VALIDATION_FAILED', message: expect.stringContaining('run-1') },
+    })
+    const readOnly = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'claude',
+      approvalMode: 'read-only',
+    })
+    expect(readOnly).toMatchObject({ ok: true, data: { status: 'running' } })
+
+    const worktree = context.worktrees.create({
+      id: 'worktree-1',
+      workspaceId: 'workspace-1',
+      branch: 'teskra/run-3',
+      baseBranch: 'main',
+      path: '/worktrees/run-3',
+      state: 'ready',
+      isolation: 'worktree',
+    })
+    if (!worktree.ok) throw new Error(worktree.error.message)
+    const isolated = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'claude',
+      worktreeId: 'worktree-1',
+    })
+    expect(isolated).toMatchObject({ ok: true, data: { status: 'running' } })
+  })
+
+  it('cancels a queued run without disturbing FIFO progression', async () => {
+    const context = setup({
+      maxGlobalRuns: 1,
+      maxRunsPerWorkspace: 3,
+      maxRunsPerAgent: 2,
+    })
+    await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      approvalMode: 'read-only',
+    })
+    await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'claude',
+      approvalMode: 'read-only',
+    })
+    await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      approvalMode: 'read-only',
+    })
+
+    expect(await context.manager.cancel('run-2')).toMatchObject({
+      ok: true,
+      data: { status: 'cancelled' },
+    })
+    expect(context.manager.get('run-3')).toMatchObject({
+      ok: true,
+      data: { status: 'queued' },
+    })
+    context.events.emit('process.exited', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      exitCode: 0,
+    })
+    await vi.waitFor(() => {
+      expect(context.manager.get('run-3')).toMatchObject({
+        ok: true,
+        data: { status: 'running' },
+      })
+    })
+  })
+
+  it('clears active and queued capacity without deadlock when every run is cancelled', async () => {
+    const context = setup({
+      maxGlobalRuns: 1,
+      maxRunsPerWorkspace: 3,
+      maxRunsPerAgent: 2,
+    })
+    for (const agentType of ['codex', 'claude', 'codex'] as const) {
+      await context.manager.start({
+        workspaceId: 'workspace-1',
+        agentType,
+        approvalMode: 'read-only',
+      })
+    }
+
+    await context.manager.cancel('run-2')
+    await context.manager.cancel('run-3')
+    await context.manager.cancel('run-1')
+    await vi.waitFor(() => {
+      expect(context.manager.list({ activeOnly: true })).toEqual({ ok: true, data: [] })
+    })
   })
 })

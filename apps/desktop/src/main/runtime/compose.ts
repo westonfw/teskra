@@ -196,6 +196,10 @@ export async function composeTeskraRuntime(
     worktrees: repositories.worktrees,
     events,
     paths,
+    resolveConcurrency: (workspaceId) => {
+      const resolved = config.resolve({ workspaceId })
+      return resolved.ok ? { ok: true, data: resolved.data.config.concurrency } : resolved
+    },
   })
 
   let disposed = false
