@@ -123,6 +123,7 @@ function fakeRuntime(): TeskraRuntime {
       }),
       get: vi.fn(() => ok(null)),
       list: vi.fn(() => ok([])),
+      getOutput: vi.fn(() => ok('')),
     },
     system: {
       info: vi.fn(() => ok({ appVersion: '0.1.0', runtimeVersion: '22.0.0' })),

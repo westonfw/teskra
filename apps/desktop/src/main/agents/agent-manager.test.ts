@@ -282,6 +282,7 @@ describe('AgentManager (TASK-028)', () => {
     expect(
       history.ok && history.data.filter(({ eventType }) => eventType === 'agent.output'),
     ).toHaveLength(1)
+    expect(context.manager.getOutput('run-1')).toEqual({ ok: true, data: 'abc\r\n' })
   })
 
   it('links Task history and derives Task status across multiple Runs', async () => {

@@ -63,6 +63,7 @@ const bridge: TeskraBridge = {
     cancel: (request) => invoke(IPC_CHANNELS.agentRunCancel, request),
     get: (request) => invoke(IPC_CHANNELS.agentRunGet, request),
     list: (request = {}) => invoke(IPC_CHANNELS.agentRunList, request),
+    getOutput: (request) => invoke(IPC_CHANNELS.agentRunOutput, request),
   },
   runtime: {
     info: () => invoke(IPC_CHANNELS.runtimeInfo),

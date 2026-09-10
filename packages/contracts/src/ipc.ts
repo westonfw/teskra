@@ -129,6 +129,7 @@ export const IPC_CHANNELS = {
   agentRunCancel: 'teskra:agent-run:cancel',
   agentRunGet: 'teskra:agent-run:get',
   agentRunList: 'teskra:agent-run:list',
+  agentRunOutput: 'teskra:agent-run:output',
   terminalCreate: 'teskra:terminal:create',
   terminalWrite: 'teskra:terminal:write',
   terminalResize: 'teskra:terminal:resize',
@@ -289,6 +290,11 @@ export const agentRunListChannel = channel(
   listAgentRunsRequestSchema,
   z.array(agentRunSchema),
 )
+export const agentRunOutputChannel = channel(
+  IPC_CHANNELS.agentRunOutput,
+  agentRunIdRequestSchema,
+  z.string(),
+)
 export const terminalCreateChannel = channel(
   IPC_CHANNELS.terminalCreate,
   createTerminalRequestSchema,
@@ -401,6 +407,7 @@ export const ipcChannelDefinitions = {
   agentRunCancel: agentRunCancelChannel,
   agentRunGet: agentRunGetChannel,
   agentRunList: agentRunListChannel,
+  agentRunOutput: agentRunOutputChannel,
   terminalCreate: terminalCreateChannel,
   terminalWrite: terminalWriteChannel,
   terminalResize: terminalResizeChannel,
@@ -465,6 +472,7 @@ export interface TeskraBridge {
     cancel(request: AgentRunIdRequest): Promise<IpcResult<AgentRun>>
     get(request: AgentRunIdRequest): Promise<IpcResult<AgentRun | null>>
     list(request?: ListAgentRunsRequest): Promise<IpcResult<AgentRun[]>>
+    getOutput(request: AgentRunIdRequest): Promise<IpcResult<string>>
   }
   readonly runtime: {
     info(): Promise<IpcResult<SystemInfo>>

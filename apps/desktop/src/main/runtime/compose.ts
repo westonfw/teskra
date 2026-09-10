@@ -232,6 +232,7 @@ export async function composeTeskraRuntime(
       cancel: ({ runId }) => agentManager.cancel(runId),
       get: ({ runId }) => agentManager.get(runId),
       list: (request = {}) => agentManager.list(request),
+      getOutput: ({ runId }) => agentManager.getOutput(runId),
     },
     workspace: {
       create: (request) => workspaceManager.create(request),

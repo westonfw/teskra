@@ -34,6 +34,7 @@ export interface AgentManager {
   cancel(runId: string): Promise<IpcResult<AgentRun>>
   get(runId: string): IpcResult<AgentRun | null>
   list(request?: ListAgentRunsRequest): IpcResult<AgentRun[]>
+  getOutput(runId: string): IpcResult<string>
   dispose(): void
 }
 
@@ -574,6 +575,22 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     },
 
     get: (runId) => deps.runs.getById(runId),
+
+    getOutput(runId) {
+      outputBatcher.flush(runId)
+      const run = deps.runs.getById(runId)
+      if (!run.ok) return run
+      if (run.data === null) return missing('Agent run', runId)
+      const history = deps.agentEvents.listByRun(runId)
+      if (!history.ok) return history
+      return {
+        ok: true,
+        data: history.data
+          .filter(({ eventType }) => eventType === 'agent.output')
+          .map(({ payload }) => (typeof payload.data === 'string' ? payload.data : ''))
+          .join(''),
+      }
+    },
 
     list(request = {}) {
       if (request.activeOnly === true) {

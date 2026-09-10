@@ -12,6 +12,7 @@ import { Button, Empty, Layout, Menu, Select, Space, Tag, Typography } from 'ant
 import { useEffect } from 'react'
 
 import { SettingsPage } from '../settings/settings-page'
+import { TaskPage } from '../tasks/task-page'
 import { AgentCatalogPage } from '../agents/agent-catalog-page'
 import type { SettingsSectionRegistry } from '../settings/registry'
 import { useNavigationStore, type WorkbenchPage } from '../stores/navigation-store'
@@ -137,14 +138,7 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
         <main className="workbench-content">
           <div className={page === 'terminal' ? 'route-layer route-layer-hidden' : 'route-layer'}>
             {page === 'workspace' && <WorkspacePage />}
-            {page === 'tasks' &&
-              needsWorkspace(
-                'Tasks',
-                <PendingFeature
-                  title="Task planning is the next workspace capability"
-                  description="The shell is ready; TaskManager is connected in Phase C."
-                />,
-              )}
+            {page === 'tasks' && needsWorkspace('Tasks', <TaskPage />)}
             {page === 'runs' && needsWorkspace('Runs', <AgentCatalogPage />)}
             {page === 'git' &&
               needsWorkspace(

@@ -94,6 +94,10 @@ function createBridge(initialRuns: AgentRun[] = []) {
         ok: true as const,
         data: runs.filter((item) => workspaceId === undefined || item.workspaceId === workspaceId),
       })),
+      getOutput: vi.fn(async ({ runId }) => ({
+        ok: true as const,
+        data: runId === 'run-history' ? 'historical output\r\n' : '',
+      })),
     },
     events: {
       subscribe: vi.fn((name, handler) => {
@@ -195,5 +199,13 @@ describe('Agent store', () => {
     expect(output?.startsWith('a')).toBe(true)
     expect(output?.endsWith('b')).toBe(true)
     stop()
+  })
+
+  it('loads persisted output for a completed historical Run', async () => {
+    const { bridge } = createBridge()
+    const store = createAgentStore(() => bridge)
+
+    expect(await store.getState().loadRunOutput('run-history')).toBe(true)
+    expect(store.getState().output['run-history']).toBe('historical output\r\n')
   })
 })

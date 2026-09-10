@@ -42,6 +42,7 @@ export interface AgentStoreBridge {
       taskId?: string
       activeOnly?: boolean
     }): Promise<IpcResult<AgentRun[]>>
+    getOutput(request: { runId: string }): Promise<IpcResult<string>>
   }
   readonly events: {
     subscribe<
@@ -77,6 +78,7 @@ interface AgentState {
   synchronizeRuns(workspaceId: string): Promise<void>
   startRun(request: StartAgentRunRequest): Promise<AgentRun | undefined>
   cancelRun(runId: string): Promise<boolean>
+  loadRunOutput(runId: string): Promise<boolean>
   loadDefinitions(): Promise<void>
   detect(agentId: string, runtime: WorkspaceRuntimeRef): Promise<void>
   loadHealth(runtime: WorkspaceRuntimeRef): Promise<void>
@@ -204,6 +206,22 @@ export function createAgentStore(getBridge: () => AgentStoreBridge) {
           return false
         }
         set((state) => ({ runs: upsertRun(state.runs, result.data) }))
+        return true
+      } catch {
+        set({ error: transportError })
+        return false
+      }
+    },
+
+    async loadRunOutput(runId) {
+      set({ error: undefined })
+      try {
+        const result = await getBridge().agent.getOutput({ runId })
+        if (!result.ok) {
+          set({ error: result.error })
+          return false
+        }
+        set((state) => ({ output: { ...state.output, [runId]: result.data } }))
         return true
       } catch {
         set({ error: transportError })

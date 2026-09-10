@@ -104,6 +104,7 @@ export interface AgentCatalogPort {
   cancel(request: AgentRunIdRequest): Promise<IpcResult<AgentRun>>
   get(request: AgentRunIdRequest): IpcResult<AgentRun | null>
   list(request?: ListAgentRunsRequest): IpcResult<readonly AgentRun[]>
+  getOutput(request: AgentRunIdRequest): IpcResult<string>
 }
 
 export type FutureRuntimePort = object

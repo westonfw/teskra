@@ -62,6 +62,7 @@ export function AgentCatalogPage() {
   const startSynchronization = useAgentStore((state) => state.startSynchronization)
   const startRun = useAgentStore((state) => state.startRun)
   const cancelRun = useAgentStore((state) => state.cancelRun)
+  const loadRunOutput = useAgentStore((state) => state.loadRunOutput)
   const clearError = useAgentStore((state) => state.clearError)
   const [selectedId, setSelectedId] = useState<string>()
   const [selectedRunId, setSelectedRunId] = useState<string>()
@@ -108,6 +109,11 @@ export function AgentCatalogPage() {
       setPrompt('')
       setSelectedRunId(run.id)
     }
+  }
+
+  const handleOpenRun = async (run: AgentRun): Promise<void> => {
+    if (!ACTIVE_STATUSES.has(run.status)) await loadRunOutput(run.id)
+    setSelectedRunId(run.id)
   }
 
   return (
@@ -195,7 +201,7 @@ export function AgentCatalogPage() {
                   workspaceName={workspace?.name ?? run.workspaceId}
                   activity={activity[run.id]}
                   now={now}
-                  onOpen={() => setSelectedRunId(run.id)}
+                  onOpen={() => void handleOpenRun(run)}
                   onCancel={() => void cancelRun(run.id)}
                 />
               )}
