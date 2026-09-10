@@ -24,6 +24,7 @@ import { type InternalAppError, toPublicError } from '../errors'
 import { getLogger } from '../logger'
 import type { TeskraPaths } from '../paths'
 import type { AgentRegistry } from './agent-registry'
+import { createAgentOutputBatcher } from './agent-output-batcher'
 import type { CodingAgentAdapter } from './adapters/coding-agent-adapter'
 
 export interface AgentManager {
@@ -132,6 +133,16 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       logger.error({ runId, eventType, error: appended.error }, 'Failed to persist Agent event.')
     }
   }
+
+  const outputBatcher = createAgentOutputBatcher((runId, data) => {
+    const timestamp = now()
+    const updated = deps.runs.update(runId, { lastOutputAt: timestamp }, timestamp)
+    if (!updated.ok) {
+      logger.error({ runId, error: updated.error }, 'Failed to update Agent output time.')
+    }
+    appendEvent(runId, 'agent.output', { data })
+    deps.events.emit('agent.output', { runId, data })
+  })
 
   const finishFailed = (runId: string, error: PublicAppError): IpcResult<AgentRun> => {
     const finishedAt = now()
@@ -247,20 +258,12 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
 
   const stopOutput = deps.events.subscribe('process.output', ({ agentRunId, data }) => {
     if (agentRunId === undefined || !activeAdapters.has(agentRunId)) return
-    const timestamp = now()
-    const updated = deps.runs.update(agentRunId, { lastOutputAt: timestamp }, timestamp)
-    if (!updated.ok) {
-      logger.error(
-        { runId: agentRunId, error: updated.error },
-        'Failed to update Agent output time.',
-      )
-    }
-    appendEvent(agentRunId, 'agent.output', { data })
-    deps.events.emit('agent.output', { runId: agentRunId, data })
+    outputBatcher.push(agentRunId, data)
   })
 
   const stopExited = deps.events.subscribe('process.exited', ({ agentRunId, exitCode, signal }) => {
     if (agentRunId === undefined || !activeAdapters.has(agentRunId)) return
+    outputBatcher.flush(agentRunId)
     const cancelled = cancelRequested.delete(agentRunId)
     const status = cancelled ? 'cancelled' : exitCode === 0 ? 'completed' : 'failed'
     const finishedAt = now()
@@ -469,6 +472,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           detail: 'No active Adapter binding exists for run input.',
         })
       }
+      outputBatcher.flush(runId)
       const sent = await adapter.send(runId, data)
       if (!sent.ok) return sent
       const timestamp = now()
@@ -505,6 +509,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         })
       }
 
+      outputBatcher.flush(runId)
       cancelRequested.add(runId)
       const cancelled = await adapter.cancel(runId)
       if (!cancelled.ok) {
@@ -552,6 +557,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     dispose() {
       stopOutput()
       stopExited()
+      outputBatcher.flushAll()
       activeAdapters.clear()
       pendingRuns.clear()
       cancelRequested.clear()

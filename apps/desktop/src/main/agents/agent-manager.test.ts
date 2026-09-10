@@ -254,6 +254,34 @@ describe('AgentManager (TASK-028)', () => {
     ])
   })
 
+  it('persists character-level PTY bursts as one output batch before exit', async () => {
+    const context = setup()
+    const output = vi.fn()
+    context.events.subscribe('agent.output', output)
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+
+    for (const data of ['a', 'b', 'c', '\r', '\n']) {
+      context.events.emit('process.output', {
+        processId: 'codex:run-1',
+        agentRunId: 'run-1',
+        data,
+      })
+    }
+    expect(output).not.toHaveBeenCalled()
+    context.events.emit('process.exited', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      exitCode: 0,
+    })
+
+    expect(output).toHaveBeenCalledOnce()
+    expect(output).toHaveBeenCalledWith({ runId: 'run-1', data: 'abc\r\n' })
+    const history = context.agentEvents.listByRun('run-1')
+    expect(
+      history.ok && history.data.filter(({ eventType }) => eventType === 'agent.output'),
+    ).toHaveLength(1)
+  })
+
   it('marks a stopped process as cancelled instead of failed', async () => {
     const context = setup()
     await context.manager.start({ workspaceId: 'workspace-1', agentType: 'claude' })

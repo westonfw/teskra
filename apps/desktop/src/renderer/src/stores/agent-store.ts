@@ -11,6 +11,8 @@ import type {
 } from '@teskra/contracts'
 import { create } from 'zustand'
 
+const MAX_AGENT_OUTPUT_CHARS = 10 * 1024 * 1024
+
 export interface AgentStoreBridge {
   readonly agent: {
     listDefinitions(): Promise<IpcResult<AgentDefinition[]>>
@@ -140,7 +142,10 @@ export function createAgentStore(getBridge: () => AgentStoreBridge) {
             state.runs.some(({ id }) => id === runId)
               ? {
                   activity: { ...state.activity, [runId]: activitySummary(data) },
-                  output: { ...state.output, [runId]: `${state.output[runId] ?? ''}${data}` },
+                  output: {
+                    ...state.output,
+                    [runId]: appendOutput(state.output[runId], data),
+                  },
                 }
               : {},
           )
@@ -314,6 +319,7 @@ function upsertRun(runs: readonly AgentRun[], run: AgentRun): AgentRun[] {
 
 function activitySummary(data: string): string {
   const plain = data
+    .slice(-4_096)
     .replaceAll('\u001b', '')
     .replaceAll(/\[[0-?]*[ -/]*[@-~]/g, '')
     .split(/\r?\n/)
@@ -321,6 +327,13 @@ function activitySummary(data: string): string {
     .filter(Boolean)
     .at(-1)
   return (plain ?? 'Agent produced output').slice(0, 180)
+}
+
+function appendOutput(current: string | undefined, data: string): string {
+  if (data.length >= MAX_AGENT_OUTPUT_CHARS) return data.slice(-MAX_AGENT_OUTPUT_CHARS)
+  const retained = current ?? ''
+  const overflow = retained.length + data.length - MAX_AGENT_OUTPUT_CHARS
+  return `${overflow > 0 ? retained.slice(overflow) : retained}${data}`
 }
 
 export const useAgentStore = createAgentStore(() => window.teskra)

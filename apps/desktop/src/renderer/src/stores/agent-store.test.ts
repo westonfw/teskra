@@ -179,4 +179,21 @@ describe('Agent store', () => {
     expect(await store.getState().cancelRun('run-started')).toBe(true)
     expect(store.getState().runs[0]?.status).toBe('cancelled')
   })
+
+  it('bounds a 10 MiB-class output history while retaining the newest raw data', async () => {
+    const initial = run()
+    const harness = createBridge([initial])
+    const store = createAgentStore(() => harness.bridge)
+    const stop = store.getState().startSynchronization('workspace-1')
+    await vi.waitFor(() => expect(store.getState().runs).toHaveLength(1))
+
+    harness.emit('agent.output', { runId: initial.id, data: 'a'.repeat(6 * 1024 * 1024) })
+    harness.emit('agent.output', { runId: initial.id, data: 'b'.repeat(6 * 1024 * 1024) })
+
+    const output = store.getState().output[initial.id]
+    expect(output).toHaveLength(10 * 1024 * 1024)
+    expect(output?.startsWith('a')).toBe(true)
+    expect(output?.endsWith('b')).toBe(true)
+    stop()
+  })
 })
