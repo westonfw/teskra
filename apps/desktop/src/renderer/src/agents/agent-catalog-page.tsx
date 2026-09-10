@@ -20,6 +20,7 @@ import { AppErrorAlert } from '../components/app-error-alert'
 import { agentRuntimeKey, useAgentStore } from '../stores/agent-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
 import { AgentPicker } from './agent-picker'
+import { AgentRunTerminal } from './agent-run-terminal'
 
 const ACTIVE_STATUSES = new Set<AgentRunStatus>([
   'created',
@@ -55,6 +56,7 @@ export function AgentCatalogPage() {
   const health = useAgentStore((state) => state.health)
   const runs = useAgentStore((state) => state.runs)
   const activity = useAgentStore((state) => state.activity)
+  const output = useAgentStore((state) => state.output)
   const loadDefinitions = useAgentStore((state) => state.loadDefinitions)
   const loadHealth = useAgentStore((state) => state.loadHealth)
   const startSynchronization = useAgentStore((state) => state.startSynchronization)
@@ -249,6 +251,7 @@ export function AgentCatalogPage() {
             run={selectedRun}
             workspaceName={workspace?.name ?? selectedRun.workspaceId}
             activity={activity[selectedRun.id]}
+            output={output[selectedRun.id]}
             now={now}
             onCancel={() => void cancelRun(selectedRun.id)}
           />
@@ -315,13 +318,16 @@ function RunListItem({
   )
 }
 
-function RunDetail({
-  run,
-  workspaceName,
-  activity,
-  now,
-  onCancel,
-}: Omit<RunListItemProps, 'agentName' | 'onOpen'>) {
+interface RunDetailProps {
+  readonly run: AgentRun
+  readonly workspaceName: string
+  readonly activity?: string
+  readonly output?: string
+  readonly now: number
+  readonly onCancel: () => void
+}
+
+function RunDetail({ run, workspaceName, activity, output, now, onCancel }: RunDetailProps) {
   return (
     <Space direction="vertical" size={20} className="run-detail">
       {run.executionMode === 'attended' && run.worktreeId === undefined && (
@@ -348,6 +354,7 @@ function RunDetail({
           <Typography.Paragraph className="run-prompt">{run.prompt}</Typography.Paragraph>
         </Card>
       )}
+      <AgentRunTerminal key={run.id} run={run} initialData={output} />
       {ACTIVE_STATUSES.has(run.status) && (
         <Button danger onClick={onCancel}>
           Cancel run

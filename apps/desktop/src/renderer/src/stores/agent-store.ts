@@ -62,6 +62,7 @@ interface AgentState {
   readonly executableOverrides: Readonly<Record<string, string | null | undefined>>
   readonly runs: readonly AgentRun[]
   readonly activity: Readonly<Record<string, string | undefined>>
+  readonly output: Readonly<Record<string, string | undefined>>
   readonly loading: boolean
   readonly runsLoading: boolean
   readonly starting: boolean
@@ -99,6 +100,7 @@ export function createAgentStore(getBridge: () => AgentStoreBridge) {
     executableOverrides: {},
     runs: [],
     activity: {},
+    output: {},
     loading: false,
     runsLoading: false,
     starting: false,
@@ -136,7 +138,10 @@ export function createAgentStore(getBridge: () => AgentStoreBridge) {
           if (generation !== synchronizationGeneration) return
           set((state) =>
             state.runs.some(({ id }) => id === runId)
-              ? { activity: { ...state.activity, [runId]: activitySummary(data) } }
+              ? {
+                  activity: { ...state.activity, [runId]: activitySummary(data) },
+                  output: { ...state.output, [runId]: `${state.output[runId] ?? ''}${data}` },
+                }
               : {},
           )
         }),

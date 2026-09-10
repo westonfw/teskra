@@ -160,6 +160,7 @@ describe('Agent store', () => {
 
     await vi.waitFor(() => expect(store.getState().runs[0]?.status).toBe('completed'))
     expect(store.getState().activity[initial.id]).toBe('Building project')
+    expect(store.getState().output[initial.id]).toBe('\u001b[32mBuilding project\u001b[0m\r\n')
     stop()
   })
 
