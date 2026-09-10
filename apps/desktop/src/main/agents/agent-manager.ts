@@ -298,6 +298,10 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     outputBatcher.push(agentRunId, data)
   })
 
+  const stopCommand = deps.events.subscribe('agent.command', ({ runId, command }) => {
+    appendEvent(runId, 'agent.command', { command })
+  })
+
   const stopExited = deps.events.subscribe('process.exited', ({ agentRunId, exitCode, signal }) => {
     if (agentRunId === undefined || !activeAdapters.has(agentRunId)) return
     outputBatcher.flush(agentRunId)
@@ -626,6 +630,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
 
     dispose() {
       stopOutput()
+      stopCommand()
       stopExited()
       outputBatcher.flushAll()
       activeAdapters.clear()

@@ -21,7 +21,7 @@ import {
   createWorktreeRepository,
 } from '../db/repositories'
 import { createEventBus, type EventBus } from '../events/event-bus'
-import { createTeskraPaths } from '../paths'
+import { createTeskraPaths, type TeskraPaths } from '../paths'
 import type { CodingAgentAdapter } from './adapters/coding-agent-adapter'
 import { createAgentManager, type AgentManager } from './agent-manager'
 import { createBuiltInAgentRegistry } from './agent-registry'
@@ -38,6 +38,7 @@ interface TestContext {
   readonly worktrees: ReturnType<typeof createWorktreeRepository>
   readonly tasks: ReturnType<typeof createTaskRepository>
   readonly adapters: Record<'codex' | 'claude', CodingAgentAdapter>
+  readonly paths: TeskraPaths
 }
 
 const contexts: TestContext[] = []
@@ -116,6 +117,7 @@ function setup(concurrency?: ConcurrencyConfig): TestContext {
   const home = mkdtempSync(join(tmpdir(), 'teskra-agent-manager-'))
   homes.push(home)
   let nextRun = 1
+  const paths = createTeskraPaths({ TESKRA_HOME: home })
   const manager = createAgentManager({
     registry: registry.data,
     adapters: [codex, claude],
@@ -125,7 +127,7 @@ function setup(concurrency?: ConcurrencyConfig): TestContext {
     tasks,
     worktrees,
     events,
-    paths: createTeskraPaths({ TESKRA_HOME: home }),
+    paths,
     createRunId: () => `run-${String(nextRun++)}`,
     now: () => '2026-09-10T00:00:02.000Z',
     ...(concurrency === undefined
@@ -142,6 +144,7 @@ function setup(concurrency?: ConcurrencyConfig): TestContext {
     worktrees,
     tasks,
     adapters: { codex, claude },
+    paths,
   }
   contexts.push(context)
   return context
@@ -283,6 +286,52 @@ describe('AgentManager (TASK-028)', () => {
       history.ok && history.data.filter(({ eventType }) => eventType === 'agent.output'),
     ).toHaveLength(1)
     expect(context.manager.getOutput('run-1')).toEqual({ ok: true, data: 'abc\r\n' })
+  })
+
+  it('persists command events and restores completed Run output after Manager restart', async () => {
+    const context = setup()
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    context.events.emit('agent.command', { runId: 'run-1', command: 'npm test' })
+    context.events.emit('process.output', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      data: 'all tests passed\r\n',
+    })
+    context.events.emit('process.exited', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      exitCode: 0,
+    })
+    context.manager.dispose()
+
+    const registry = createBuiltInAgentRegistry()
+    if (!registry.ok) throw new Error(registry.error.message)
+    const restarted = createAgentManager({
+      registry: registry.data,
+      adapters: [context.adapters.codex, context.adapters.claude],
+      runs: context.runs,
+      agentEvents: context.agentEvents,
+      workspaces: context.workspaces,
+      tasks: context.tasks,
+      worktrees: context.worktrees,
+      events: createEventBus(),
+      paths: context.paths,
+    })
+
+    expect(restarted.list({ workspaceId: 'workspace-1' })).toMatchObject({
+      ok: true,
+      data: [{ id: 'run-1', status: 'completed' }],
+    })
+    expect(restarted.getOutput('run-1')).toEqual({ ok: true, data: 'all tests passed\r\n' })
+    const history = context.agentEvents.listByRun('run-1')
+    expect(history.ok && history.data.map(({ eventType }) => eventType)).toEqual([
+      'agent.created',
+      'agent.started',
+      'agent.command',
+      'agent.output',
+      'agent.completed',
+    ])
+    restarted.dispose()
   })
 
   it('links Task history and derives Task status across multiple Runs', async () => {
