@@ -29,6 +29,26 @@ import {
 import { ipcResultSchema, type IpcResult } from './error'
 import type { WorkbenchEventName, WorkbenchEvents } from './event'
 import {
+  gitBranchSchema,
+  gitCommitRequestSchema,
+  gitCommitResultSchema,
+  gitCommitSchema,
+  gitDiffRequestSchema,
+  gitLogRequestSchema,
+  gitRawDiffSchema,
+  gitStatusSchema,
+  gitWorkspaceRequestSchema,
+  type GitBranch,
+  type GitCommit,
+  type GitCommitRequest,
+  type GitCommitResult,
+  type GitDiffRequest,
+  type GitLogRequest,
+  type GitRawDiff,
+  type GitStatus,
+  type GitWorkspaceRequest,
+} from './git'
+import {
   archiveTaskRequestSchema,
   createTaskRequestSchema,
   listTasksRequestSchema,
@@ -130,6 +150,11 @@ export const IPC_CHANNELS = {
   agentRunGet: 'teskra:agent-run:get',
   agentRunList: 'teskra:agent-run:list',
   agentRunOutput: 'teskra:agent-run:output',
+  gitStatus: 'teskra:git:status',
+  gitBranch: 'teskra:git:branch',
+  gitDiff: 'teskra:git:diff',
+  gitLog: 'teskra:git:log',
+  gitCommit: 'teskra:git:commit',
   terminalCreate: 'teskra:terminal:create',
   terminalWrite: 'teskra:terminal:write',
   terminalResize: 'teskra:terminal:resize',
@@ -295,6 +320,27 @@ export const agentRunOutputChannel = channel(
   agentRunIdRequestSchema,
   z.string(),
 )
+export const gitStatusChannel = channel(
+  IPC_CHANNELS.gitStatus,
+  gitWorkspaceRequestSchema,
+  gitStatusSchema,
+)
+export const gitBranchChannel = channel(
+  IPC_CHANNELS.gitBranch,
+  gitWorkspaceRequestSchema,
+  gitBranchSchema,
+)
+export const gitDiffChannel = channel(IPC_CHANNELS.gitDiff, gitDiffRequestSchema, gitRawDiffSchema)
+export const gitLogChannel = channel(
+  IPC_CHANNELS.gitLog,
+  gitLogRequestSchema,
+  z.array(gitCommitSchema),
+)
+export const gitCommitChannel = channel(
+  IPC_CHANNELS.gitCommit,
+  gitCommitRequestSchema,
+  gitCommitResultSchema,
+)
 export const terminalCreateChannel = channel(
   IPC_CHANNELS.terminalCreate,
   createTerminalRequestSchema,
@@ -408,6 +454,11 @@ export const ipcChannelDefinitions = {
   agentRunGet: agentRunGetChannel,
   agentRunList: agentRunListChannel,
   agentRunOutput: agentRunOutputChannel,
+  gitStatus: gitStatusChannel,
+  gitBranch: gitBranchChannel,
+  gitDiff: gitDiffChannel,
+  gitLog: gitLogChannel,
+  gitCommit: gitCommitChannel,
   terminalCreate: terminalCreateChannel,
   terminalWrite: terminalWriteChannel,
   terminalResize: terminalResizeChannel,
@@ -473,6 +524,13 @@ export interface TeskraBridge {
     get(request: AgentRunIdRequest): Promise<IpcResult<AgentRun | null>>
     list(request?: ListAgentRunsRequest): Promise<IpcResult<AgentRun[]>>
     getOutput(request: AgentRunIdRequest): Promise<IpcResult<string>>
+  }
+  readonly git: {
+    status(request: GitWorkspaceRequest): Promise<IpcResult<GitStatus>>
+    branch(request: GitWorkspaceRequest): Promise<IpcResult<GitBranch>>
+    diff(request: GitDiffRequest): Promise<IpcResult<GitRawDiff>>
+    log(request: GitLogRequest): Promise<IpcResult<GitCommit[]>>
+    commit(request: GitCommitRequest): Promise<IpcResult<GitCommitResult>>
   }
   readonly runtime: {
     info(): Promise<IpcResult<SystemInfo>>

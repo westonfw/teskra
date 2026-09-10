@@ -42,3 +42,64 @@ export const diffResultSchema = z.strictObject({
   files: z.array(diffFileSchema),
 })
 export type DiffResult = z.infer<typeof diffResultSchema>
+
+export const gitWorkspaceRequestSchema = z.strictObject({ workspaceId: z.string().min(1) })
+export type GitWorkspaceRequest = z.infer<typeof gitWorkspaceRequestSchema>
+
+export const gitStatusEntrySchema = z.strictObject({
+  path: z.string(),
+  code: z.string().min(1),
+})
+export type GitStatusEntry = z.infer<typeof gitStatusEntrySchema>
+
+export const gitStatusSchema = z.strictObject({
+  branch: z.string().optional(),
+  upstream: z.string().optional(),
+  ahead: z.number().int().nonnegative(),
+  behind: z.number().int().nonnegative(),
+  clean: z.boolean(),
+  entries: z.array(gitStatusEntrySchema),
+})
+export type GitStatus = z.infer<typeof gitStatusSchema>
+
+export const gitBranchSchema = z.strictObject({
+  current: z.string().optional(),
+  detached: z.boolean(),
+  branches: z.array(z.string()),
+})
+export type GitBranch = z.infer<typeof gitBranchSchema>
+
+export const gitDiffRequestSchema = gitWorkspaceRequestSchema.extend({
+  staged: z.boolean().optional(),
+  path: z.string().min(1).optional(),
+})
+export type GitDiffRequest = z.infer<typeof gitDiffRequestSchema>
+
+export const gitRawDiffSchema = z.strictObject({ patch: z.string() })
+export type GitRawDiff = z.infer<typeof gitRawDiffSchema>
+
+export const gitLogRequestSchema = gitWorkspaceRequestSchema.extend({
+  limit: z.number().int().positive().max(200).optional(),
+})
+export type GitLogRequest = z.infer<typeof gitLogRequestSchema>
+
+export const gitCommitSchema = z.strictObject({
+  hash: z.string().min(1),
+  shortHash: z.string().min(1),
+  author: z.string(),
+  authoredAt: z.string(),
+  subject: z.string(),
+})
+export type GitCommit = z.infer<typeof gitCommitSchema>
+
+export const gitCommitRequestSchema = gitWorkspaceRequestSchema.extend({
+  message: z.string().trim().min(1),
+  all: z.boolean().optional(),
+})
+export type GitCommitRequest = z.infer<typeof gitCommitRequestSchema>
+
+export const gitCommitResultSchema = z.strictObject({
+  hash: z.string().min(1),
+  output: z.string(),
+})
+export type GitCommitResult = z.infer<typeof gitCommitResultSchema>

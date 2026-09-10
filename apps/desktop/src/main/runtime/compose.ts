@@ -32,6 +32,7 @@ import {
   createWorktreeRepository,
 } from '../db/repositories'
 import { createEventBus } from '../events/event-bus'
+import { createGitManager } from '../git/git-manager'
 import { getLogger, initializeLogging } from '../logger'
 import { createTeskraPaths, type TeskraPaths } from '../paths'
 import { createCommandRunner, type CommandRunner } from '../process/command-runner'
@@ -165,6 +166,12 @@ export async function composeTeskraRuntime(
     workspaces: repositories.workspaces,
     events,
   })
+  const gitManager = createGitManager({
+    commands,
+    workspaces: repositories.workspaces,
+    events,
+    resolveRuntime: (workspace) => runtimeFor(workspace.runtime),
+  })
   const agentDetector = createAgentDetector({
     registry: registeredAgents.data,
     commands,
@@ -218,6 +225,13 @@ export async function composeTeskraRuntime(
       delete: ({ id }) => taskManager.delete(id),
       get: ({ id }) => taskManager.get(id),
       list: (request) => taskManager.list(request),
+    },
+    git: {
+      status: ({ workspaceId }) => gitManager.status(workspaceId),
+      branch: ({ workspaceId }) => gitManager.branch(workspaceId),
+      diff: (request) => gitManager.diff(request),
+      log: (request) => gitManager.log(request),
+      commit: (request) => gitManager.commit(request),
     },
     agent: {
       listDefinitions: () => ({ ok: true, data: registeredAgents.data.list() }),

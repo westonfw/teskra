@@ -65,6 +65,13 @@ const bridge: TeskraBridge = {
     list: (request = {}) => invoke(IPC_CHANNELS.agentRunList, request),
     getOutput: (request) => invoke(IPC_CHANNELS.agentRunOutput, request),
   },
+  git: {
+    status: (request) => invoke(IPC_CHANNELS.gitStatus, request),
+    branch: (request) => invoke(IPC_CHANNELS.gitBranch, request),
+    diff: (request) => invoke(IPC_CHANNELS.gitDiff, request),
+    log: (request) => invoke(IPC_CHANNELS.gitLog, request),
+    commit: (request) => invoke(IPC_CHANNELS.gitCommit, request),
+  },
   runtime: {
     info: () => invoke(IPC_CHANNELS.runtimeInfo),
     paths: () => invoke(IPC_CHANNELS.runtimePaths),

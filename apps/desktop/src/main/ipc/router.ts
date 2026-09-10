@@ -183,6 +183,26 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.agent.getOutput(request)),
   )
   register(
+    ipcChannelDefinitions.gitStatus,
+    withRuntime((runtime, request) => runtime.git.status(request)),
+  )
+  register(
+    ipcChannelDefinitions.gitBranch,
+    withRuntime((runtime, request) => runtime.git.branch(request)),
+  )
+  register(
+    ipcChannelDefinitions.gitDiff,
+    withRuntime((runtime, request) => runtime.git.diff(request)),
+  )
+  register(
+    ipcChannelDefinitions.gitLog,
+    withRuntime((runtime, request) => runtime.git.log(request)),
+  )
+  register(
+    ipcChannelDefinitions.gitCommit,
+    withRuntime((runtime, request) => runtime.git.commit(request)),
+  )
+  register(
     ipcChannelDefinitions.terminalCreate,
     withRuntime((runtime, request) => runtime.terminal.create(request)),
   )

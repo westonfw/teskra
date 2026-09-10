@@ -11,6 +11,15 @@ import type {
   CreateTerminalRequest,
   CreateWorkspaceRequest,
   FutureRuntimePortName,
+  GitBranch,
+  GitCommit,
+  GitCommitRequest,
+  GitCommitResult,
+  GitDiffRequest,
+  GitLogRequest,
+  GitRawDiff,
+  GitStatus,
+  GitWorkspaceRequest,
   IpcResult,
   ListRecentWorkspacesRequest,
   ListAgentDetectionsRequest,
@@ -89,6 +98,14 @@ export interface TaskPort {
   list(request: ListTasksRequest): IpcResult<readonly Task[]>
 }
 
+export interface GitPort {
+  status(request: GitWorkspaceRequest): Promise<IpcResult<GitStatus>>
+  branch(request: GitWorkspaceRequest): Promise<IpcResult<GitBranch>>
+  diff(request: GitDiffRequest): Promise<IpcResult<GitRawDiff>>
+  log(request: GitLogRequest): Promise<IpcResult<readonly GitCommit[]>>
+  commit(request: GitCommitRequest): Promise<IpcResult<GitCommitResult>>
+}
+
 export interface AgentCatalogPort {
   listDefinitions(): IpcResult<readonly AgentDefinition[]>
   detect(request: AgentDetectionRequest): Promise<IpcResult<AgentDetectionResult>>
@@ -125,7 +142,7 @@ export interface TeskraRuntime {
   readonly events: RuntimeEventSource
   readonly task: TaskPort
   readonly agent: AgentCatalogPort
-  readonly git?: FutureRuntimePort
+  readonly git: GitPort
   readonly worktree?: FutureRuntimePort
   readonly workflow?: FutureRuntimePort
   dispose(): IpcResult<void>
