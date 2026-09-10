@@ -33,6 +33,7 @@ import {
   createWorktreeRepository,
 } from '../db/repositories'
 import { createEventBus } from '../events/event-bus'
+import { createAutoCommitService } from '../git/auto-commit-service'
 import { createDiffService } from '../git/diff-service'
 import { createGitManager } from '../git/git-manager'
 import { createWorktreeManager } from '../git/worktree-manager'
@@ -245,6 +246,15 @@ export async function composeTeskraRuntime(
       const resolved = config.resolve({ workspaceId })
       return resolved.ok ? { ok: true, data: resolved.data.config.concurrency } : resolved
     },
+  })
+  const autoCommit = createAutoCommitService({
+    commands,
+    runs: repositories.agentRuns,
+    workspaces: repositories.workspaces,
+    worktrees: repositories.worktrees,
+    handoffs: repositories.handoffs,
+    events,
+    resolveRuntime: (workspace) => runtimeFor(workspace.runtime),
   })
   const resumeService = createResumeService({
     runs: repositories.agentRuns,
@@ -464,6 +474,7 @@ export async function composeTeskraRuntime(
       disposed = true
       agentManager.dispose()
       terminalManager.dispose()
+      autoCommit.dispose()
       events.clear()
       return database.close()
     },

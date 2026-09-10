@@ -66,6 +66,12 @@ export interface WorkbenchEvents {
     runId: string
     exitCode: number
   }
+  /** TASK-087: the run's worktree changes were auto-committed (never pushed). */
+  'agent.committed': {
+    runId: string
+    worktreeId: string
+    commitHash: string
+  }
   'agent.failed': {
     runId: string
     error: PublicAppError
@@ -121,6 +127,7 @@ export const WORKBENCH_EVENT_NAMES = [
   'agent.command',
   'agent.waiting',
   'agent.completed',
+  'agent.committed',
   'agent.failed',
   'agent.cancelled',
   'agent.interrupted',
