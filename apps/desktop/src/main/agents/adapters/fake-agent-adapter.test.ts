@@ -130,6 +130,26 @@ describe('FakeAgentAdapter (TASK-025)', () => {
     expect(deps.processes.stop).toHaveBeenCalledWith('agent-run:run-1')
   })
 
+  it('routes the hang scenario used by watchdog tests', async () => {
+    const deps = dependencies()
+    const adapter = createFakeAgentAdapter({
+      ...deps,
+      scriptPath: '/teskra/tools/fake-agent.js',
+      resolveRuntime: () => ({ ok: true, data: runtime }),
+    })
+
+    await adapter.start({
+      ...request,
+      environment: { TESKRA_FAKE_SCENARIO: 'hang' },
+    })
+
+    expect(deps.processes.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: ['/teskra/tools/fake-agent.js', '--scenario', 'hang'],
+      }),
+    )
+  })
+
   it('propagates structured ProcessManager start failures', async () => {
     const deps = dependencies()
     deps.processes.start = vi.fn((): IpcResult<never> => ({

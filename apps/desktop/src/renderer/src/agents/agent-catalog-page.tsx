@@ -13,14 +13,22 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import type { AgentRun, AgentRunStatus, ApprovalMode } from '@teskra/contracts'
+import {
+  DEFAULT_CONFIG,
+  type AgentRun,
+  type AgentRunStatus,
+  type ApprovalMode,
+} from '@teskra/contracts'
+import { inspectRunWatchdog, type WatchdogInspection } from '@teskra/shared'
 import { useEffect, useMemo, useState } from 'react'
 
 import { AppErrorAlert } from '../components/app-error-alert'
+import { useSettingsStore } from '../settings/settings-store'
 import { agentRuntimeKey, useAgentStore } from '../stores/agent-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
 import { AgentPicker } from './agent-picker'
 import { AgentRunTerminal } from './agent-run-terminal'
+import { restartAgentRunRequest, shortDuration } from './agent-watchdog'
 
 const ACTIVE_STATUSES = new Set<AgentRunStatus>([
   'created',
@@ -64,6 +72,9 @@ export function AgentCatalogPage() {
   const cancelRun = useAgentStore((state) => state.cancelRun)
   const loadRunOutput = useAgentStore((state) => state.loadRunOutput)
   const clearError = useAgentStore((state) => state.clearError)
+  const settingsWorkspaceId = useSettingsStore((state) => state.workspaceId)
+  const resolvedConfig = useSettingsStore((state) => state.resolved)
+  const setSettingsWorkspace = useSettingsStore((state) => state.setWorkspace)
   const [selectedId, setSelectedId] = useState<string>()
   const [selectedRunId, setSelectedRunId] = useState<string>()
   const [prompt, setPrompt] = useState('')
@@ -72,6 +83,11 @@ export function AgentCatalogPage() {
   const workspace = useWorkspaceStore((state) => state.current)
   const now = useNow(runs.some(({ status }) => ACTIVE_STATUSES.has(status)))
   const selectedRun = runs.find(({ id }) => id === selectedRunId)
+  const stalledThresholdMs =
+    workspace !== undefined && settingsWorkspaceId === workspace.id
+      ? (resolvedConfig?.config.watchdog.stalledThresholdMs ??
+        DEFAULT_CONFIG.watchdog.stalledThresholdMs)
+      : DEFAULT_CONFIG.watchdog.stalledThresholdMs
 
   useEffect(() => {
     void loadDefinitions()
@@ -82,6 +98,10 @@ export function AgentCatalogPage() {
     void loadHealth(workspace.runtime)
     return startSynchronization(workspace.id)
   }, [loadHealth, startSynchronization, workspace])
+
+  useEffect(() => {
+    void setSettingsWorkspace(workspace?.id)
+  }, [setSettingsWorkspace, workspace?.id])
 
   useEffect(() => {
     if (selectedId === undefined && definitions[0] !== undefined) {
@@ -114,6 +134,12 @@ export function AgentCatalogPage() {
   const handleOpenRun = async (run: AgentRun): Promise<void> => {
     if (!ACTIVE_STATUSES.has(run.status)) await loadRunOutput(run.id)
     setSelectedRunId(run.id)
+  }
+
+  const handleRestart = async (run: AgentRun): Promise<void> => {
+    if (ACTIVE_STATUSES.has(run.status) && !(await cancelRun(run.id))) return
+    const restarted = await startRun(restartAgentRunRequest(run))
+    if (restarted !== undefined) setSelectedRunId(restarted.id)
   }
 
   return (
@@ -201,8 +227,10 @@ export function AgentCatalogPage() {
                   workspaceName={workspace?.name ?? run.workspaceId}
                   activity={activity[run.id]}
                   now={now}
+                  watchdog={inspectRunWatchdog(run, now, stalledThresholdMs)}
                   onOpen={() => void handleOpenRun(run)}
                   onCancel={() => void cancelRun(run.id)}
+                  onRestart={() => void handleRestart(run)}
                 />
               )}
             />
@@ -259,7 +287,9 @@ export function AgentCatalogPage() {
             activity={activity[selectedRun.id]}
             output={output[selectedRun.id]}
             now={now}
+            watchdog={inspectRunWatchdog(selectedRun, now, stalledThresholdMs)}
             onCancel={() => void cancelRun(selectedRun.id)}
+            onRestart={() => void handleRestart(selectedRun)}
           />
         )}
       </Drawer>
@@ -273,8 +303,10 @@ interface RunListItemProps {
   readonly workspaceName: string
   readonly activity?: string
   readonly now: number
+  readonly watchdog: WatchdogInspection
   readonly onOpen: () => void
   readonly onCancel: () => void
+  readonly onRestart: () => void
 }
 
 function RunListItem({
@@ -283,8 +315,10 @@ function RunListItem({
   workspaceName,
   activity,
   now,
+  watchdog,
   onOpen,
   onCancel,
+  onRestart,
 }: RunListItemProps) {
   const active = ACTIVE_STATUSES.has(run.status)
   return (
@@ -292,11 +326,16 @@ function RunListItem({
       className="run-list-item"
       actions={[
         <Button key="detail" type="link" onClick={onOpen}>
-          Details
+          {active ? 'Send input / Terminal' : 'Details'}
         </Button>,
         active ? (
           <Button key="cancel" danger type="link" onClick={onCancel}>
-            Cancel
+            Interrupt
+          </Button>
+        ) : null,
+        watchdog.possiblyStalled ? (
+          <Button key="restart" type="link" onClick={onRestart}>
+            Restart
           </Button>
         ) : null,
       ].filter(Boolean)}
@@ -308,6 +347,11 @@ function RunListItem({
             <Tag color={statusColor[run.status]}>{statusLabel(run.status)}</Tag>
             {run.executionMode === 'attended' && run.worktreeId === undefined && (
               <Tag color="orange">Unisolated</Tag>
+            )}
+            {watchdog.possiblyStalled && (
+              <Tag color="volcano">
+                Possibly stalled (no output for {shortDuration(watchdog.silentForMs)})
+              </Tag>
             )}
           </Space>
           <Typography.Text type="secondary" ellipsis>
@@ -330,14 +374,43 @@ interface RunDetailProps {
   readonly activity?: string
   readonly output?: string
   readonly now: number
+  readonly watchdog: WatchdogInspection
   readonly onCancel: () => void
+  readonly onRestart: () => void
 }
 
-function RunDetail({ run, workspaceName, activity, output, now, onCancel }: RunDetailProps) {
+function RunDetail({
+  run,
+  workspaceName,
+  activity,
+  output,
+  now,
+  watchdog,
+  onCancel,
+  onRestart,
+}: RunDetailProps) {
   return (
     <Space direction="vertical" size={20} className="run-detail">
       {run.executionMode === 'attended' && run.worktreeId === undefined && (
         <Alert type="warning" showIcon message="直接修改主工作区，未做隔离" />
+      )}
+      {watchdog.possiblyStalled && (
+        <Alert
+          type="warning"
+          showIcon
+          message={`Possibly stalled (no output for ${shortDuration(watchdog.silentForMs)})`}
+          description="Teskra will not stop this process automatically. You can use the terminal below, interrupt it, or restart it."
+          action={
+            <Space>
+              <Button size="small" danger onClick={onCancel}>
+                Interrupt
+              </Button>
+              <Button size="small" onClick={onRestart}>
+                Restart
+              </Button>
+            </Space>
+          }
+        />
       )}
       <Descriptions column={1} size="small" bordered>
         <Descriptions.Item label="Status">
@@ -363,7 +436,7 @@ function RunDetail({ run, workspaceName, activity, output, now, onCancel }: RunD
       <AgentRunTerminal key={run.id} run={run} initialData={output} />
       {ACTIVE_STATUSES.has(run.status) && (
         <Button danger onClick={onCancel}>
-          Cancel run
+          Interrupt run
         </Button>
       )}
     </Space>

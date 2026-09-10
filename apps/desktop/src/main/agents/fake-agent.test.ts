@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { workerHandoffSchema } from '@teskra/contracts'
+import { inspectRunWatchdog } from '@teskra/shared'
 
 const fakeAgent = fileURLToPath(new URL('../../../../../tools/fake-agent.js', import.meta.url))
 const temporaryDirectories: string[] = []
@@ -92,6 +93,17 @@ describe('Fake Agent scenarios (TASK-083)', () => {
     expect(result.exitCode).toBeNull()
     expect(result.signal).not.toBeNull()
     expect(result.stdout).toContain('hanging as requested')
+    expect(
+      inspectRunWatchdog(
+        {
+          status: 'running',
+          createdAt: '2026-09-10T00:00:00.000Z',
+          lastOutputAt: '2026-09-10T00:00:01.000Z',
+        },
+        Date.parse('2026-09-10T00:10:01.000Z'),
+        600_000,
+      ).possiblyStalled,
+    ).toBe(true)
   })
 
   it('slow-output streams ten MiB before exiting', async () => {
