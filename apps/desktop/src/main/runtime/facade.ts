@@ -53,6 +53,7 @@ import type {
   RenderPromptTemplateRequest,
   ResolveConfigRequest,
   ResumeAgentRunRequest,
+  ReviewRunStartResult,
   RunDoctorRequest,
   ResolvedConfig,
   ScanRunArtifactsRequest,
@@ -63,6 +64,7 @@ import type {
   SystemInfo,
   SystemPaths,
   StartAgentRunRequest,
+  StartReviewRunRequest,
   Task,
   TaskIdRequest,
   TerminalCloseRequest,
@@ -186,6 +188,7 @@ export interface AgentCatalogPort {
   getExecutableOverride(request: AgentExecutableOverrideRequest): IpcResult<string | null>
   setExecutableOverride(request: SetAgentExecutableOverrideRequest): IpcResult<string | null>
   start(request: StartAgentRunRequest): Promise<IpcResult<AgentRun>>
+  startReview(request: StartReviewRunRequest): Promise<IpcResult<ReviewRunStartResult>>
   resume(request: ResumeAgentRunRequest): Promise<IpcResult<AgentRun>>
   send(request: SendAgentRunInputRequest): Promise<IpcResult<void>>
   cancel(request: AgentRunIdRequest): Promise<IpcResult<AgentRun>>

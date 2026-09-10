@@ -11,9 +11,11 @@ import {
   listAgentDetectionsRequestSchema,
   listAgentRunsRequestSchema,
   resumeAgentRunRequestSchema,
+  reviewRunStartResultSchema,
   sendAgentRunInputRequestSchema,
   setAgentExecutableOverrideRequestSchema,
   startAgentRunRequestSchema,
+  startReviewRunRequestSchema,
   type AgentDefinition,
   type AgentDetectionRequest,
   type AgentDetectionResult,
@@ -24,9 +26,11 @@ import {
   type ListAgentDetectionsRequest,
   type ListAgentRunsRequest,
   type ResumeAgentRunRequest,
+  type ReviewRunStartResult,
   type SendAgentRunInputRequest,
   type SetAgentExecutableOverrideRequest,
   type StartAgentRunRequest,
+  type StartReviewRunRequest,
 } from './agent'
 import {
   artifactContentSchema,
@@ -238,6 +242,7 @@ export const IPC_CHANNELS = {
   agentGetPathOverride: 'teskra:agent:path-override:get',
   agentSetPathOverride: 'teskra:agent:path-override:set',
   agentRunStart: 'teskra:agent-run:start',
+  agentRunReviewStart: 'teskra:agent-run:review-start',
   agentRunSend: 'teskra:agent-run:send',
   agentRunCancel: 'teskra:agent-run:cancel',
   agentRunGet: 'teskra:agent-run:get',
@@ -471,6 +476,11 @@ export const agentRunStartChannel = channel(
   IPC_CHANNELS.agentRunStart,
   startAgentRunRequestSchema,
   agentRunSchema,
+)
+export const agentRunReviewStartChannel = channel(
+  IPC_CHANNELS.agentRunReviewStart,
+  startReviewRunRequestSchema,
+  reviewRunStartResultSchema,
 )
 export const agentRunSendChannel = channel(
   IPC_CHANNELS.agentRunSend,
@@ -710,6 +720,7 @@ export const ipcChannelDefinitions = {
   agentGetExecutableOverride: agentGetExecutableOverrideChannel,
   agentSetExecutableOverride: agentSetExecutableOverrideChannel,
   agentRunStart: agentRunStartChannel,
+  agentRunReviewStart: agentRunReviewStartChannel,
   agentRunSend: agentRunSendChannel,
   agentRunCancel: agentRunCancelChannel,
   agentRunGet: agentRunGetChannel,
@@ -814,6 +825,7 @@ export interface TeskraBridge {
       request: SetAgentExecutableOverrideRequest,
     ): Promise<IpcResult<string | null>>
     start(request: StartAgentRunRequest): Promise<IpcResult<AgentRun>>
+    startReview(request: StartReviewRunRequest): Promise<IpcResult<ReviewRunStartResult>>
     send(request: SendAgentRunInputRequest): Promise<IpcResult<void>>
     cancel(request: AgentRunIdRequest): Promise<IpcResult<AgentRun>>
     get(request: AgentRunIdRequest): Promise<IpcResult<AgentRun | null>>

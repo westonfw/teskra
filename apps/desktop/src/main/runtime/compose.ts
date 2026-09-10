@@ -48,6 +48,7 @@ import { createProcessManager } from '../process/process-manager'
 import { createPromptTemplateService } from '../prompts/prompt-template-service'
 import { createReconciliationService } from '../recovery/reconciliation-service'
 import { createResumeService } from '../recovery/resume-service'
+import { createReviewerService } from '../agents/reviewer-service'
 import { createTerminalManager } from '../terminal/terminal-manager'
 import { createCriteriaManager } from '../tasks/criteria-manager'
 import { createTaskManager } from '../tasks/task-manager'
@@ -324,6 +325,14 @@ export async function composeTeskraRuntime(
     agentManager,
     resolveRuntime: (workspace) => runtimeFor(workspace.runtime),
   })
+  const reviewerService = createReviewerService({
+    registry: registeredAgents.data,
+    agents: agentManager,
+    worktreeManager,
+    runs: repositories.agentRuns,
+    worktrees: repositories.worktrees,
+    events,
+  })
   const reconciled = await createReconciliationService({
     runs: repositories.agentRuns,
     agentEvents: repositories.agentEvents,
@@ -417,6 +426,7 @@ export async function composeTeskraRuntime(
       getExecutableOverride: (request) => agentDetector.getExecutableOverride(request),
       setExecutableOverride: (request) => agentDetector.setExecutableOverride(request),
       start: (request) => agentManager.start(request),
+      startReview: (request) => reviewerService.startReview(request),
       resume: (request) => resumeService.resume(request),
       send: (request) => agentManager.send(request),
       cancel: ({ runId }) => agentManager.cancel(runId),
@@ -568,6 +578,7 @@ export async function composeTeskraRuntime(
       }
       disposed = true
       agentManager.dispose()
+      reviewerService.dispose()
       terminalManager.dispose()
       autoCommit.dispose()
       events.clear()

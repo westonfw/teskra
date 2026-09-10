@@ -565,7 +565,9 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           { workspaceId: workspace.data.id, agentType: definition.id },
           policy.data,
         )
-      const runId = createRunId()
+      // TASK-052: services that pre-bind resources to the Run (ReviewerService
+      // snapshot worktree) supply runId; direct IPC callers leave it to us.
+      const runId = request.runId ?? createRunId()
       const runDirectory = deps.paths.runDir(runId)
       if (!runDirectory.ok) return runDirectory
       const timestamp = now()

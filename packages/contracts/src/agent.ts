@@ -234,6 +234,13 @@ export type AgentRun = z.infer<typeof agentRunSchema>
 export const startAgentRunRequestSchema = z.strictObject({
   workspaceId: z.string().min(1),
   agentType: z.string().min(1),
+  /**
+   * Pre-allocated Run id. Internal use only: services that must bind resources
+   * to the Run before it launches (TASK-052 ReviewerService binds the
+   * disposable-snapshot worktree to the Run id) pass one explicitly; everyone
+   * else lets AgentManager generate it.
+   */
+  runId: z.string().min(1).optional(),
   taskId: z.string().min(1).optional(),
   role: agentRoleSchema.optional(),
   model: z.string().min(1).optional(),
@@ -245,6 +252,49 @@ export const startAgentRunRequestSchema = z.strictObject({
   environment: z.record(z.string(), z.string()).optional(),
 })
 export type StartAgentRunRequest = z.infer<typeof startAgentRunRequestSchema>
+
+/**
+ * plan §126 ReviewIsolation — the three ways a Reviewer run is kept from
+ * polluting the implement worktree (TASK-052). A subset of
+ * WORKTREE_ISOLATIONS (§139.1 `worktrees.isolation`); plain 'worktree' is
+ * never a valid review isolation.
+ */
+export const REVIEW_ISOLATIONS = [
+  'shared-readonly',
+  'worktree-readonly',
+  'disposable-snapshot',
+] as const
+export const reviewIsolationSchema = z.enum(REVIEW_ISOLATIONS)
+export type ReviewIsolation = z.infer<typeof reviewIsolationSchema>
+
+/**
+ * TASK-052: start a `reviewer`-role run with review isolation. The review
+ * target is resolved from the most specific explicit reference first
+ * (targetWorktreeId, then targetRunId, then the latest run of taskId that has
+ * a worktree); with no resolvable target the review runs shared-readonly.
+ */
+export const startReviewRunRequestSchema = z.strictObject({
+  workspaceId: z.string().min(1),
+  agentType: z.string().min(1),
+  taskId: z.string().min(1).optional(),
+  /** Explicit implement run whose worktree the review targets. */
+  targetRunId: z.string().min(1).optional(),
+  /** Explicit worktree the review targets. */
+  targetWorktreeId: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
+  mode: z.enum(['interactive', 'exec']).optional(),
+  executionMode: executionModeSchema.optional(),
+  prompt: z.string().optional(),
+  environment: z.record(z.string(), z.string()).optional(),
+})
+export type StartReviewRunRequest = z.infer<typeof startReviewRunRequestSchema>
+
+export const reviewRunStartResultSchema = z.strictObject({
+  run: agentRunSchema,
+  /** The isolation tier the Reviewer was actually launched under. */
+  isolation: reviewIsolationSchema,
+})
+export type ReviewRunStartResult = z.infer<typeof reviewRunStartResultSchema>
 
 export const agentRunIdRequestSchema = z.strictObject({ runId: z.string().min(1) })
 export type AgentRunIdRequest = z.infer<typeof agentRunIdRequestSchema>

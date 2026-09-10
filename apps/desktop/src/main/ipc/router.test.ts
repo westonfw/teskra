@@ -5,6 +5,7 @@ import {
   ipcChannelDefinitions,
   type AcceptanceCriteriaSet,
   type AcceptanceCriterion,
+  type AgentRun,
   type IpcResult,
   type Task,
   type Workspace,
@@ -80,6 +81,19 @@ const WORKTREE: Worktree = {
   path: '/data/worktrees/ws1/run-1',
   state: 'ready',
   isolation: 'worktree',
+  createdAt: '2026-09-10T00:00:00.000Z',
+  updatedAt: '2026-09-10T00:00:00.000Z',
+}
+
+const AGENT_RUN: AgentRun = {
+  id: 'run-2',
+  workspaceId: 'ws1',
+  agentType: 'codex',
+  role: 'reviewer',
+  approvalMode: 'read-only',
+  status: 'running',
+  executionMode: 'attended',
+  runDir: '/data/runs/run-2',
   createdAt: '2026-09-10T00:00:00.000Z',
   updatedAt: '2026-09-10T00:00:00.000Z',
 }
@@ -174,6 +188,9 @@ function fakeRuntime(): TeskraRuntime {
       getExecutableOverride: vi.fn(() => ok<string | null>(null)),
       setExecutableOverride: vi.fn(() => ok<string | null>(null)),
       start: vi.fn(async () => {
+        throw new Error('not used')
+      }),
+      startReview: vi.fn(async () => {
         throw new Error('not used')
       }),
       resume: vi.fn(async () => {
@@ -387,6 +404,26 @@ describe('Typed IPC Router (TASK-020)', () => {
     const invalid = await ipc.invoke(IPC_CHANNELS.handoffGet, {})
     expect(invalid).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
     expect(runtime.handoff.get).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes reviewer launches through the runtime facade (TASK-052)', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    runtime.agent.startReview = vi.fn(async () =>
+      ok({ run: AGENT_RUN, isolation: 'shared-readonly' as const }),
+    )
+    registerIpcRouter(ipc, () => runtime)
+
+    const request = { workspaceId: 'ws1', agentType: 'codex' }
+    expect(await ipc.invoke(IPC_CHANNELS.agentRunReviewStart, request)).toEqual({
+      ok: true,
+      data: { run: AGENT_RUN, isolation: 'shared-readonly' },
+    })
+    expect(runtime.agent.startReview).toHaveBeenCalledWith(request)
+
+    const invalid = await ipc.invoke(IPC_CHANNELS.agentRunReviewStart, { agentType: 'codex' })
+    expect(invalid).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    expect(runtime.agent.startReview).toHaveBeenCalledTimes(1)
   })
 
   it('routes validated Task CRUD through the runtime facade', async () => {
