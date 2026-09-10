@@ -79,6 +79,7 @@ const bridge: TeskraBridge = {
     create: (request) => invoke(IPC_CHANNELS.worktreeCreate, request),
     list: (request) => invoke(IPC_CHANNELS.worktreeList, request),
     validate: (request) => invoke(IPC_CHANNELS.worktreeValidate, request),
+    preflight: (request) => invoke(IPC_CHANNELS.worktreeMergePreflight, request),
     remove: (request) => invoke(IPC_CHANNELS.worktreeRemove, request),
   },
   runtime: {

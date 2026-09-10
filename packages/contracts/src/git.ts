@@ -70,6 +70,54 @@ export type WorktreeListRequest = z.infer<typeof worktreeListRequestSchema>
 export const worktreeIdRequestSchema = z.strictObject({ worktreeId: z.string().min(1) })
 export type WorktreeIdRequest = z.infer<typeof worktreeIdRequestSchema>
 
+/**
+ * TASK-045 merge-preflight check identifiers. Stable ids (not labels) are the
+ * renderer contract; every check is always listed, including skipped ones, so
+ * a skipped check can never be mistaken for a pass.
+ */
+export const MERGE_PREFLIGHT_CHECK_IDS = [
+  'main-clean',
+  'worktree-clean',
+  'branch-exists',
+  'base-branch',
+  'no-ongoing-operation',
+  'worktree-healthy',
+  'required-tests',
+  'acceptance-criteria',
+] as const
+export const mergePreflightCheckIdSchema = z.enum(MERGE_PREFLIGHT_CHECK_IDS)
+export type MergePreflightCheckId = z.infer<typeof mergePreflightCheckIdSchema>
+
+export const MERGE_PREFLIGHT_CHECK_OUTCOMES = ['pass', 'failed', 'skipped'] as const
+export const mergePreflightCheckOutcomeSchema = z.enum(MERGE_PREFLIGHT_CHECK_OUTCOMES)
+export type MergePreflightCheckOutcome = z.infer<typeof mergePreflightCheckOutcomeSchema>
+
+/** A failed check's structured reason; `overridable` gates any future forced merge. */
+export const mergePreflightBlockerSchema = z.strictObject({
+  code: z.string().min(1),
+  message: z.string().min(1),
+  overridable: z.boolean(),
+})
+export type MergePreflightBlocker = z.infer<typeof mergePreflightBlockerSchema>
+
+export const mergePreflightCheckSchema = z.strictObject({
+  id: mergePreflightCheckIdSchema,
+  label: z.string().min(1),
+  outcome: mergePreflightCheckOutcomeSchema,
+  /** Present iff outcome is 'failed'. */
+  blocker: mergePreflightBlockerSchema.optional(),
+  /** Explains 'skipped' outcomes (e.g. no confirmed criteria set). */
+  reason: z.string().min(1).optional(),
+})
+export type MergePreflightCheck = z.infer<typeof mergePreflightCheckSchema>
+
+export const mergePreflightResultSchema = z.strictObject({
+  worktreeId: z.string(),
+  status: z.enum(['pass', 'blocked']),
+  checks: z.array(mergePreflightCheckSchema),
+})
+export type MergePreflightResult = z.infer<typeof mergePreflightResultSchema>
+
 /** plan §40. */
 export const DIFF_FILE_STATUSES = ['added', 'modified', 'deleted', 'renamed'] as const
 export const diffFileStatusSchema = z.enum(DIFF_FILE_STATUSES)

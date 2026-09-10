@@ -155,6 +155,7 @@ function fakeRuntime(): TeskraRuntime {
       create: vi.fn(async () => ok(WORKTREE)),
       list: vi.fn(async () => ok([WORKTREE])),
       validate: vi.fn(async () => ok(WORKTREE)),
+      preflight: vi.fn(async () => ok({ worktreeId: 'wt1', status: 'pass' as const, checks: [] })),
       remove: vi.fn(async () => ok(WORKTREE)),
     },
     system: {

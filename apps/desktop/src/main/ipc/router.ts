@@ -227,6 +227,10 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.worktree.validate(request)),
   )
   register(
+    ipcChannelDefinitions.worktreeMergePreflight,
+    withRuntime((runtime, request) => runtime.worktree.preflight(request)),
+  )
+  register(
     ipcChannelDefinitions.worktreeRemove,
     withRuntime((runtime, request) => runtime.worktree.remove(request)),
   )

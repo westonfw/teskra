@@ -48,6 +48,7 @@ import {
   gitRawDiffSchema,
   gitStatusSchema,
   gitWorkspaceRequestSchema,
+  mergePreflightResultSchema,
   worktreeCreateRequestSchema,
   worktreeIdRequestSchema,
   worktreeListRequestSchema,
@@ -63,6 +64,7 @@ import {
   type GitRawDiff,
   type GitStatus,
   type GitWorkspaceRequest,
+  type MergePreflightResult,
   type Worktree,
   type WorktreeCreateRequest,
   type WorktreeIdRequest,
@@ -181,6 +183,7 @@ export const IPC_CHANNELS = {
   worktreeCreate: 'teskra:worktree:create',
   worktreeList: 'teskra:worktree:list',
   worktreeValidate: 'teskra:worktree:validate',
+  worktreeMergePreflight: 'teskra:worktree:preflight',
   worktreeRemove: 'teskra:worktree:remove',
   terminalCreate: 'teskra:terminal:create',
   terminalWrite: 'teskra:terminal:write',
@@ -399,6 +402,11 @@ export const worktreeValidateChannel = channel(
   worktreeIdRequestSchema,
   worktreeSchema,
 )
+export const worktreeMergePreflightChannel = channel(
+  IPC_CHANNELS.worktreeMergePreflight,
+  worktreeIdRequestSchema,
+  mergePreflightResultSchema,
+)
 export const worktreeRemoveChannel = channel(
   IPC_CHANNELS.worktreeRemove,
   worktreeIdRequestSchema,
@@ -533,6 +541,7 @@ export const ipcChannelDefinitions = {
   worktreeCreate: worktreeCreateChannel,
   worktreeList: worktreeListChannel,
   worktreeValidate: worktreeValidateChannel,
+  worktreeMergePreflight: worktreeMergePreflightChannel,
   worktreeRemove: worktreeRemoveChannel,
   terminalCreate: terminalCreateChannel,
   terminalWrite: terminalWriteChannel,
@@ -615,6 +624,7 @@ export interface TeskraBridge {
     create(request: WorktreeCreateRequest): Promise<IpcResult<Worktree>>
     list(request: WorktreeListRequest): Promise<IpcResult<Worktree[]>>
     validate(request: WorktreeIdRequest): Promise<IpcResult<Worktree>>
+    preflight(request: WorktreeIdRequest): Promise<IpcResult<MergePreflightResult>>
     remove(request: WorktreeIdRequest): Promise<IpcResult<Worktree>>
   }
   readonly runtime: {

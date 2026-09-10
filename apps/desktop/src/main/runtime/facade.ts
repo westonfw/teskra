@@ -29,6 +29,7 @@ import type {
   ListAgentRunsRequest,
   ListTasksRequest,
   ListTerminalsRequest,
+  MergePreflightResult,
   OpenWorkspaceRequest,
   OpenSystemDirectoryRequest,
   ResolveConfigRequest,
@@ -141,6 +142,7 @@ export interface WorktreePort {
   create(request: WorktreeCreateRequest): Promise<IpcResult<Worktree>>
   list(request: WorktreeListRequest): Promise<IpcResult<readonly Worktree[]>>
   validate(request: WorktreeIdRequest): Promise<IpcResult<Worktree>>
+  preflight(request: WorktreeIdRequest): Promise<IpcResult<MergePreflightResult>>
   remove(request: WorktreeIdRequest): Promise<IpcResult<Worktree>>
 }
 
