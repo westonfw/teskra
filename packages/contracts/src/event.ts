@@ -16,11 +16,13 @@ export interface WorkbenchEvents {
   'process.output': {
     processId: string
     data: string
+    agentRunId?: string
   }
   'process.exited': {
     processId: string
     exitCode: number
     signal?: number
+    agentRunId?: string
   }
 
   'workspace.opened': {
@@ -64,6 +66,9 @@ export interface WorkbenchEvents {
   'agent.failed': {
     runId: string
     error: PublicAppError
+  }
+  'agent.cancelled': {
+    runId: string
   }
 
   'task.created': {
@@ -109,6 +114,7 @@ export const WORKBENCH_EVENT_NAMES = [
   'agent.waiting',
   'agent.completed',
   'agent.failed',
+  'agent.cancelled',
   'task.created',
   'task.updated',
   'git.changed',

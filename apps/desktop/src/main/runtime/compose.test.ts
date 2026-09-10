@@ -79,6 +79,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       ok: true,
       data: [{ id: 'codex' }, { id: 'claude' }, { id: 'fake' }],
     })
+    expect(runtime.agent.list({ activeOnly: true })).toEqual({ ok: true, data: [] })
     expect(runtime.system.info()).toEqual({
       ok: true,
       data: { appVersion: '9.8.7', runtimeVersion: '22.test' },
@@ -176,6 +177,47 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       { ok: true, data: '/selected/repo' },
     )
     expect(selectDirectory).toHaveBeenCalledOnce()
+    composed.data.dispose()
+  })
+
+  it('runs the repository Fake Agent through the composed Agent lifecycle', async () => {
+    const home = makeHome()
+    const composed = await composeTeskraRuntime({
+      paths: createTeskraPaths({ TESKRA_HOME: home }),
+      hostPlatform: 'linux',
+      wslInfo: { available: true },
+      initializeLogs: false,
+      includeDevelopmentAgents: true,
+      fakeAgentScriptPath: join(process.cwd(), 'tools', 'fake-agent.js'),
+    })
+    if (!composed.ok) throw new Error('expected runtime')
+
+    const repo = join(home, 'repo')
+    mkdirSync(repo)
+    const workspace = composed.data.workspace.create({
+      name: 'Demo',
+      runtime: { kind: 'wsl', distro: 'Ubuntu' },
+      path: repo,
+    })
+    if (!workspace.ok) throw new Error(workspace.error.message)
+    const completed = new Promise<{ runId: string; exitCode: number }>((resolveCompleted) => {
+      composed.data.events.subscribe('agent.completed', resolveCompleted)
+    })
+
+    const started = await composed.data.agent.start({
+      workspaceId: workspace.data.id,
+      agentType: 'fake',
+      executionMode: 'attended',
+      environment: { TESKRA_FAKE_SCENARIO: 'success' },
+    })
+    expect(started).toMatchObject({ ok: true, data: { status: 'running' } })
+    const exit = await completed
+    expect(exit.exitCode).toBe(0)
+    expect(composed.data.agent.get({ runId: exit.runId })).toMatchObject({
+      ok: true,
+      data: { status: 'completed', exitCode: 0 },
+    })
+
     composed.data.dispose()
   })
 

@@ -151,6 +151,31 @@ describe('ProcessManager (TASK-014)', () => {
     })
   })
 
+  it('carries AgentRun identity on process output and exit events', () => {
+    const backend = fakePtyBackend()
+    const events = createEventBus<WorkbenchEvents>()
+    const output = vi.fn()
+    const exited = vi.fn()
+    events.subscribe('process.output', output)
+    events.subscribe('process.exited', exited)
+    const manager = createProcessManager({ events, spawn: backend.spawn, hostPlatform: 'linux' })
+    manager.start({ ...request('agent-process'), agentRunId: 'run-1' })
+
+    backend.terminals[0]?.emitData('chunk')
+    backend.terminals[0]?.emitExit(0)
+
+    expect(output).toHaveBeenCalledWith({
+      processId: 'agent-process',
+      agentRunId: 'run-1',
+      data: 'chunk',
+    })
+    expect(exited).toHaveBeenCalledWith({
+      processId: 'agent-process',
+      agentRunId: 'run-1',
+      exitCode: 0,
+    })
+  })
+
   it('centralizes write, resize, interrupt, terminate, and force kill', () => {
     const backend = fakePtyBackend()
     const manager = createProcessManager({

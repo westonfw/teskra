@@ -2,6 +2,8 @@ import type {
   AgentDefinition,
   AgentDetectionRequest,
   AgentDetectionResult,
+  AgentRun,
+  AgentRunIdRequest,
   AgentHealth,
   AgentExecutableOverrideRequest,
   CreateTerminalRequest,
@@ -10,16 +12,19 @@ import type {
   IpcResult,
   ListRecentWorkspacesRequest,
   ListAgentDetectionsRequest,
+  ListAgentRunsRequest,
   ListTerminalsRequest,
   OpenWorkspaceRequest,
   OpenSystemDirectoryRequest,
   ResolveConfigRequest,
   ResolvedConfig,
   SelectWorkspaceDirectoryRequest,
+  SendAgentRunInputRequest,
   SetAgentExecutableOverrideRequest,
   SystemHealth,
   SystemInfo,
   SystemPaths,
+  StartAgentRunRequest,
   TerminalCloseRequest,
   TerminalIdRequest,
   TerminalResizeRequest,
@@ -79,6 +84,11 @@ export interface AgentCatalogPort {
   listHealth(request: ListAgentDetectionsRequest): Promise<IpcResult<readonly AgentHealth[]>>
   getExecutableOverride(request: AgentExecutableOverrideRequest): IpcResult<string | null>
   setExecutableOverride(request: SetAgentExecutableOverrideRequest): IpcResult<string | null>
+  start(request: StartAgentRunRequest): Promise<IpcResult<AgentRun>>
+  send(request: SendAgentRunInputRequest): Promise<IpcResult<void>>
+  cancel(request: AgentRunIdRequest): Promise<IpcResult<AgentRun>>
+  get(request: AgentRunIdRequest): IpcResult<AgentRun | null>
+  list(request?: ListAgentRunsRequest): IpcResult<readonly AgentRun[]>
 }
 
 export type FutureRuntimePort = object

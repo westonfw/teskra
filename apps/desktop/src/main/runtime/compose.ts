@@ -1,3 +1,5 @@
+import { resolve } from 'node:path'
+
 import type {
   IpcResult,
   PublicAppError,
@@ -6,6 +8,13 @@ import type {
 } from '@teskra/contracts'
 
 import { createConfigService } from '../config/config-service'
+import { createAgentDetector } from '../agents/agent-detector'
+import { createAgentHealthManager } from '../agents/agent-health-manager'
+import { createAgentManager } from '../agents/agent-manager'
+import { createDefaultAgentRegistry } from '../agents/agent-registry'
+import { createClaudeAdapter } from '../agents/adapters/claude-adapter'
+import { createCodexAdapter } from '../agents/adapters/codex-adapter'
+import { createFakeAgentAdapter } from '../agents/adapters/fake-agent-adapter'
 import { openDatabase, type TeskraDatabase } from '../db'
 import { migrateDatabase } from '../db/migrations'
 import {
@@ -32,9 +41,6 @@ import { createWorkspaceRuntime, type WslEnvironmentInfo } from '../workspace/ru
 import { createWorkspaceManager } from '../workspace/workspace-manager'
 import { createWslManager } from '../workspace/wsl-manager'
 import type { TeskraRuntime } from './facade'
-import { createDefaultAgentRegistry } from '../agents/agent-registry'
-import { createAgentDetector } from '../agents/agent-detector'
-import { createAgentHealthManager } from '../agents/agent-health-manager'
 
 export interface ComposeRuntimeOptions {
   readonly paths?: TeskraPaths
@@ -53,6 +59,8 @@ export interface ComposeRuntimeOptions {
   readonly selectDirectory?: () => Promise<string | null>
   /** Explicit packaging boundary: Fake Agent is available only in development/tests. */
   readonly includeDevelopmentAgents?: boolean
+  /** Test/dev override for the repository-distributed Fake Agent script. */
+  readonly fakeAgentScriptPath?: string
 }
 
 function createRepositories(connection: TeskraDatabase['connection']) {
@@ -161,6 +169,34 @@ export async function composeTeskraRuntime(
     registry: registeredAgents.data,
     detector: agentDetector,
   })
+  const adapterOptions = {
+    processes: processManager,
+    detector: agentDetector,
+    resolveRuntime: runtimeFor,
+  }
+  const agentManager = createAgentManager({
+    registry: registeredAgents.data,
+    adapters: [
+      createCodexAdapter(adapterOptions),
+      createClaudeAdapter(adapterOptions),
+      ...(options.includeDevelopmentAgents === true
+        ? [
+            createFakeAgentAdapter({
+              ...adapterOptions,
+              scriptPath:
+                options.fakeAgentScriptPath ?? resolve(process.cwd(), 'tools/fake-agent.js'),
+            }),
+          ]
+        : []),
+    ],
+    runs: repositories.agentRuns,
+    agentEvents: repositories.agentEvents,
+    workspaces: repositories.workspaces,
+    tasks: repositories.tasks,
+    worktrees: repositories.worktrees,
+    events,
+    paths,
+  })
 
   let disposed = false
   const runtime: TeskraRuntime = {
@@ -173,6 +209,11 @@ export async function composeTeskraRuntime(
       listHealth: (request) => agentHealth.list(request),
       getExecutableOverride: (request) => agentDetector.getExecutableOverride(request),
       setExecutableOverride: (request) => agentDetector.setExecutableOverride(request),
+      start: (request) => agentManager.start(request),
+      send: (request) => agentManager.send(request),
+      cancel: ({ runId }) => agentManager.cancel(runId),
+      get: ({ runId }) => agentManager.get(runId),
+      list: (request = {}) => agentManager.list(request),
     },
     workspace: {
       create: (request) => workspaceManager.create(request),
@@ -316,6 +357,7 @@ export async function composeTeskraRuntime(
         return { ok: true, data: undefined }
       }
       disposed = true
+      agentManager.dispose()
       terminalManager.dispose()
       events.clear()
       return database.close()

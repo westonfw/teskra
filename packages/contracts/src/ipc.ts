@@ -4,17 +4,27 @@ import {
   agentDefinitionSchema,
   agentDetectionRequestSchema,
   agentDetectionResultSchema,
+  agentRunIdRequestSchema,
+  agentRunSchema,
   agentHealthSchema,
   agentExecutableOverrideRequestSchema,
   listAgentDetectionsRequestSchema,
+  listAgentRunsRequestSchema,
+  sendAgentRunInputRequestSchema,
   setAgentExecutableOverrideRequestSchema,
+  startAgentRunRequestSchema,
   type AgentDefinition,
   type AgentDetectionRequest,
   type AgentDetectionResult,
+  type AgentRun,
+  type AgentRunIdRequest,
   type AgentHealth,
   type AgentExecutableOverrideRequest,
   type ListAgentDetectionsRequest,
+  type ListAgentRunsRequest,
+  type SendAgentRunInputRequest,
   type SetAgentExecutableOverrideRequest,
+  type StartAgentRunRequest,
 } from './agent'
 import { ipcResultSchema, type IpcResult } from './error'
 import type { WorkbenchEventName, WorkbenchEvents } from './event'
@@ -94,6 +104,11 @@ export const IPC_CHANNELS = {
   agentListHealth: 'teskra:agent:health:list',
   agentGetPathOverride: 'teskra:agent:path-override:get',
   agentSetPathOverride: 'teskra:agent:path-override:set',
+  agentRunStart: 'teskra:agent-run:start',
+  agentRunSend: 'teskra:agent-run:send',
+  agentRunCancel: 'teskra:agent-run:cancel',
+  agentRunGet: 'teskra:agent-run:get',
+  agentRunList: 'teskra:agent-run:list',
   terminalCreate: 'teskra:terminal:create',
   terminalWrite: 'teskra:terminal:write',
   terminalResize: 'teskra:terminal:resize',
@@ -203,6 +218,31 @@ export const agentSetExecutableOverrideChannel = channel(
   setAgentExecutableOverrideRequestSchema,
   z.string().nullable(),
 )
+export const agentRunStartChannel = channel(
+  IPC_CHANNELS.agentRunStart,
+  startAgentRunRequestSchema,
+  agentRunSchema,
+)
+export const agentRunSendChannel = channel(
+  IPC_CHANNELS.agentRunSend,
+  sendAgentRunInputRequestSchema,
+  voidResponseSchema,
+)
+export const agentRunCancelChannel = channel(
+  IPC_CHANNELS.agentRunCancel,
+  agentRunIdRequestSchema,
+  agentRunSchema,
+)
+export const agentRunGetChannel = channel(
+  IPC_CHANNELS.agentRunGet,
+  agentRunIdRequestSchema,
+  agentRunSchema.nullable(),
+)
+export const agentRunListChannel = channel(
+  IPC_CHANNELS.agentRunList,
+  listAgentRunsRequestSchema,
+  z.array(agentRunSchema),
+)
 export const terminalCreateChannel = channel(
   IPC_CHANNELS.terminalCreate,
   createTerminalRequestSchema,
@@ -304,6 +344,11 @@ export const ipcChannelDefinitions = {
   agentListHealth: agentListHealthChannel,
   agentGetExecutableOverride: agentGetExecutableOverrideChannel,
   agentSetExecutableOverride: agentSetExecutableOverrideChannel,
+  agentRunStart: agentRunStartChannel,
+  agentRunSend: agentRunSendChannel,
+  agentRunCancel: agentRunCancelChannel,
+  agentRunGet: agentRunGetChannel,
+  agentRunList: agentRunListChannel,
   terminalCreate: terminalCreateChannel,
   terminalWrite: terminalWriteChannel,
   terminalResize: terminalResizeChannel,
@@ -355,6 +400,11 @@ export interface TeskraBridge {
     setExecutableOverride(
       request: SetAgentExecutableOverrideRequest,
     ): Promise<IpcResult<string | null>>
+    start(request: StartAgentRunRequest): Promise<IpcResult<AgentRun>>
+    send(request: SendAgentRunInputRequest): Promise<IpcResult<void>>
+    cancel(request: AgentRunIdRequest): Promise<IpcResult<AgentRun>>
+    get(request: AgentRunIdRequest): Promise<IpcResult<AgentRun | null>>
+    list(request?: ListAgentRunsRequest): Promise<IpcResult<AgentRun[]>>
   }
   readonly runtime: {
     info(): Promise<IpcResult<SystemInfo>>

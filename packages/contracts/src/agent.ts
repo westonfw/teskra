@@ -199,3 +199,63 @@ export const agentResumeRequestSchema = agentStartRequestSchema.extend({
   providerSession: providerSessionRefSchema,
 })
 export type AgentResumeRequest = z.infer<typeof agentResumeRequestSchema>
+
+/** Public projection of plan §139.1 `agent_runs`; safe to return over Typed IPC. */
+export const agentRunSchema = z.strictObject({
+  id: z.string().min(1),
+  taskId: z.string().optional(),
+  workspaceId: z.string().min(1),
+  workflowRunId: z.string().optional(),
+  workflowStepId: z.string().optional(),
+  agentType: z.string().min(1),
+  role: agentRoleSchema.optional(),
+  model: z.string().optional(),
+  approvalMode: approvalModeSchema.optional(),
+  status: agentRunStatusSchema,
+  processId: z.string().optional(),
+  pid: z.number().int().optional(),
+  worktreeId: z.string().optional(),
+  executionMode: executionModeSchema,
+  criteriaSetId: z.string().optional(),
+  providerSession: z.record(z.string(), z.unknown()).optional(),
+  runDir: z.string(),
+  prompt: z.string().optional(),
+  startedAt: z.string().datetime().optional(),
+  finishedAt: z.string().datetime().optional(),
+  lastOutputAt: z.string().datetime().optional(),
+  lastInputAt: z.string().datetime().optional(),
+  exitCode: z.number().int().optional(),
+  error: z.record(z.string(), z.unknown()).optional(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+})
+export type AgentRun = z.infer<typeof agentRunSchema>
+
+export const startAgentRunRequestSchema = z.strictObject({
+  workspaceId: z.string().min(1),
+  agentType: z.string().min(1),
+  taskId: z.string().min(1).optional(),
+  role: agentRoleSchema.optional(),
+  model: z.string().min(1).optional(),
+  mode: z.enum(['interactive', 'exec']).optional(),
+  approvalMode: approvalModeSchema.optional(),
+  executionMode: executionModeSchema.optional(),
+  worktreeId: z.string().min(1).optional(),
+  prompt: z.string().optional(),
+  environment: z.record(z.string(), z.string()).optional(),
+})
+export type StartAgentRunRequest = z.infer<typeof startAgentRunRequestSchema>
+
+export const agentRunIdRequestSchema = z.strictObject({ runId: z.string().min(1) })
+export type AgentRunIdRequest = z.infer<typeof agentRunIdRequestSchema>
+
+export const sendAgentRunInputRequestSchema = agentRunIdRequestSchema.extend({
+  data: z.string(),
+})
+export type SendAgentRunInputRequest = z.infer<typeof sendAgentRunInputRequestSchema>
+
+export const listAgentRunsRequestSchema = z.strictObject({
+  workspaceId: z.string().min(1).optional(),
+  activeOnly: z.boolean().optional(),
+})
+export type ListAgentRunsRequest = z.infer<typeof listAgentRunsRequestSchema>

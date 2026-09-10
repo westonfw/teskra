@@ -135,6 +135,26 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.agent.setExecutableOverride(request)),
   )
   register(
+    ipcChannelDefinitions.agentRunStart,
+    withRuntime((runtime, request) => runtime.agent.start(request)),
+  )
+  register(
+    ipcChannelDefinitions.agentRunSend,
+    withRuntime((runtime, request) => runtime.agent.send(request)),
+  )
+  register(
+    ipcChannelDefinitions.agentRunCancel,
+    withRuntime((runtime, request) => runtime.agent.cancel(request)),
+  )
+  register(
+    ipcChannelDefinitions.agentRunGet,
+    withRuntime((runtime, request) => runtime.agent.get(request)),
+  )
+  register(
+    ipcChannelDefinitions.agentRunList,
+    withRuntime((runtime, request) => runtime.agent.list(request)),
+  )
+  register(
     ipcChannelDefinitions.terminalCreate,
     withRuntime((runtime, request) => runtime.terminal.create(request)),
   )

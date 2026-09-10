@@ -1,25 +1,19 @@
 import type Database from 'better-sqlite3'
-import { z } from 'zod'
 
 import type {
   AgentRole,
+  AgentRun,
   AgentRunStatus,
   ApprovalMode,
   ExecutionMode,
   IpcResult,
 } from '@teskra/contracts'
-import {
-  agentRoleSchema,
-  agentRunStatusSchema,
-  approvalModeSchema,
-  executionModeSchema,
-} from '@teskra/contracts'
+import { agentRunSchema } from '@teskra/contracts'
 
 import {
   decodeJson,
   encodeJson,
   execute,
-  isoTimestampSchema,
   jsonRecordSchema,
   mapRows,
   nowIso,
@@ -40,35 +34,8 @@ import {
  * records, with corrupted data surfacing as VALIDATION_FAILED.
  */
 
-export const agentRunRecordSchema = z.strictObject({
-  id: z.string(),
-  taskId: z.string().optional(),
-  workspaceId: z.string(),
-  workflowRunId: z.string().optional(),
-  workflowStepId: z.string().optional(),
-  agentType: z.string(),
-  role: agentRoleSchema.optional(),
-  model: z.string().optional(),
-  approvalMode: approvalModeSchema.optional(),
-  status: agentRunStatusSchema,
-  processId: z.string().optional(),
-  pid: z.number().int().optional(),
-  worktreeId: z.string().optional(),
-  executionMode: executionModeSchema,
-  criteriaSetId: z.string().optional(),
-  providerSession: jsonRecordSchema.optional(),
-  runDir: z.string(),
-  prompt: z.string().optional(),
-  startedAt: isoTimestampSchema.optional(),
-  finishedAt: isoTimestampSchema.optional(),
-  lastOutputAt: isoTimestampSchema.optional(),
-  lastInputAt: isoTimestampSchema.optional(),
-  exitCode: z.number().int().optional(),
-  error: jsonRecordSchema.optional(),
-  createdAt: isoTimestampSchema,
-  updatedAt: isoTimestampSchema,
-})
-export type AgentRun = z.infer<typeof agentRunRecordSchema>
+export const agentRunRecordSchema = agentRunSchema
+export type { AgentRun } from '@teskra/contracts'
 
 interface AgentRunRow {
   id: string

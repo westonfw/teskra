@@ -240,7 +240,11 @@ export function createProcessManager(deps: ProcessManagerDeps): ProcessManager {
         disposeExit: () => undefined,
       }
       const dataSubscription = terminal.onData((data) => {
-        deps.events.emit('process.output', { processId: request.id, data })
+        deps.events.emit('process.output', {
+          processId: request.id,
+          data,
+          ...(request.agentRunId === undefined ? {} : { agentRunId: request.agentRunId }),
+        })
       })
       entry.disposeData = () => dataSubscription.dispose()
       const exitSubscription = terminal.onExit(({ exitCode, signal }) => {
@@ -259,7 +263,10 @@ export function createProcessManager(deps: ProcessManagerDeps): ProcessManager {
           ...(signal !== undefined ? { signal } : {}),
         }
         entry.resolveExit(exit)
-        deps.events.emit('process.exited', exit)
+        deps.events.emit('process.exited', {
+          ...exit,
+          ...(request.agentRunId === undefined ? {} : { agentRunId: request.agentRunId }),
+        })
         logger.debug({ processId: request.id, pid: terminal.pid, exitCode, signal }, 'PTY exited')
       })
       entry.disposeExit = () => exitSubscription.dispose()
