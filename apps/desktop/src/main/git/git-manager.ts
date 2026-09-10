@@ -135,6 +135,7 @@ function validRelativePath(path: string): boolean {
 
 /** TASK-035 Git authority; every bounded command is delegated to CommandRunner. */
 export function createGitManager(deps: GitManagerDeps): GitManager {
+  const statusInFlight = new Map<string, Promise<IpcResult<GitStatus>>>()
   const contextFor = (workspaceId: string): IpcResult<GitContext> => {
     const workspace = deps.workspaces.getById(workspaceId)
     if (!workspace.ok) return workspace
@@ -182,19 +183,29 @@ export function createGitManager(deps: GitManagerDeps): GitManager {
       : commandFailed(operation, result.data)
   }
 
+  const readStatus = async (workspaceId: string): Promise<IpcResult<GitStatus>> => {
+    const result = await run(workspaceId, 'status', [
+      'status',
+      '--porcelain=v2',
+      '--branch',
+      '-z',
+      '--',
+      '.',
+      ':(exclude)node_modules',
+      ':(exclude)**/node_modules/**',
+    ])
+    return result.ok ? { ok: true, data: parseStatus(result.data.stdout) } : result
+  }
+
   return {
-    async status(workspaceId) {
-      const result = await run(workspaceId, 'status', [
-        'status',
-        '--porcelain=v2',
-        '--branch',
-        '-z',
-        '--',
-        '.',
-        ':(exclude)node_modules',
-        ':(exclude)**/node_modules/**',
-      ])
-      return result.ok ? { ok: true, data: parseStatus(result.data.stdout) } : result
+    status(workspaceId) {
+      const existing = statusInFlight.get(workspaceId)
+      if (existing !== undefined) return existing
+      const pending = readStatus(workspaceId).finally(() => {
+        if (statusInFlight.get(workspaceId) === pending) statusInFlight.delete(workspaceId)
+      })
+      statusInFlight.set(workspaceId, pending)
+      return pending
     },
 
     async branch(workspaceId) {

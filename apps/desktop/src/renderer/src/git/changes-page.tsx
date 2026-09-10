@@ -9,6 +9,7 @@ import { useGitStore } from '../stores/git-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
 
 const MAX_RENDERED_PATCH_CHARS = 200_000
+const MAX_VISIBLE_CHANGE_FILES = 500
 
 const statusColor: Record<DiffFileStatus, string> = {
   added: 'green',
@@ -21,6 +22,10 @@ function patchForDisplay(patch: string): { text: string; truncated: boolean } {
   return patch.length > MAX_RENDERED_PATCH_CHARS
     ? { text: patch.slice(0, MAX_RENDERED_PATCH_CHARS), truncated: true }
     : { text: patch, truncated: false }
+}
+
+function filesForDisplay(files: readonly DiffFile[]): readonly DiffFile[] {
+  return files.slice(0, MAX_VISIBLE_CHANGE_FILES)
 }
 
 function FileRow({
@@ -62,6 +67,7 @@ export function ChangesPage() {
   const error = useGitStore((state) => state.error)
   const startSynchronization = useGitStore((state) => state.startSynchronization)
   const refresh = useGitStore((state) => state.refresh)
+  const refreshOnFocus = useGitStore((state) => state.refreshOnFocus)
   const selectFile = useGitStore((state) => state.selectFile)
   const openFile = useGitStore((state) => state.openFile)
   const clearError = useGitStore((state) => state.clearError)
@@ -70,6 +76,13 @@ export function ChangesPage() {
     if (workspace === undefined) return
     return startSynchronization(workspace.id)
   }, [startSynchronization, workspace])
+
+  useEffect(() => {
+    if (workspace === undefined) return
+    const handleFocus = () => refreshOnFocus(workspace.id)
+    window.addEventListener('focus', handleFocus)
+    return () => window.removeEventListener('focus', handleFocus)
+  }, [refreshOnFocus, workspace])
 
   const totals = useMemo(
     () =>
@@ -83,6 +96,7 @@ export function ChangesPage() {
     [changes.files],
   )
   const selected = changes.files.find(({ path }) => path === selectedPath)
+  const visibleFiles = useMemo(() => filesForDisplay(changes.files), [changes.files])
   const displayPatch = patchForDisplay(selected?.patch ?? '')
 
   if (workspace === undefined) return null
@@ -125,8 +139,15 @@ export function ChangesPage() {
         ) : (
           <div className="changes-workbench">
             <Card className="changes-file-card" title="Files" variant="borderless">
+              {changes.files.length > MAX_VISIBLE_CHANGE_FILES && (
+                <div className="large-file-list-notice">
+                  Showing {MAX_VISIBLE_CHANGE_FILES.toLocaleString()} of{' '}
+                  {changes.files.length.toLocaleString()} files. Narrow the working set before
+                  reviewing the remainder.
+                </div>
+              )}
               <div className="changes-file-list">
-                {changes.files.map((file) => (
+                {visibleFiles.map((file) => (
                   <FileRow
                     key={file.path}
                     file={file}
@@ -170,4 +191,4 @@ export function ChangesPage() {
   )
 }
 
-export { MAX_RENDERED_PATCH_CHARS, patchForDisplay }
+export { MAX_RENDERED_PATCH_CHARS, MAX_VISIBLE_CHANGE_FILES, filesForDisplay, patchForDisplay }

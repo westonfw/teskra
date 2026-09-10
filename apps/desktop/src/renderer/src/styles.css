@@ -426,6 +426,15 @@ body {
   padding: 6px;
 }
 
+.large-file-list-notice {
+  margin: 2px 4px 6px;
+  padding: 9px 10px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.035);
+  border-radius: 6px;
+}
+
 .changes-file-list {
   max-height: calc(100vh - 270px);
   overflow: auto;

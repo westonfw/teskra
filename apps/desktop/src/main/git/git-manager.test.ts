@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { WorkbenchEvents } from '@teskra/contracts'
+import type { IpcResult, WorkbenchEvents } from '@teskra/contracts'
 
 import { migrateDatabase } from '../db/migrations'
 import { createWorkspaceRepository } from '../db/repositories'
@@ -185,5 +185,91 @@ describe('GitManager (TASK-035)', () => {
         error: { code: 'VALIDATION_FAILED' },
       },
     )
+  })
+
+  it('deduplicates in-flight status calls for the same workspace', async () => {
+    const workspaces = repository()
+    workspaces.create({
+      id: 'workspace-1',
+      name: 'Repo',
+      runtime: { kind: 'wsl' },
+      path: '/repo',
+    })
+    let resolveCommand:
+      | ((
+          result: IpcResult<{
+            stdout: string
+            stderr: string
+            exitCode: number
+          }>,
+        ) => void)
+      | undefined
+    const commandResult = new Promise<
+      IpcResult<{
+        stdout: string
+        stderr: string
+        exitCode: number
+      }>
+    >((resolve) => {
+      resolveCommand = resolve
+    })
+    const commands: CommandRunner = { run: vi.fn(() => commandResult) }
+    const manager = createGitManager({
+      commands,
+      workspaces,
+      events: createEventBus(),
+      resolveRuntime: (candidate) =>
+        createWorkspaceRuntime(candidate.runtime, { hostPlatform: 'linux' }),
+    })
+
+    const first = manager.status('workspace-1')
+    const second = manager.status('workspace-1')
+    expect(commands.run).toHaveBeenCalledOnce()
+    resolveCommand?.({
+      ok: true,
+      data: { stdout: '# branch.head main\0', stderr: '', exitCode: 0 },
+    })
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { ok: true, data: { branch: 'main', ahead: 0, behind: 0, clean: true, entries: [] } },
+      { ok: true, data: { branch: 'main', ahead: 0, behind: 0, clean: true, entries: [] } },
+    ])
+  })
+
+  it('passes a timeout to CommandRunner without cancelling an Agent Run', async () => {
+    const workspaces = repository()
+    workspaces.create({
+      id: 'workspace-1',
+      name: 'Repo',
+      runtime: { kind: 'wsl' },
+      path: '/repo',
+    })
+    const events = createEventBus<WorkbenchEvents>()
+    const agentCancelled = vi.fn()
+    events.subscribe('agent.cancelled', agentCancelled)
+    const commands: CommandRunner = {
+      run: vi.fn(async () => ({
+        ok: false as const,
+        error: {
+          code: 'COMMAND_TIMEOUT' as const,
+          message: 'Command timed out.',
+          retryable: true,
+        },
+      })),
+    }
+    const manager = createGitManager({
+      commands,
+      workspaces,
+      events,
+      resolveRuntime: (candidate) =>
+        createWorkspaceRuntime(candidate.runtime, { hostPlatform: 'linux' }),
+    })
+
+    expect(await manager.status('workspace-1')).toMatchObject({
+      ok: false,
+      error: { code: 'COMMAND_TIMEOUT' },
+    })
+    expect(commands.run).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 15_000 }))
+    expect(agentCancelled).not.toHaveBeenCalled()
   })
 })
