@@ -46,8 +46,12 @@ export interface WslEnvironmentInfo {
   readonly available: boolean
   /** `wsl --version` WSL version (e.g. "2.4.11.0"); undefined = unknown. */
   readonly version?: string
-  /** Home directory inside the distro (e.g. "/home/user"), if detected. */
-  readonly homeDir?: string
+  /**
+   * Home directory per installed distro (e.g. { "Ubuntu-24.04": "/home/u" }),
+   * keyed by canonical distro name. Each distro has its own filesystem, so a
+   * single home cannot be shared across distros.
+   */
+  readonly homeDirs?: Readonly<Record<string, string>>
   /** Effective Teskra/system default distro, when detected. */
   readonly defaultDistro?: string
   /** Installed distro names; enables synchronous runtime validation. */
@@ -217,6 +221,23 @@ function createNativePosixRuntime(ref: WorkspaceRuntimeRef, paths: TeskraPaths):
   }
 }
 
+/** Distro names compare case-insensitively, like validate() does. */
+function lookupHomeDir(
+  homeDirs: Readonly<Record<string, string>> | undefined,
+  distro: string,
+): string | undefined {
+  if (homeDirs === undefined) {
+    return undefined
+  }
+  const folded = distro.toLocaleLowerCase()
+  for (const [name, home] of Object.entries(homeDirs)) {
+    if (name.toLocaleLowerCase() === folded) {
+      return home
+    }
+  }
+  return undefined
+}
+
 function createWslRuntime(
   ref: WorkspaceRuntimeRef,
   paths: TeskraPaths,
@@ -281,11 +302,14 @@ function createWslRuntime(
     resolveDataRoot() {
       // ADR-0003: WSL worktrees must live inside the WSL filesystem, so the
       // data root is the WSL-side ~/.teskra — never the host C:\… one. The
-      // host paths module only supplies the directory name here.
-      if (wsl?.homeDir !== undefined) {
-        return posix.join(wsl.homeDir, TESKRA_DATA_DIR)
+      // home must come from THIS runtime's distro: each distro has its own
+      // filesystem, and the resolved path is used verbatim as a --cd / quoted
+      // bash cwd, where a tilde would never expand.
+      const home = distro === undefined ? undefined : lookupHomeDir(wsl?.homeDirs, distro)
+      if (home !== undefined) {
+        return posix.join(home, TESKRA_DATA_DIR)
       }
-      // Tilde form: expanded by the WSL shell when the path is used.
+      // Degraded fallback when detection could not probe the distro home.
       return posix.join('~', TESKRA_DATA_DIR)
     },
     validate() {

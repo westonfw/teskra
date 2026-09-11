@@ -220,12 +220,36 @@ describe('WslRuntime (Windows host)', () => {
   it('resolves the data root on the WSL side, never as a C:\\ path', () => {
     const detected = createWorkspaceRuntime(
       ref,
-      deps({ wsl: { available: true, version: '2.4.11.0', homeDir: '/home/u' } }),
+      deps({
+        wsl: {
+          available: true,
+          version: '2.4.11.0',
+          homeDirs: { 'Ubuntu-24.04': '/home/u' },
+        },
+      }),
     )
     expect(detected.ok && detected.data.resolveDataRoot()).toBe('/home/u/.teskra')
 
     const unknown = createWorkspaceRuntime(ref, deps())
     expect(unknown.ok && unknown.data.resolveDataRoot()).toBe('~/.teskra')
+  })
+
+  it('uses the home directory of the workspace distro, not the default distro', () => {
+    const result = createWorkspaceRuntime(
+      { kind: 'wsl', distro: 'Debian' },
+      deps({
+        wsl: {
+          available: true,
+          version: '2.4.11.0',
+          defaultDistro: 'Ubuntu-24.04',
+          distributions: ['Ubuntu-24.04', 'Debian'],
+          homeDirs: { 'Ubuntu-24.04': '/home/ubuntu', Debian: '/home/debian' },
+        },
+      }),
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.resolveDataRoot()).toBe('/home/debian/.teskra')
   })
 })
 

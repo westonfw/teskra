@@ -102,6 +102,24 @@ function commandText(result: IpcResult<CommandResult>): string {
   return result.ok ? `${result.data.stdout}\n${result.data.stderr}` : ''
 }
 
+/**
+ * Probes the home directory inside one distro. The output is produced by the
+ * Linux-side shell, so it decodes as UTF-8 — unlike wsl.exe's own UTF-16LE
+ * output — and no `encoding` override is passed.
+ */
+async function probeHomeDir(commands: CommandRunner, distro: string): Promise<string | undefined> {
+  const result = await commands.run({
+    command: WSL_COMMAND,
+    args: ['-d', distro, 'bash', '-lc', 'printf %s "$HOME"'],
+    timeoutMs: PROBE_TIMEOUT_MS,
+  })
+  if (!result.ok || result.data.exitCode !== 0) {
+    return undefined
+  }
+  const home = result.data.stdout.trim()
+  return home.startsWith('/') && !/[\r\n]/u.test(home) ? home : undefined
+}
+
 export function createWslManager(deps: WslManagerDeps): WslManager {
   const inspect = async (): Promise<IpcResult<WslEnvironment>> => {
     const [statusResult, listResult, versionResult] = await Promise.all([
@@ -220,6 +238,19 @@ export function createWslManager(deps: WslManagerDeps): WslManager {
       if (!result.ok) {
         return result
       }
+      const names = result.data.distributions.map((distribution) => distribution.name)
+      // WorkspaceRuntime.resolveDataRoot() needs an absolute home per distro:
+      // the fallback "~/.teskra" never expands once the path is passed through
+      // `wsl.exe --cd` or the single-quoted `bash -lc 'cd …'` wrapping.
+      const probedHomes = await Promise.all(
+        names.map(async (name) => [name, await probeHomeDir(deps.commands, name)] as const),
+      )
+      const homeDirs: Record<string, string> = {}
+      for (const [name, home] of probedHomes) {
+        if (home !== undefined) {
+          homeDirs[name] = home
+        }
+      }
       return {
         ok: true,
         data: {
@@ -228,7 +259,8 @@ export function createWslManager(deps: WslManagerDeps): WslManager {
           ...(result.data.effectiveDefault !== undefined
             ? { defaultDistro: result.data.effectiveDefault }
             : {}),
-          distributions: result.data.distributions.map((distribution) => distribution.name),
+          distributions: names,
+          ...(Object.keys(homeDirs).length > 0 ? { homeDirs } : {}),
         },
       }
     },

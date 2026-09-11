@@ -18,7 +18,9 @@ const success = (stdout: string, exitCode = 0): { ok: true; data: CommandResult 
 })
 
 function fakeCommands(
-  responses: Partial<Record<'status' | 'list' | 'version', ReturnType<typeof success>>> = {},
+  responses: Partial<
+    Record<'status' | 'list' | 'version' | 'home', ReturnType<typeof success>>
+  > = {},
 ): { runner: CommandRunner; requests: CommandRequest[] } {
   const requests: CommandRequest[] = []
   return {
@@ -26,6 +28,13 @@ function fakeCommands(
     runner: {
       async run(request) {
         requests.push(request)
+        if (request.args?.includes('bash')) {
+          if (responses['home'] !== undefined) {
+            return responses['home']
+          }
+          const distro = request.args[request.args.indexOf('-d') + 1]
+          return success(`/home/${String(distro).toLowerCase()}\n`)
+        }
         const key = request.args?.includes('--status')
           ? 'status'
           : request.args?.includes('--version')
@@ -136,8 +145,38 @@ describe('WslManager (TASK-011)', () => {
         version: '2.4.11.0',
         defaultDistro: 'Debian',
         distributions: ['Ubuntu-24.04', 'Debian'],
+        homeDirs: { 'Ubuntu-24.04': '/home/ubuntu-24.04', Debian: '/home/debian' },
       },
     })
+  })
+
+  it('probes the home directory of every distro for the runtime data root', async () => {
+    const commands = fakeCommands()
+    const manager = createWslManager({ commands: commands.runner, config: fakeConfig().config })
+
+    const runtime = await manager.getRuntimeInfo()
+    expect(runtime.ok).toBe(true)
+    if (!runtime.ok) return
+    expect(runtime.data.homeDirs).toEqual({
+      'Ubuntu-24.04': '/home/ubuntu-24.04',
+      Debian: '/home/debian',
+    })
+    // Linux-side output is UTF-8, not the UTF-16LE of wsl.exe's own output.
+    const homeProbes = commands.requests.filter((request) => request.args?.includes('bash'))
+    expect(homeProbes).toHaveLength(2)
+    for (const request of homeProbes) {
+      expect(request.encoding).toBeUndefined()
+    }
+  })
+
+  it('omits homeDirs when the home probe fails', async () => {
+    const commands = fakeCommands({ home: success('not a home', 1) })
+    const manager = createWslManager({ commands: commands.runner, config: fakeConfig().config })
+
+    const runtime = await manager.getRuntimeInfo()
+    expect(runtime.ok).toBe(true)
+    if (!runtime.ok) return
+    expect(runtime.data).not.toHaveProperty('homeDirs')
   })
 
   it('writes and clears the global default preference using canonical distro casing', async () => {
