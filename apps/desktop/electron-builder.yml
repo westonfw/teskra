@@ -1,0 +1,63 @@
+# TASK-072 — electron-builder packaging configuration.
+#
+# Output: NSIS installer + portable exe for Windows (no Microsoft Store
+# dependency). Windows code signing is out of scope here (TASK-073).
+appId: com.teskra.desktop
+productName: Teskra
+# Top-level (not per-platform): without it the Linux binary derives from the
+# npm package name and comes out as `@teskradesktop`.
+executableName: teskra
+
+directories:
+  output: dist
+
+# electron-vite emits the full runtime (main/preload/renderer bundles) to
+# out/. renderer dependencies (react/antd/...) are inlined into those bundles
+# by vite; resources/prompts/*.md are inlined into the main bundle via `?raw`
+# imports (TASK-079), so neither needs to be shipped as loose files. Runtime
+# node_modules production deps (better-sqlite3, node-pty, pino, ...) are still
+# collected automatically from the package.json dependency tree.
+files:
+  - out/**
+  - package.json
+  - '!**/*.map'
+
+asar: true
+# Native modules must live outside the asar archive so the OS loader can
+# dlopen the .node binaries (TASK-013 contract).
+asarUnpack:
+  - '**/node_modules/node-pty/**'
+  - '**/node_modules/better-sqlite3/**'
+
+# Rebuild better-sqlite3/node-pty against the packaged Electron ABI instead of
+# shipping whatever ABI happens to be installed in node_modules. Packaging is
+# therefore self-contained even when node_modules was built for plain Node.
+npmRebuild: true
+
+win:
+  target:
+    - nsis
+    - portable
+
+nsis:
+  # Per-user install: no admin rights required on a clean Windows machine.
+  oneClick: true
+  perMachine: false
+  # Explicit even though false is the default: uninstalling must never touch
+  # user data. The data root lives at ~/.teskra (ADR-0003), outside the
+  # install directory, so the uninstaller does not see it — this guards the
+  # app-data deletion switch regardless.
+  deleteAppDataOnUninstall: false
+  allowToChangeInstallationDirectory: true
+
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}
+
+# Linux target exists so the packaging pipeline can be exercised on the
+# Linux/WSL development machines (Windows-first product, TASK-072).
+linux:
+  target:
+    - AppImage
+  category: Development
+
+publish: null
