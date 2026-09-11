@@ -72,13 +72,19 @@ function setup(startPanel: (request: StartReviewPanelRequest) => Promise<IpcResu
     workflowRuns: createWorkflowRunRepository(connection),
     tasks,
   })
-  const panel = { startPanel: vi.fn(startPanel), cancelPanel: vi.fn() }
+  const panel = {
+    startPanel: vi.fn(startPanel),
+    cancelPanel: vi.fn(),
+    getPanel: vi.fn(
+      (_panelId: string): IpcResult<ReviewPanelResult | null> => ({ ok: true, data: null }),
+    ),
+  }
   const engine = createWorkflowEngine({
     runs: store,
     events,
-    executors: { 'review-panel': createReviewPanelStepExecutor({ panel }) },
+    executors: { 'review-panel': createReviewPanelStepExecutor({ panel, events }) },
   })
-  return { engine, store, panel }
+  return { engine, store, panel, events }
 }
 
 const DEFINITION = {
@@ -143,5 +149,91 @@ describe('createReviewPanelStepExecutor', () => {
     const step = settled.steps.find((entry) => entry.nodeId === 'panel')
     expect(step?.status).toBe('failed')
     expect(panel.startPanel).not.toHaveBeenCalled()
+  })
+
+  /**
+   * Regression: startPanel settles only after the panel converges, so the
+   * executor used to learn the panel id too late — a workflow cancel during
+   * the review never reached the panel's reviewer runs. The id is captured
+   * from the 'review.panel_updated' creation event instead.
+   */
+  it('routes a workflow cancel to the in-flight panel', async () => {
+    let settlePanel!: (result: IpcResult<ReviewPanelResult>) => void
+    const { engine, store, panel, events } = setup(
+      () =>
+        new Promise<IpcResult<ReviewPanelResult>>((resolve) => {
+          settlePanel = resolve
+        }),
+    )
+    const run = requireOk(
+      store.createRun({ definition: DEFINITION, taskId: 'task-1', totalIterations: 1 }),
+    )
+    // The panel row links back to the workflow run; getPanel resolves it.
+    panel.getPanel.mockImplementation((panelId: string) => ({
+      ok: true as const,
+      data: {
+        panel: {
+          ...panelResult('completed', 'approve').panel,
+          id: panelId,
+          workflowRunId: run.run.id,
+        },
+        members: [],
+      },
+    }))
+
+    const pass = engine.start(run.run.id, { workspaceId: 'ws-1' })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(panel.startPanel).toHaveBeenCalled()
+
+    // ReviewPanelService.startPanel emits this synchronously when the panel
+    // row is created, long before the reviewers finish.
+    events.emit('review.panel_updated', { panelId: 'panel-1', taskId: 'task-1', status: 'running' })
+
+    const cancelled = await engine.cancel(run.run.id)
+    expect(cancelled.ok).toBe(true)
+    expect(panel.cancelPanel).toHaveBeenCalledWith('panel-1')
+
+    // The cancelled panel converges as failed; the late settlement is ignored.
+    settlePanel({ ok: true, data: panelResult('failed') })
+    const finished = requireOk(await pass)
+    expect(finished.run.status).toBe('cancelled')
+  })
+
+  it('cancels the panel when the cancel arrived before the creation event', async () => {
+    let settlePanel!: (result: IpcResult<ReviewPanelResult>) => void
+    const { engine, store, panel, events } = setup(
+      () =>
+        new Promise<IpcResult<ReviewPanelResult>>((resolve) => {
+          settlePanel = resolve
+        }),
+    )
+    const run = requireOk(
+      store.createRun({ definition: DEFINITION, taskId: 'task-1', totalIterations: 1 }),
+    )
+    panel.getPanel.mockImplementation((panelId: string) => ({
+      ok: true as const,
+      data: {
+        panel: {
+          ...panelResult('completed', 'approve').panel,
+          id: panelId,
+          workflowRunId: run.run.id,
+        },
+        members: [],
+      },
+    }))
+
+    const pass = engine.start(run.run.id, { workspaceId: 'ws-1' })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    // Cancel before the panel row exists: the request is recorded and
+    // forwarded as soon as the creation event arrives.
+    const cancelled = await engine.cancel(run.run.id)
+    expect(cancelled.ok).toBe(true)
+    expect(panel.cancelPanel).not.toHaveBeenCalled()
+
+    events.emit('review.panel_updated', { panelId: 'panel-1', taskId: 'task-1', status: 'running' })
+    expect(panel.cancelPanel).toHaveBeenCalledWith('panel-1')
+
+    settlePanel({ ok: true, data: panelResult('failed') })
+    await pass
   })
 })

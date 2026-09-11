@@ -473,7 +473,9 @@ export async function composeTeskraRuntime(
     runs: workflowRunStore,
     events,
     agentManager,
-    executors: { 'review-panel': createReviewPanelStepExecutor({ panel: reviewPanelService }) },
+    executors: {
+      'review-panel': createReviewPanelStepExecutor({ panel: reviewPanelService, events }),
+    },
   })
   const dispatchService = createDispatchService({
     runs: workflowRunStore,
@@ -515,7 +517,7 @@ export async function composeTeskraRuntime(
     agentManager,
     executors: {
       shell: createShellStepExecutor({ commands, artifacts: artifactStore }),
-      'review-panel': createReviewPanelStepExecutor({ panel: reviewPanelService }),
+      'review-panel': createReviewPanelStepExecutor({ panel: reviewPanelService, events }),
       'criteria-gate': createCriteriaGateStepExecutor({
         reviews: repositories.reviews,
         criteria: repositories.criteria,
