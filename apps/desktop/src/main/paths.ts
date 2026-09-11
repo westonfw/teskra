@@ -19,6 +19,22 @@ export interface RunPaths {
   readonly artifacts: string
 }
 
+/** File names inside a run directory; the single source for both writers and GC. */
+const RUN_FILE_NAMES = {
+  manifest: 'run.json',
+  events: 'events.jsonl',
+  terminal: 'terminal.log',
+  handoff: 'handoff.json',
+  diff: 'diff.patch',
+  artifacts: 'artifacts',
+} as const
+
+/** The volatile log files RetentionService (TASK-069) may collect. */
+export interface RunLogFiles {
+  readonly events: string
+  readonly terminal: string
+}
+
 /**
  * Central path resolution for the Teskra data root (ADR-0003 / TASK-078).
  *
@@ -43,6 +59,11 @@ export interface TeskraPaths {
   runDir(runId: string): IpcResult<string>
   /** Every durable path owned by one Agent Run; creates the artifacts directory. */
   runFiles(runId: string): IpcResult<RunPaths>
+  /**
+   * Volatile log files inside an EXISTING run directory (TASK-069) —
+   * resolution only, no I/O, so GC can probe without recreating directories.
+   */
+  runLogFiles(runDirectory: string): RunLogFiles
   /** <home>/worktrees/<workspaceId>/ — created on demand. */
   worktreeRoot(workspaceId: string): IpcResult<string>
   /** <home>/config.json — resolution only; the file may not exist. */
@@ -135,20 +156,26 @@ export function createTeskraPaths(env: NodeJS.ProcessEnv = process.env): TeskraP
       return ensureDir(join(home(), 'logs'))
     },
     runDir,
+    runLogFiles(runDirectory) {
+      return {
+        events: join(runDirectory, RUN_FILE_NAMES.events),
+        terminal: join(runDirectory, RUN_FILE_NAMES.terminal),
+      }
+    },
     runFiles(runId) {
       const directory = runDir(runId)
       if (!directory.ok) return directory
-      const artifacts = ensureDir(join(directory.data, 'artifacts'))
+      const artifacts = ensureDir(join(directory.data, RUN_FILE_NAMES.artifacts))
       if (!artifacts.ok) return artifacts
       return {
         ok: true,
         data: {
           directory: directory.data,
-          manifest: join(directory.data, 'run.json'),
-          events: join(directory.data, 'events.jsonl'),
-          terminal: join(directory.data, 'terminal.log'),
-          handoff: join(directory.data, 'handoff.json'),
-          diff: join(directory.data, 'diff.patch'),
+          manifest: join(directory.data, RUN_FILE_NAMES.manifest),
+          events: join(directory.data, RUN_FILE_NAMES.events),
+          terminal: join(directory.data, RUN_FILE_NAMES.terminal),
+          handoff: join(directory.data, RUN_FILE_NAMES.handoff),
+          diff: join(directory.data, RUN_FILE_NAMES.diff),
           artifacts: artifacts.data,
         },
       }

@@ -79,6 +79,10 @@ import type {
   ResolvedConfig,
   ResolvedPermissionProfile,
   ResumeAgentRunRequest,
+  RetentionPlan,
+  RetentionPlanRequest,
+  RetentionReport,
+  RetentionRunRequest,
   ReviewFindingRecord,
   ReviewPanel,
   ReviewPanelIdRequest,
@@ -315,6 +319,17 @@ export interface WorktreePort {
   cleanup(request: WorktreeCleanupRequest): Promise<IpcResult<WorktreeCleanupResult>>
 }
 
+/**
+ * TASK-069: RetentionService GC. planRetention is the dry-run preview;
+ * runRetention executes (cancellable between items via cancelRetention) and
+ * returns the per-item audit trail.
+ */
+export interface MaintenancePort {
+  planRetention(request?: RetentionPlanRequest): Promise<IpcResult<RetentionPlan>>
+  runRetention(request?: RetentionRunRequest): Promise<IpcResult<RetentionReport>>
+  cancelRetention(): IpcResult<boolean>
+}
+
 /** TASK-055/056: repo-local definitions (ADR-0005) + WorkflowRun persistence;
  *  TASK-059: engine control (start/cancel/resolveStep) + Dispatch Primitive. */
 export interface WorkflowPort {
@@ -368,6 +383,7 @@ export interface TeskraRuntime {
   readonly agent: AgentCatalogPort
   readonly git: GitPort
   readonly worktree: WorktreePort
+  readonly maintenance: MaintenancePort
   readonly workflow: WorkflowPort
   dispose(): IpcResult<void>
 }

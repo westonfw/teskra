@@ -75,6 +75,17 @@ export const reviewConfigSchema = z.strictObject({
 })
 export type ReviewConfig = z.infer<typeof reviewConfigSchema>
 
+/**
+ * TASK-069 / plan §135: RetentionService GC thresholds, in days. A worktree,
+ * run log, or discarded run older than its threshold becomes a GC candidate.
+ */
+export const retentionConfigSchema = z.strictObject({
+  mergedWorktreeDays: z.number().int().min(0),
+  completedRunLogsDays: z.number().int().min(0),
+  discardedRunDays: z.number().int().min(0),
+})
+export type RetentionConfig = z.infer<typeof retentionConfigSchema>
+
 export const teskraConfigSchema = z.strictObject({
   logging: loggingConfigSchema,
   concurrency: concurrencyConfigSchema,
@@ -82,6 +93,7 @@ export const teskraConfigSchema = z.strictObject({
   environment: environmentConfigSchema,
   agents: agentsConfigSchema,
   review: reviewConfigSchema,
+  retention: retentionConfigSchema,
 })
 export type TeskraConfig = z.infer<typeof teskraConfigSchema>
 
@@ -97,6 +109,7 @@ export const teskraConfigLayerSchema = z.strictObject({
   environment: environmentConfigSchema.partial().optional(),
   agents: agentsConfigSchema.partial().optional(),
   review: reviewConfigSchema.partial().optional(),
+  retention: retentionConfigSchema.partial().optional(),
 })
 export type TeskraConfigLayer = z.infer<typeof teskraConfigLayerSchema>
 
@@ -108,6 +121,9 @@ export const DEFAULT_CONFIG: TeskraConfig = {
   environment: { defaultDistro: null },
   agents: { executableOverrides: {} },
   review: { mediumBlockThreshold: 0 },
+  // plan §135: merged worktrees are collected quickly; run logs and discarded
+  // runs get a longer window for post-hoc audit (ADR-0002).
+  retention: { mergedWorktreeDays: 1, completedRunLogsDays: 30, discardedRunDays: 30 },
 }
 
 /**

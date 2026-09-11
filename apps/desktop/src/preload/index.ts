@@ -132,6 +132,11 @@ const bridge: TeskraBridge = {
     archive: (request) => invoke(IPC_CHANNELS.worktreeArchive, request),
     cleanup: (request) => invoke(IPC_CHANNELS.worktreeCleanup, request),
   },
+  maintenance: {
+    planRetention: (request = {}) => invoke(IPC_CHANNELS.maintenanceRetentionPlan, request),
+    runRetention: (request = {}) => invoke(IPC_CHANNELS.maintenanceRetentionRun, request),
+    cancelRetention: () => invoke(IPC_CHANNELS.maintenanceRetentionCancel),
+  },
   runtime: {
     info: () => invoke(IPC_CHANNELS.runtimeInfo),
     paths: () => invoke(IPC_CHANNELS.runtimePaths),

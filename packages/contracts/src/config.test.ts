@@ -23,6 +23,12 @@ describe('config contracts (TASK-080)', () => {
     })
     expect(DEFAULT_CONFIG.watchdog.stalledThresholdMs).toBe(600_000)
     expect(DEFAULT_CONFIG.environment.defaultDistro).toBeNull()
+    // plan §135 / TASK-069: merged worktrees 1d, run logs 30d, discarded runs 30d.
+    expect(DEFAULT_CONFIG.retention).toEqual({
+      mergedWorktreeDays: 1,
+      completedRunLogsDays: 30,
+      discardedRunDays: 30,
+    })
   })
 
   it('layer schema accepts deep-partial layers and rejects unknown keys', () => {
