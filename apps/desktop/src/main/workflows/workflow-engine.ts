@@ -20,6 +20,7 @@ import type { AgentManager } from '../agents/agent-manager'
 import type { EventBus } from '../events/event-bus'
 import { type InternalAppError, toPublicError } from '../errors'
 import { getLogger } from '../logger'
+import type { WorkspaceRuntime } from '../workspace/runtime'
 import type { WorkflowRunStore } from './workflow-run-store'
 
 /**
@@ -77,6 +78,9 @@ export interface WorkflowExecutionContext {
    * worktree must be refused, and AgentManager.start enforces that too).
    */
   readonly worktreeId?: string
+  /** TASK-058: runtime + cwd that shell steps execute under. */
+  readonly runtime?: WorkspaceRuntime
+  readonly cwd?: string
 }
 
 export interface StepCompletion {
