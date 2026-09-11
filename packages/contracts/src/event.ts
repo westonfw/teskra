@@ -1,5 +1,6 @@
 import type { DiffResult } from './git'
 import type { PublicAppError } from './error'
+import type { WorkflowRunStatus, WorkflowStepStatus } from './workflow'
 
 /**
  * plan §18 — EventBus event map. Type-only: payloads cross to the Renderer
@@ -126,6 +127,19 @@ export interface WorkbenchEvents {
     runId: string
     command: string
   }
+
+  /** TASK-057: a WorkflowRun changed status (running / waiting / cancelled …). */
+  'workflow.run_updated': {
+    runId: string
+    status: WorkflowRunStatus
+  }
+  /** TASK-057: a WorkflowStep transitioned (running / completed / skipped …). */
+  'workflow.step_updated': {
+    runId: string
+    stepId: string
+    nodeId: string
+    status: WorkflowStepStatus
+  }
 }
 
 export type WorkbenchEventName = keyof WorkbenchEvents
@@ -157,6 +171,8 @@ export const WORKBENCH_EVENT_NAMES = [
   'worktree.merged',
   'permission.requested',
   'permission.resolved',
+  'workflow.run_updated',
+  'workflow.step_updated',
 ] as const satisfies readonly WorkbenchEventName[]
 
 export const RENDERER_EVENT_CHANNEL = 'teskra:event' as const
