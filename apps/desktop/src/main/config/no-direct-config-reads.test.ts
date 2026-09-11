@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
@@ -35,7 +35,9 @@ describe('config file reads are centralized in ConfigService (TASK-080)', () => 
   })
 
   for (const file of sourceFiles) {
-    const rel = relative(mainDir, file)
+    // ALLOWED is written with POSIX separators; relative() uses the host
+    // separator, so normalize before comparing (Windows CI).
+    const rel = relative(mainDir, file).split(sep).join('/')
     if (ALLOWED.has(rel)) {
       continue
     }

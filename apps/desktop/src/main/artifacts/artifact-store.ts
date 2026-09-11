@@ -69,13 +69,29 @@ function invalid<T>(message: string, detail: string): IpcResult<T> {
   return fail({ code: 'VALIDATION_FAILED', message, retryable: false, detail })
 }
 
-/** Absolute paths and `..` escapes must never leave the artifact directory. */
+/** Windows absolute forms that node:path.isAbsolute misses on POSIX hosts. */
+const WINDOWS_ABSOLUTE_PATTERN = /^([A-Za-z]:[\\/]|\\\\)/u
+
+/**
+ * Absolute paths and `..` escapes must never leave the artifact directory.
+ * Both separator families are rejected explicitly: agents may hand us a
+ * Windows-shaped path (`..\evil`, `C:\…`) while the host resolves POSIX-style
+ * (or vice versa), so platform-local isAbsolute/resolve alone is not enough.
+ */
 export function resolveArtifactPath(artifactDir: string, filePath: string): string | undefined {
-  if (isAbsolute(filePath)) {
+  if (
+    isAbsolute(filePath) ||
+    filePath.startsWith('/') ||
+    WINDOWS_ABSOLUTE_PATTERN.test(filePath)
+  ) {
     return undefined
   }
-  const resolved = resolve(artifactDir, filePath)
-  return resolved === artifactDir || resolved.startsWith(artifactDir + sep) ? resolved : undefined
+  if (filePath.split(/[\\/]/u).includes('..')) {
+    return undefined
+  }
+  const base = resolve(artifactDir)
+  const resolved = resolve(base, filePath)
+  return resolved === base || resolved.startsWith(base + sep) ? resolved : undefined
 }
 
 function guessArtifactType(fileName: string): ArtifactType {

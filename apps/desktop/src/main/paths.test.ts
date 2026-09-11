@@ -95,26 +95,32 @@ describe('createTeskraPaths (ADR-0003 / TASK-078)', () => {
     }
   })
 
-  it('returns a structured error when TESKRA_HOME is read-only', () => {
-    if (typeof process.geteuid === 'function' && process.geteuid() === 0) {
-      // chmod-based permission checks are bypassed by root.
-      return
-    }
-    const dir = makeTempHome()
-    const readOnly = join(dir, 'read-only')
-    mkdirSync(readOnly)
-    chmodSync(readOnly, 0o444)
-    try {
-      const paths = createTeskraPaths({ TESKRA_HOME: join(readOnly, 'teskra') })
-      const result = paths.logs()
-      expect(result.ok).toBe(false)
-      if (!result.ok) {
-        expect(result.error.code).toBe('UNKNOWN')
+  // chmod-based read-only semantics are POSIX-only: on Windows a directory's
+  // read-only attribute does not block creating entries inside it (ACLs would
+  // be needed), so this scenario is covered by the Linux/macOS runs only.
+  it.skipIf(process.platform === 'win32')(
+    'returns a structured error when TESKRA_HOME is read-only',
+    () => {
+      if (typeof process.geteuid === 'function' && process.geteuid() === 0) {
+        // chmod-based permission checks are bypassed by root.
+        return
       }
-    } finally {
-      chmodSync(readOnly, 0o755)
-    }
-  })
+      const dir = makeTempHome()
+      const readOnly = join(dir, 'read-only')
+      mkdirSync(readOnly)
+      chmodSync(readOnly, 0o444)
+      try {
+        const paths = createTeskraPaths({ TESKRA_HOME: join(readOnly, 'teskra') })
+        const result = paths.logs()
+        expect(result.ok).toBe(false)
+        if (!result.ok) {
+          expect(result.error.code).toBe('UNKNOWN')
+        }
+      } finally {
+        chmodSync(readOnly, 0o755)
+      }
+    },
+  )
 
   it('rejects path-traversal segments with VALIDATION_FAILED', () => {
     const dir = makeTempHome()

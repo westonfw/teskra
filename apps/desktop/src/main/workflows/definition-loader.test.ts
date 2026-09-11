@@ -36,10 +36,18 @@ const VALID = {
   ],
 }
 
+// The loader builds paths with node:path.join (host separators), while the
+// seam's matching below is written against '/'; normalize both sides so the
+// seam behaves identically on Windows and POSIX hosts.
+const toPosixSeps = (value: string): string => value.replaceAll('\\', '/')
+
 function fileSeam(files: Record<string, string>) {
+  const byPosixPath = new Map(
+    Object.entries(files).map(([path, content]) => [toPosixSeps(path), content] as const),
+  )
   return {
     readFile: (path: string) => {
-      const entry = files[path]
+      const entry = byPosixPath.get(toPosixSeps(path))
       if (entry === undefined) {
         const error = new Error(`ENOENT: ${path}`) as NodeJS.ErrnoException
         error.code = 'ENOENT'
@@ -48,8 +56,9 @@ function fileSeam(files: Record<string, string>) {
       return entry
     },
     listDir: (path: string) => {
-      const prefix = path.endsWith('/') ? path : `${path}/`
-      const entries = Object.keys(files)
+      const posixPath = toPosixSeps(path)
+      const prefix = posixPath.endsWith('/') ? posixPath : `${posixPath}/`
+      const entries = [...byPosixPath.keys()]
         .filter((key) => key.startsWith(prefix) && !key.slice(prefix.length).includes('/'))
         .map((key) => key.slice(prefix.length))
       if (entries.length === 0) {

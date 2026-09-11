@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -102,13 +102,20 @@ afterEach(() => {
 
 describe('resolveArtifactPath', () => {
   it('keeps relative paths inside the artifact directory and rejects escapes', () => {
-    expect(resolveArtifactPath('/run/artifacts', 'plan.md')).toBe('/run/artifacts/plan.md')
-    expect(resolveArtifactPath('/run/artifacts', 'nested/plan.md')).toBe(
-      '/run/artifacts/nested/plan.md',
+    const artifactDir = '/run/artifacts'
+    // The resolved form follows the host path semantics (a POSIX-shaped base
+    // gains the current drive on Windows), so compare via node:path.
+    expect(resolveArtifactPath(artifactDir, 'plan.md')).toBe(resolve(artifactDir, 'plan.md'))
+    expect(resolveArtifactPath(artifactDir, 'nested/plan.md')).toBe(
+      resolve(artifactDir, 'nested/plan.md'),
     )
-    expect(resolveArtifactPath('/run/artifacts', '../evil.txt')).toBeUndefined()
-    expect(resolveArtifactPath('/run/artifacts', '../../evil.txt')).toBeUndefined()
-    expect(resolveArtifactPath('/run/artifacts', '/etc/passwd')).toBeUndefined()
+    expect(resolveArtifactPath(artifactDir, '../evil.txt')).toBeUndefined()
+    expect(resolveArtifactPath(artifactDir, '../../evil.txt')).toBeUndefined()
+    expect(resolveArtifactPath(artifactDir, '/etc/passwd')).toBeUndefined()
+    // Windows-shaped escapes are rejected on every host: an agent running in
+    // WSL may emit backslash paths that the host must not resolve leniently.
+    expect(resolveArtifactPath(artifactDir, '..\\evil.txt')).toBeUndefined()
+    expect(resolveArtifactPath(artifactDir, 'C:\\evil.txt')).toBeUndefined()
   })
 })
 

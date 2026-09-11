@@ -62,8 +62,9 @@ function importedModuleStems(): Set<string> {
       if (specifier === undefined) continue
       const resolved = resolve(dirname(testFile), specifier)
       stems.add(resolved)
-      // Directory imports resolve to their index barrel.
-      stems.add(`${resolved}/index`)
+      // Directory imports resolve to their index barrel; join keeps the host
+      // separator consistent with the join()-built lookup keys below.
+      stems.add(join(resolved, 'index'))
     }
   }
   return stems

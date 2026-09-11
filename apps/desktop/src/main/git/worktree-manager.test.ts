@@ -60,6 +60,9 @@ async function setup(): Promise<Fixture> {
   await git('init', '--initial-branch=main')
   await git('config', 'user.name', 'Teskra Test')
   await git('config', 'user.email', 'teskra@example.invalid')
+  // Keep checkouts byte-identical on every host: Git for Windows defaults to
+  // core.autocrlf=true, which would rewrite LF to CRLF on checkout.
+  await git('config', 'core.autocrlf', 'false')
   writeFileSync(join(repoDir, 'README.md'), 'fixture\n')
   await git('add', '--all')
   await git('commit', '--message', 'feat: initial')
@@ -142,7 +145,11 @@ describe('WorktreeManager (TASK-043)', () => {
       state: 'ready',
       isolation: 'worktree',
     })
-    const expectedPath = join(fixture.dataRoot, 'worktrees', 'workspace-1', 'run-1')
+    // The runtime-side worktree path is built with POSIX separators
+    // (worktreePathFor + resolveCwd → posix.normalize); on a Windows host the
+    // data root keeps its backslashes, so compare against that contract
+    // instead of node:path.join.
+    const expectedPath = [fixture.dataRoot, 'worktrees', 'workspace-1', 'run-1'].join('/')
     expect(created.path).toBe(expectedPath)
     expect(existsSync(expectedPath)).toBe(true)
     expect(changed).toHaveBeenCalledWith({ workspaceId: 'workspace-1' })

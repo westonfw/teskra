@@ -46,12 +46,16 @@ import testTemplate from '../../../resources/prompts/test.md?raw'
  * the prompt either.
  */
 
+// Built-in templates are LF-canonical: a Windows checkout may carry CRLF
+// (core.autocrlf), and the `?raw` import inlines the file bytes verbatim.
+const lf = (text: string): string => text.replaceAll('\r\n', '\n')
+
 const BUILT_IN_TEMPLATES: Readonly<Record<string, string>> = {
-  plan: planTemplate,
-  implement: implementTemplate,
-  review: reviewTemplate,
-  fix: fixTemplate,
-  test: testTemplate,
+  plan: lf(planTemplate),
+  implement: lf(implementTemplate),
+  review: lf(reviewTemplate),
+  fix: lf(fixTemplate),
+  test: lf(testTemplate),
 }
 
 const PLACEHOLDER_PATTERN = /\{\{\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\}\}/g

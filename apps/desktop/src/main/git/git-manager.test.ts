@@ -46,6 +46,9 @@ describe('GitManager (TASK-035)', () => {
     for (const [key, value] of [
       ['user.name', 'Teskra Test'],
       ['user.email', 'teskra@example.invalid'],
+      // Keep checkouts byte-identical on every host: Git for Windows defaults
+      // to core.autocrlf=true, which would rewrite LF to CRLF on checkout.
+      ['core.autocrlf', 'false'],
     ] as const) {
       await commands.run({
         command: 'git',
@@ -86,7 +89,11 @@ describe('GitManager (TASK-035)', () => {
       ok: true,
       data: undefined,
     })
-    expect(openPath).toHaveBeenCalledWith(join(directory, 'hello.txt'))
+    // openFile builds the runtime-side path with POSIX separators
+    // (resolveCwd of the native-posix runtime normalizes with node:path.posix);
+    // on a Windows host the temp directory keeps its backslashes, so the
+    // expected value is the same template join, not node:path.join.
+    expect(openPath).toHaveBeenCalledWith(`${directory}/hello.txt`)
     const committed = await manager.commit({
       workspaceId: 'workspace-1',
       message: 'feat: initial',

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { FUTURE_RUNTIME_PORTS } from '@teskra/contracts'
+import { FUTURE_RUNTIME_PORTS, type WorkspaceRuntimeRef } from '@teskra/contracts'
 import { buildHandoffContext } from '@teskra/shared'
 
 import { createTeskraPaths } from '../paths'
@@ -16,7 +16,9 @@ const tempHomes: string[] = []
 
 afterEach(() => {
   for (const path of tempHomes.splice(0)) {
-    rmSync(path, { recursive: true, force: true })
+    // Windows cannot unlink an open SQLite file (EBUSY); if a test fails
+    // before dispose(), give the handle a moment to be released.
+    rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
   }
 })
 
@@ -49,6 +51,16 @@ function wslCommands(): CommandRunner {
   }
 }
 
+/**
+ * The workspace runtime kind that maps onto the host's native filesystem.
+ * On a Linux dev host a "wsl" workspace IS the native filesystem; on Windows
+ * the temp repo path is a Windows path (C:\…), which the domain rules reject
+ * for wsl workspaces — the coherent native kind there is 'windows'.
+ */
+function nativeRuntimeRef(distro: string): WorkspaceRuntimeRef {
+  return process.platform === 'win32' ? { kind: 'windows' } : { kind: 'wsl', distro }
+}
+
 describe('TeskraRuntime composition root (TASK-081)', () => {
   it('instantiates under plain Node with working workspace, terminal, and system ports', async () => {
     const home = makeHome()
@@ -70,7 +82,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     mkdirSync(workspacePath)
     const created = runtime.workspace.create({
       name: 'Demo',
-      runtime: { kind: 'wsl', distro: 'Ubuntu-24.04' },
+      runtime: nativeRuntimeRef('Ubuntu-24.04'),
       path: workspacePath,
     })
     expect(created.ok).toBe(true)
@@ -157,7 +169,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     mkdirSync(repo)
     const workspace = composed.data.workspace.create({
       name: 'Demo',
-      runtime: { kind: 'wsl', distro: 'Ubuntu-24.04' },
+      runtime: nativeRuntimeRef('Ubuntu-24.04'),
       path: repo,
     })
     if (!workspace.ok) throw new Error('expected workspace')
@@ -213,7 +225,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     mkdirSync(repo)
     const workspace = composed.data.workspace.create({
       name: 'Demo',
-      runtime: { kind: 'wsl', distro: 'Ubuntu-24.04' },
+      runtime: nativeRuntimeRef('Ubuntu-24.04'),
       path: repo,
       env: { OPENAI_API_KEY: 'sk-compose-secret' },
     })
@@ -259,7 +271,9 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     const home = makeHome()
     const composed = await composeTeskraRuntime({
       paths: createTeskraPaths({ TESKRA_HOME: home }),
-      hostPlatform: 'linux',
+      // Spawning test: runtime.validate() requires the runtime kind to be
+      // host-native, so the host platform cannot be simulated here.
+      hostPlatform: process.platform,
       wslInfo: { available: true },
       initializeLogs: false,
       includeDevelopmentAgents: true,
@@ -271,7 +285,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     mkdirSync(repo)
     const workspace = composed.data.workspace.create({
       name: 'Demo',
-      runtime: { kind: 'wsl', distro: 'Ubuntu' },
+      runtime: nativeRuntimeRef('Ubuntu'),
       path: repo,
     })
     if (!workspace.ok) throw new Error(workspace.error.message)
@@ -334,7 +348,9 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     const home = makeHome()
     const composed = await composeTeskraRuntime({
       paths: createTeskraPaths({ TESKRA_HOME: home }),
-      hostPlatform: 'linux',
+      // Spawning test: runtime.validate() requires the runtime kind to be
+      // host-native, so the host platform cannot be simulated here.
+      hostPlatform: process.platform,
       wslInfo: { available: true },
       initializeLogs: false,
       includeDevelopmentAgents: true,
@@ -346,7 +362,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     mkdirSync(repo)
     const workspace = composed.data.workspace.create({
       name: 'Demo',
-      runtime: { kind: 'wsl', distro: 'Ubuntu' },
+      runtime: nativeRuntimeRef('Ubuntu'),
       path: repo,
     })
     if (!workspace.ok) throw new Error(workspace.error.message)
@@ -411,7 +427,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     mkdirSync(repo)
     const workspace = runtime.workspace.create({
       name: 'Demo',
-      runtime: { kind: 'wsl', distro: 'Ubuntu-24.04' },
+      runtime: nativeRuntimeRef('Ubuntu-24.04'),
       path: repo,
     })
     if (!workspace.ok) throw new Error('expected workspace')
@@ -458,7 +474,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     mkdirSync(repo)
     const workspace = runtime.workspace.create({
       name: 'Demo',
-      runtime: { kind: 'wsl', distro: 'Ubuntu-24.04' },
+      runtime: nativeRuntimeRef('Ubuntu-24.04'),
       path: repo,
     })
     if (!workspace.ok) throw new Error('expected workspace')
