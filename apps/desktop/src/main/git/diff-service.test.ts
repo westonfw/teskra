@@ -1,4 +1,4 @@
-import { mkdtempSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -75,10 +75,22 @@ describe('DiffService (TASK-036)', () => {
     unlinkSync(join(directory, 'deleted.txt'))
     renameSync(join(directory, 'rename-old.txt'), join(directory, 'rename-new.txt'))
     writeFileSync(join(directory, 'added.txt'), 'new file\n')
+    mkdirSync(join(directory, 'added-dir'))
+    writeFileSync(join(directory, 'added-dir', 'nested.txt'), 'nested new\n')
 
     const beforeStage = await service.get('workspace-1')
     expect(beforeStage.ok && beforeStage.data.files).toContainEqual(
       expect.objectContaining({ path: 'added.txt', status: 'added', additions: 1 }),
+    )
+    // An untracked directory must surface its files individually — a collapsed
+    // `? added-dir/` entry cannot be diffed and would hide the agent's output.
+    expect(beforeStage.ok && beforeStage.data.files).toContainEqual(
+      expect.objectContaining({
+        path: 'added-dir/nested.txt',
+        status: 'added',
+        additions: 1,
+        patch: expect.stringContaining('+nested new'),
+      }),
     )
 
     await commands.run({
@@ -90,6 +102,7 @@ describe('DiffService (TASK-036)', () => {
     const result = await service.get('workspace-1')
     if (!result.ok) throw new Error(result.error.message)
     expect(Object.fromEntries(result.data.files.map((file) => [file.path, file.status]))).toEqual({
+      'added-dir/nested.txt': 'added',
       'added.txt': 'added',
       'deleted.txt': 'deleted',
       'modified.txt': 'modified',

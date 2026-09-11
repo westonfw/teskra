@@ -204,6 +204,10 @@ export function createGitManager(deps: GitManagerDeps): GitManager {
       '--porcelain=v2',
       '--branch',
       '-z',
+      // List untracked files individually: the default collapses untracked
+      // directories to `? dir/`, which cannot be diffed (DiffService would
+      // show an empty patch for everything the agent created inside it).
+      '--untracked-files=all',
       '--',
       '.',
       ':(exclude)node_modules',
