@@ -95,6 +95,9 @@ npm run test:security # 构建 + Electron 安全基线断言（TASK-002，script
 npm run build         # 构建
 npm run dist          # 构建 + electron-builder 打包（TASK-072；apps/desktop/electron-builder.yml）
                       # Windows 产出 NSIS installer + portable exe；--dir 快速验证见 apps/desktop 的 pack 脚本
+npm run release       # 发布编排（TASK-073，scripts/release.mjs）：build → sign（需 CSC_LINK/
+                      # CSC_KEY_PASSWORD，缺失则警告并产出未签名产物）→ package → checksum →
+                      # release notes；完整流程见 docs/release.md，CI 见 .github/workflows/release.yml
 ```
 
 CI（GitHub Actions，`.github/workflows/ci.yml`，TASK-091）：matrix 为

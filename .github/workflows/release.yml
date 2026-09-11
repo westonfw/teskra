@@ -1,0 +1,62 @@
+# TASK-073 — release pipeline (build → sign → package → checksum → notes).
+#
+# Separate from ci.yml on purpose: this workflow is tag-triggered and never
+# gates merging. Signing is optional — without the TESKRA_CSC_* secrets the
+# same pipeline produces unsigned artifacts (see docs/release.md).
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version override (defaults to the git tag / package.json version)'
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: windows-latest
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve Node version from package.json engines
+        id: node
+        shell: bash
+        run: echo "version=$(node -p "require('./package.json').engines.node.match(/\d+/)[0]")" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node ${{ steps.node.outputs.version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.node.outputs.version }}
+          cache: npm
+
+      - name: Install dependencies (lockfile-only)
+        run: npm ci
+
+      - name: Build → sign (if secrets present) → package → checksum → notes
+        # electron-builder picks up CSC_LINK/CSC_KEY_PASSWORD automatically;
+        # unset secrets leave the env empty and scripts/release.mjs warns and
+        # packages unsigned artifacts instead of failing.
+        env:
+          CSC_LINK: ${{ secrets.TESKRA_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.TESKRA_CSC_KEY_PASSWORD }}
+        run: node scripts/release.mjs --target win ${{ inputs.version && format('--version {0}', inputs.version) || '' }}
+
+      - name: Verify checksums
+        run: node scripts/make-checksums.mjs --verify
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: teskra-${{ github.ref_name || inputs.version }}
+          path: |
+            apps/desktop/dist/*.exe
+            apps/desktop/dist/*.blockmap
+            apps/desktop/dist/SHA256SUMS.txt
+            apps/desktop/dist/RELEASE_NOTES.md

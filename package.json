@@ -14,6 +14,8 @@
     "dev": "npm run dev --workspace @teskra/desktop",
     "build": "npm run build --workspace @teskra/desktop",
     "dist": "npm run dist --workspace @teskra/desktop",
+    "release": "node scripts/release.mjs",
+    "release:checksums": "node scripts/make-checksums.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint .",
     "test:unit": "vitest run",

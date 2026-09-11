@@ -1,7 +1,10 @@
 # TASK-072 — electron-builder packaging configuration.
 #
 # Output: NSIS installer + portable exe for Windows (no Microsoft Store
-# dependency). Windows code signing is out of scope here (TASK-073).
+# dependency). Windows code signing (TASK-073) is env-driven: electron-builder
+# Authenticode-signs automatically when CSC_LINK/CSC_KEY_PASSWORD are present;
+# see docs/release.md. The release orchestrator (scripts/release.mjs) injects
+# the resolved version (git tag / package.json) via -c.extraMetadata.version.
 appId: com.teskra.desktop
 productName: Teskra
 # Top-level (not per-platform): without it the Linux binary derives from the
