@@ -34,7 +34,7 @@ jobs:
             allow-failure: true
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Resolve Node version from package.json engines
         id: node
@@ -44,7 +44,7 @@ jobs:
         run: echo "version=$(node -p "require('./package.json').engines.node.match(/\d+/)[0]")" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node ${{ steps.node.outputs.version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ steps.node.outputs.version }}
           cache: npm
@@ -105,7 +105,7 @@ jobs:
         os: [windows-latest, ubuntu-latest]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Resolve Node version from package.json engines
         id: node
@@ -113,7 +113,7 @@ jobs:
         run: echo "version=$(node -p "require('./package.json').engines.node.match(/\d+/)[0]")" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node ${{ steps.node.outputs.version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ steps.node.outputs.version }}
           cache: npm
