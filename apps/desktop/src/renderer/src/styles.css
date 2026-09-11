@@ -237,12 +237,28 @@ body {
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 
+.terminal-keep-alive > .ant-spin {
+  flex: 1;
+  min-height: 0;
+}
+
+.terminal-keep-alive .ant-spin-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
 .terminal-tabs,
-.terminal-tabs > .ant-tabs-content-holder,
-.terminal-tabs .ant-tabs-content,
-.terminal-tabs .ant-tabs-tabpane {
+.terminal-tabs > .ant-tabs-body-holder {
   min-height: 0;
   flex: 1;
+}
+
+.terminal-tabs .ant-tabs-body,
+.terminal-tabs .ant-tabs-content {
+  height: 100%;
+  min-height: 0;
 }
 
 .terminal-tabs {
