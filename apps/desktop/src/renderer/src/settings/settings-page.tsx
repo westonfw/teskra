@@ -1,11 +1,13 @@
 import { Alert, Layout, Menu, Segmented, Spin, Typography } from 'antd'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 
-import type { WritableConfigLayer } from '@teskra/contracts'
+import type { ResolvedConfig, WritableConfigLayer } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../components/app-error-alert'
 import type { SettingsSectionRegistry } from './registry'
 import { useSettingsStore } from './settings-store'
+
+const NO_WARNINGS: ResolvedConfig['warnings'] = []
 
 interface SettingsPageProps {
   readonly registry: SettingsSectionRegistry
@@ -22,7 +24,7 @@ export function SettingsPage({ registry, workspaceId: selectedWorkspaceId }: Set
   const loading = useSettingsStore((state) => state.loading)
   const error = useSettingsStore((state) => state.error)
   const clearError = useSettingsStore((state) => state.clearError)
-  const warnings = useSettingsStore((state) => state.resolved?.warnings ?? [])
+  const warnings = useSettingsStore((state) => state.resolved?.warnings ?? NO_WARNINGS)
 
   useEffect(() => {
     void setWorkspace(selectedWorkspaceId)
