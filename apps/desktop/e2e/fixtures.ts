@@ -104,6 +104,9 @@ export async function openAndSwitchWorkspace(
   const workspace = await openWorkspaceViaBridge(page, repoDir, name)
   await page.reload()
   await page.waitForLoadState('domcontentloaded')
+  // Home is the default page (TASK-071); the Recent workspaces list lives on
+  // the Workspace page.
+  await page.getByRole('menuitem', { name: 'Workspace' }).click()
   const item = page.locator('.ant-list-item', { hasText: name })
   await expect(item).toBeVisible()
   // The most recent workspace is auto-selected, so the action reads either

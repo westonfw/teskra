@@ -5,7 +5,9 @@ test.describe('Open Workspace', () => {
     await expect(page.getByRole('heading', { name: 'Teskra' })).toBeVisible()
     await expect(page.getByText('Orchestrate your coding agents.')).toBeVisible()
     await expect(page.getByRole('menuitem', { name: 'Workspace' })).toBeVisible()
-    // Fresh TESKRA_HOME → no workspaces yet.
+    // Home is the default page (TASK-071); the Workspace page keeps the
+    // no-workspace empty state behind its menu entry.
+    await page.getByRole('menuitem', { name: 'Workspace' }).click()
     await expect(page.getByText('No workspace is open')).toBeVisible()
   })
 
@@ -34,6 +36,7 @@ test.describe('Open Workspace', () => {
   })
 
   test('workspace dialog renders and can be dismissed', async ({ page }) => {
+    await page.getByRole('menuitem', { name: 'Workspace' }).click()
     await page.getByRole('button', { name: 'Open your first workspace' }).click()
     const dialog = page.getByRole('dialog', { name: 'Open workspace' })
     await expect(dialog).toBeVisible()
