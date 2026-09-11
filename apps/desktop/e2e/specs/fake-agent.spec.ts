@@ -14,7 +14,9 @@ test.describe('Start Fake Agent', () => {
       ).toBeVisible()
 
       await page.locator('.page-heading .agent-picker').click()
-      await page.locator('.ant-select-item-option', { hasText: 'Fake Agent' }).click()
+      // TASK-089 renders fallback suggestions like "建议改用 Fake Agent" inside
+      // unavailable options, so a substring match resolves to multiple options.
+      await page.locator('.ant-select-item-option', { hasText: /^Fake Agent$/u }).click()
       await page
         .getByPlaceholder('Describe what the Agent should do…')
         .fill('Deterministic TASK-076 E2E run')
