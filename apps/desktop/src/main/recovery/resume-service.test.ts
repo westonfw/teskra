@@ -40,6 +40,7 @@ interface Fixture {
     worktreeId?: string
     pid?: number
     processId?: string
+    executionMode?: AgentRun['executionMode']
   }) => AgentRun
 }
 
@@ -101,7 +102,7 @@ function setup(): Fixture {
       id: 'run-1',
       workspaceId: 'workspace-1',
       agentType: 'codex',
-      executionMode: 'attended',
+      executionMode: overrides.executionMode ?? 'attended',
       runDir: runDir.data,
       status: 'interrupted',
       ...(overrides.worktreeId === undefined ? {} : { worktreeId: overrides.worktreeId }),
@@ -238,6 +239,22 @@ describe('ResumeService (TASK-042)', () => {
     expect(result).toMatchObject({
       ok: false,
       error: { code: 'VALIDATION_FAILED', message: 'The Run worktree branch no longer exists.' },
+    })
+    expect(fixture.resume).not.toHaveBeenCalled()
+  })
+
+  it('refuses to resume an orchestrated run whose worktree is gone', async () => {
+    const fixture = setup()
+    // The worktree record was deleted (retention GC / cleanup), so the FK
+    // ON DELETE SET NULL cleared run.worktreeId — the run is still
+    // orchestrated and must never relaunch directly into the main checkout.
+    fixture.createRun({ executionMode: 'orchestrated' })
+
+    const result = await fixture.service().resume({ runId: 'run-1' })
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'VALIDATION_FAILED' },
     })
     expect(fixture.resume).not.toHaveBeenCalled()
   })

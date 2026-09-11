@@ -54,6 +54,17 @@ export function createResumeService(deps: ResumeServiceDeps): ResumeService {
           `run=${run.id} status=${run.status}`,
         )
       }
+      // ADR-0002: an orchestrated Run may only execute inside its isolated
+      // worktree. worktree_id is ON DELETE SET NULL, so a Run whose worktree
+      // record was collected arrives here without one — relaunching it would
+      // write directly into the main checkout (agent-manager.ts start() has
+      // the same gate for fresh Runs).
+      if (run.executionMode === 'orchestrated' && run.worktreeId === undefined) {
+        return unavailable(
+          'Orchestrated Agent runs require an isolated worktree.',
+          `run=${run.id} mode=orchestrated worktree=none`,
+        )
+      }
 
       const oldProcessStillPresent = deps.processes
         .list()
