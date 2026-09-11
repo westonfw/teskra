@@ -453,6 +453,25 @@ describe('RetentionService (TASK-069)', () => {
     expect(existsSync(second.files.events)).toBe(false)
   })
 
+  it('skips log GC when the run went back to a live status after the plan', async () => {
+    const fixture = await setup()
+    const old = createRunRecord(fixture, 'run-old', { finishedDaysAgo: 45 })
+
+    // The plan collects the run as 'completed'; a resume (recovery flow)
+    // flips it back to 'running' before retention reaches the item, so the
+    // log files are live again and must not be deleted.
+    fixture.setOnItemStart(() => {
+      requireOk(fixture.runs.update('run-old', { status: 'running' }, new Date().toISOString()))
+    })
+
+    const report = requireOk(await fixture.service.run())
+    expect(report.entries.map((entry) => [entry.item.runId, entry.action])).toEqual([
+      ['run-old', 'skipped'],
+    ])
+    expect(existsSync(old.files.events)).toBe(true)
+    expect(existsSync(old.files.terminal)).toBe(true)
+  })
+
   it('respects per-call workspace scoping and retention thresholds', async () => {
     const fixture = await setup()
     const recent = createRunRecord(fixture, 'run-recent', { finishedDaysAgo: 10 })

@@ -381,6 +381,11 @@ export function createRetentionService(deps: RetentionServiceDeps): RetentionSer
     const run = deps.runs.getById(runId)
     if (!run.ok) return run
     if (run.data === null) return okEntry('skipped', 'run record is gone')
+    // plan() may be stale: a resumed run is live again and a process can be
+    // appending to these files right now — never collect them.
+    if (!LOG_COLLECTABLE_STATUSES.has(run.data.status)) {
+      return okEntry('skipped', `run is ${run.data.status} again; live logs are never collected`)
+    }
     const logFiles = deps.paths.runLogFiles(run.data.runDir)
     const removed: string[] = []
     try {
