@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto'
 
 import type Database from 'better-sqlite3'
 
+import type { WorkerHandoff } from '@teskra/contracts'
+
 /**
  * Development seed (TASK-090): builds the full relation graph
  * "1 Workspace / 1 Task / 1 WorkflowRun / 2 AgentRun / 1 ReviewPanel"
@@ -159,12 +161,19 @@ export function seedDatabase(connection: Database.Database, now?: string): SeedG
       )
       .run(artifactId, taskId, implementerRunId, at)
 
+    // ADR-0004: parse_status 'ok' requires a full WorkerHandoff payload —
+    // HandoffRepository validates it against workerHandoffSchema on read.
+    const handoffPayload = JSON.stringify({
+      runId: implementerRunId,
+      type: 'implementation',
+      summary: 'done',
+    } satisfies WorkerHandoff)
     connection
       .prepare(
         `INSERT INTO handoffs (id, run_id, type, payload_json, raw_path, parse_status, created_at)
-         VALUES (?, ?, 'implementation', '{"summary":"done"}', 'handoff/implementation.json', 'ok', ?)`,
+         VALUES (?, ?, 'implementation', ?, 'handoff/implementation.json', 'ok', ?)`,
       )
-      .run(handoffId, implementerRunId, at)
+      .run(handoffId, implementerRunId, handoffPayload, at)
 
     connection
       .prepare(

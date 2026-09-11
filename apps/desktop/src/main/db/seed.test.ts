@@ -3,6 +3,7 @@ import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { migrateDatabase } from './migrations'
+import { createHandoffRepository } from './repositories/handoff-repository'
 import { seedDatabase } from './seed'
 
 /** TASK-090 acceptance: the seed builds the full demo relation graph. */
@@ -130,5 +131,21 @@ describe('seedDatabase (TASK-090)', () => {
     expect(count(db, 'workspaces')).toBe(2)
     expect(count(db, 'agent_runs')).toBe(4)
     expect(count(db, 'review_panels')).toBe(2)
+  })
+
+  it('seeds a handoff the Repository layer can read back', () => {
+    const db = migratedDb()
+    const graph = seedDatabase(db, '2026-09-09T00:00:00.000Z')
+
+    // parse_status 'ok' promises a full WorkerHandoff payload (ADR-0004).
+    const handoff = createHandoffRepository(db).getByRunId(graph.implementerRunId)
+    expect(handoff.ok).toBe(true)
+    if (handoff.ok) {
+      expect(handoff.data?.payload).toMatchObject({
+        runId: graph.implementerRunId,
+        type: 'implementation',
+        summary: 'done',
+      })
+    }
   })
 })
