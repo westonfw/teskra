@@ -85,6 +85,15 @@ describe('CommandClassifier conservative semantics (TASK-064)', () => {
     expect(classifyCommand('git status > status.txt')).toBe('WORKSPACE_WRITE')
   })
 
+  it('treats bash &>/&>>/>& file redirections as workspace writes, fd dups as no write', () => {
+    expect(classifyCommand('git status &> out.txt')).toBe('WORKSPACE_WRITE')
+    expect(classifyCommand('git status &>> out.txt')).toBe('WORKSPACE_WRITE')
+    expect(classifyCommand('git status >& out.txt')).toBe('WORKSPACE_WRITE')
+    // `>&2` / `1>&2` duplicate an fd — nothing is written to a file.
+    expect(classifyCommand('echo hi >&2')).toBe('READ_ONLY')
+    expect(classifyCommand('echo hi 1>&2')).toBe('READ_ONLY')
+  })
+
   it('quotes do not confuse tokenization', () => {
     expect(classifyCommand('echo "a && b"')).toBe('READ_ONLY')
     expect(classifyCommand('git commit -m "fix: rm -rf typo"')).toBe('WORKSPACE_WRITE')

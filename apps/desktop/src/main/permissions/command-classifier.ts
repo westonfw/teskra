@@ -113,7 +113,7 @@ function tokenize(line: string): string[] | null {
       const pair = line.slice(index, index + 2)
       const triple = line.slice(index, index + 3)
       // fd duplications (`>&`, `&>`, `&>>`) are single redirect tokens — the
-      // `&` here is not a background operator and nothing is written to a file.
+      // `&` here is not a background operator.
       if (char === '>' && next === '&') {
         flush()
         tokens.push('>&')
@@ -172,6 +172,8 @@ function splitCompound(tokens: readonly string[]): string[][] {
 
 const REDIRECT_PATTERN = /^(?:\d*>>?|\d*<<|>&|&>>?)$/
 const FILE_WRITE_REDIRECT = /^\d*>>?$/
+// `&> file` / `&>> file` redirect stdout+stderr to a file (not fd dups).
+const WRITE_ALL_REDIRECT = /^&>>?$/
 
 /** Extracts redirections; a `>` target that is not an fd dup (`>&1`) writes a file. */
 function extractRedirects(tokens: readonly string[]): {
@@ -188,7 +190,12 @@ function extractRedirects(tokens: readonly string[]): {
     }
     const target = tokens[index + 1]
     if (target !== undefined) index += 1
-    if (FILE_WRITE_REDIRECT.test(token) && target !== undefined && !target.startsWith('&')) {
+    if (target === undefined || target.startsWith('&')) continue
+    if (FILE_WRITE_REDIRECT.test(token) || WRITE_ALL_REDIRECT.test(token)) {
+      writesFile = true
+    } else if (token === '>&' && !/^\d+$/.test(target) && target !== '-') {
+      // `>& word` with a non-numeric word redirects stdout to the file `word`;
+      // `>&2` duplicates an fd and `>&-` closes it — neither writes a file.
       writesFile = true
     }
   }
