@@ -520,21 +520,24 @@ export function createRetentionService(deps: RetentionServiceDeps): RetentionSer
           detail: 'RetentionService.run called while another run is active',
         })
       }
-      const startedAt = now().toISOString()
-      const collected = await collect(request.workspaceId)
-      if (!collected.ok) return collected
-      const { policy, items, contexts } = collected.data
-
+      // The guard must be set synchronously, before the first await —
+      // otherwise a concurrent run() slips through the check above while
+      // this one is suspended in collect().
       const controller = new AbortController()
+      active = controller
       const abortFromCaller = (): void => controller.abort()
       if (signal !== undefined) {
         if (signal.aborted) controller.abort()
         else signal.addEventListener('abort', abortFromCaller, { once: true })
       }
-      active = controller
-      const entries: RetentionAuditEntry[] = []
-      let cancelled = false
       try {
+        const startedAt = now().toISOString()
+        const collected = await collect(request.workspaceId)
+        if (!collected.ok) return collected
+        const { policy, items, contexts } = collected.data
+
+        const entries: RetentionAuditEntry[] = []
+        let cancelled = false
         const dryRun = request.dryRun === true
         for (const item of items) {
           deps.onItemStart?.(item)
@@ -577,20 +580,20 @@ export function createRetentionService(deps: RetentionServiceDeps): RetentionSer
             }),
           )
         }
+        return {
+          ok: true,
+          data: {
+            startedAt,
+            finishedAt: now().toISOString(),
+            dryRun: request.dryRun === true,
+            cancelled,
+            policy,
+            entries,
+          },
+        }
       } finally {
         active = null
         signal?.removeEventListener('abort', abortFromCaller)
-      }
-      return {
-        ok: true,
-        data: {
-          startedAt,
-          finishedAt: now().toISOString(),
-          dryRun: request.dryRun === true,
-          cancelled,
-          policy,
-          entries,
-        },
       }
     },
 

@@ -435,6 +435,24 @@ describe('RetentionService (TASK-069)', () => {
     expect(secondRun.entries).toEqual([])
   })
 
+  it('rejects a second run() while one is already in flight', async () => {
+    const fixture = await setup()
+    const first = createRunRecord(fixture, 'run-1', { finishedDaysAgo: 40 })
+    const second = createRunRecord(fixture, 'run-2', { finishedDaysAgo: 40 })
+
+    // The first run suspends in collect() before marking itself active; the
+    // second call must still see the in-flight run and be rejected.
+    const runA = fixture.service.run()
+    const runB = await fixture.service.run()
+    expect(runB.ok).toBe(false)
+    if (!runB.ok) expect(runB.error.message).toContain('already in progress')
+
+    const reportA = requireOk(await runA)
+    expect(reportA.entries.every((entry) => entry.action === 'deleted')).toBe(true)
+    expect(existsSync(first.files.events)).toBe(false)
+    expect(existsSync(second.files.events)).toBe(false)
+  })
+
   it('respects per-call workspace scoping and retention thresholds', async () => {
     const fixture = await setup()
     const recent = createRunRecord(fixture, 'run-recent', { finishedDaysAgo: 10 })
