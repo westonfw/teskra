@@ -3,6 +3,7 @@ import { AgentsSettingsSection } from './sections/agents-settings'
 import { EnvironmentSettingsSection } from './sections/environment-settings'
 import { GeneralSettingsSection } from './sections/general-settings'
 import { PermissionsSettingsSection } from './sections/permissions-settings'
+import { SecuritySettingsSection } from './sections/security-settings'
 import type { SettingsSectionRegistry } from './registry'
 
 export function registerBuiltInSettings(registry: SettingsSectionRegistry): void {
@@ -19,6 +20,13 @@ export function registerBuiltInSettings(registry: SettingsSectionRegistry): void
     description: 'Agent permission rules and the command audit trail',
     order: 40,
     component: PermissionsSettingsSection,
+  })
+  registry.register({
+    id: 'security',
+    title: 'Security',
+    description: 'Credential Store and secret environment variables',
+    order: 35,
+    component: SecuritySettingsSection,
   })
   registry.register({
     id: 'general',

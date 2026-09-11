@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -9,6 +9,8 @@ import type { WorkspaceRuntimeRef } from '@teskra/contracts'
 
 import { migrateDatabase } from '../db/migrations'
 import { createWorkspaceRepository } from '../db/repositories'
+import { createTeskraPaths } from '../paths'
+import { createCredentialStore, type CredentialCipher } from '../security/credential-store'
 import { createWorkspaceManager, type WorkspaceManager } from './workspace-manager'
 
 // Tests must run on both the Linux dev machine and the Windows CI gate.
@@ -210,8 +212,7 @@ describe('WorkspaceManager.validate', () => {
   })
 })
 
-describe('WorkspaceManager.remove / listRecent', () => {
-  it('removes a workspace and reports unknown ids', () => {
+describe('WorkspaceManager.remove / listRecent', () => {  it('removes a workspace and reports unknown ids', () => {
     const dir = makeTempDir('project')
     const opened = manager.open({ runtime: nativeRuntime, path: dir })
     if (!opened.ok) throw new Error('open should succeed')
@@ -232,5 +233,104 @@ describe('WorkspaceManager.remove / listRecent', () => {
 
     const limited = manager.listRecent(1)
     expect(limited.ok && limited.data.map((ws) => ws.name)).toEqual(['b'])
+  })
+})
+
+/** Deterministic stand-in for safeStorage: reversibly "encrypts" via base64. */
+function mockCipher(available = true): CredentialCipher {
+  return {
+    isAvailable: () => available,
+    encrypt: (plaintext) => `enc:${Buffer.from(plaintext, 'utf8').toString('base64')}`,
+    decrypt: (ciphertext) =>
+      Buffer.from(ciphertext.slice('enc:'.length), 'base64').toString('utf8'),
+  }
+}
+
+describe('WorkspaceManager env secret diversion (TASK-088)', () => {
+  function managerWithCredentials(available = true): {
+    manager: WorkspaceManager
+    store: ReturnType<typeof createCredentialStore>
+  } {
+    const paths = createTeskraPaths()
+    const store = createCredentialStore({ paths, cipher: mockCipher(available) })
+    return {
+      store,
+      manager: createWorkspaceManager(createWorkspaceRepository(connection), {
+        now: () => `2026-09-09T10:00:${String(tick++).padStart(2, '0')}.000Z`,
+        credentials: store,
+      }),
+    }
+  }
+
+  function rawEnvJson(id: string): string | null {
+    const row = connection
+      .prepare('SELECT env_json FROM workspaces WHERE id = ?')
+      .get(id) as { env_json: string | null } | undefined
+    return row?.env_json ?? null
+  }
+
+  it('diverts secret-shaped values to the Credential Store; env_json keeps only the ref', () => {
+    const { manager: secureManager, store } = managerWithCredentials()
+    const created = secureManager.create({
+      name: 'Secrets',
+      runtime: { kind: 'wsl', distro: 'Ubuntu-24.04' },
+      path: '/home/user/secrets',
+      env: {
+        PLAIN_VAR: 'visible',
+        OPENAI_API_KEY: 'sk-test-secret-123',
+        MY_TOKEN: 'not-a-known-shape-but-secret-key-name',
+      },
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+
+    // Acceptance: 敏感 env 不出现在 workspaces.env_json（直接读 DB 断言）。
+    const envJson = rawEnvJson(created.data.id)
+    expect(envJson).not.toBeNull()
+    expect(envJson).not.toContain('sk-test-secret-123')
+    expect(envJson).not.toContain('not-a-known-shape-but-secret-key-name')
+    expect(envJson).toContain('visible')
+
+    const ref = `workspace/${created.data.id}/OPENAI_API_KEY`
+    expect(created.data.env).toEqual({
+      PLAIN_VAR: 'visible',
+      OPENAI_API_KEY: { secretRef: ref },
+      MY_TOKEN: { secretRef: `workspace/${created.data.id}/MY_TOKEN` },
+    })
+
+    // The value round-trips through the store; the ciphertext file holds no plaintext.
+    expect(store.get(ref)).toEqual({ ok: true, data: 'sk-test-secret-123' })
+    const onDisk = readFileSync(createTeskraPaths().credentials(), 'utf8')
+    expect(onDisk).not.toContain('sk-test-secret-123')
+  })
+
+  it('fails explicitly when encryption is unavailable — nothing is persisted', () => {
+    const { manager: degradedManager } = managerWithCredentials(false)
+    const created = degradedManager.create({
+      name: 'Secrets',
+      runtime: { kind: 'wsl', distro: 'Ubuntu-24.04' },
+      path: '/home/user/secrets',
+      env: { OPENAI_API_KEY: 'sk-test-secret-123' },
+    })
+    expect(created.ok).toBe(false)
+    if (created.ok) return
+    expect(created.error.code).toBe('CAPABILITY_NOT_AVAILABLE')
+    expect(created.error.retryable).toBe(false)
+
+    // No workspace row, no credentials file, no plaintext anywhere on disk.
+    expect(degradedManager.listRecent(10)).toEqual({ ok: true, data: [] })
+    expect(existsSync(createTeskraPaths().credentials())).toBe(false)
+  })
+
+  it('still accepts non-sensitive env without a Credential Store', () => {
+    const created = manager.create({
+      name: 'Plain',
+      runtime: { kind: 'wsl', distro: 'Ubuntu-24.04' },
+      path: '/home/user/plain',
+      env: { PLAIN_VAR: 'visible' },
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    expect(created.data.env).toEqual({ PLAIN_VAR: 'visible' })
   })
 })

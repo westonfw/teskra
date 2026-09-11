@@ -16,6 +16,24 @@ export const workspaceRuntimeRefSchema = z.strictObject({
 })
 export type WorkspaceRuntimeRef = z.infer<typeof workspaceRuntimeRefSchema>
 
+/**
+ * TASK-088: a persisted secret env entry is a Credential Store reference, not
+ * the value. The reference is an opaque store key (e.g.
+ * `workspace/<workspaceId>/<ENV_KEY>`); the plaintext only exists inside the
+ * Credential Store and in the launched process's environment.
+ */
+export const workspaceSecretRefSchema = z.strictObject({
+  secretRef: z.string().min(1),
+})
+export type WorkspaceSecretRef = z.infer<typeof workspaceSecretRefSchema>
+
+export const workspaceEnvValueSchema = z.union([z.string(), workspaceSecretRefSchema])
+export type WorkspaceEnvValue = z.infer<typeof workspaceEnvValueSchema>
+
+export function isWorkspaceSecretRef(value: WorkspaceEnvValue): value is WorkspaceSecretRef {
+  return typeof value !== 'string'
+}
+
 /** Fields mirror the §139.1 `workspaces` table; timestamps are ISO-8601 UTC text. */
 export const workspaceSchema = z.strictObject({
   id: z.string(),
@@ -24,8 +42,8 @@ export const workspaceSchema = z.strictObject({
   path: z.string(),
   gitRoot: z.string().optional(),
   defaultBranch: z.string().optional(),
-  /** Non-sensitive env vars only; secrets go through the Credential Store. */
-  env: z.record(z.string(), z.string()).optional(),
+  /** Non-sensitive values are plain strings; secrets are Credential Store refs. */
+  env: z.record(z.string(), workspaceEnvValueSchema).optional(),
   lastOpenedAt: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -37,6 +55,7 @@ const workspaceInputFields = {
   path: z.string().min(1),
   gitRoot: z.string().optional(),
   defaultBranch: z.string().optional(),
+  /** Callers send plaintext; the Main process diverts secrets to the Credential Store. */
   env: z.record(z.string(), z.string()).optional(),
 }
 

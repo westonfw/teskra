@@ -138,6 +138,12 @@ const bridge: TeskraBridge = {
     updateConfig: (request) => invoke(IPC_CHANNELS.settingsUpdateConfig, request),
     openDirectory: (request) => invoke(IPC_CHANNELS.systemOpenDirectory, request),
   },
+  credential: {
+    status: () => invoke(IPC_CHANNELS.credentialStatus),
+    set: (request) => invoke(IPC_CHANNELS.credentialSet, request),
+    delete: (request) => invoke(IPC_CHANNELS.credentialDelete, request),
+    list: () => invoke(IPC_CHANNELS.credentialList),
+  },
   prompts: {
     list: (request = {}) => invoke(IPC_CHANNELS.promptListTemplates, request),
     render: (request) => invoke(IPC_CHANNELS.promptRender, request),

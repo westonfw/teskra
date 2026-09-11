@@ -4,9 +4,12 @@ import type {
   AgentStartRequest,
   IpcResult,
   ProviderSessionRef,
+  WorkspaceEnvValue,
   WorkspaceRuntimeRef,
 } from '@teskra/contracts'
+import { isWorkspaceSecretRef } from '@teskra/contracts'
 
+import { getLogger } from '../../logger'
 import type { ProcessManager, ProcessStartRequest } from '../../process/process-manager'
 import type { WorkspaceRuntime } from '../../workspace/runtime'
 import type { AgentDetector } from '../agent-detector'
@@ -36,12 +39,36 @@ export function agentProcessId(runId: string): string {
   return `agent-run:${runId}`
 }
 
+/**
+ * TASK-088 backstop: the AgentManager resolves workspace env secret refs to
+ * plaintext before launch, so only plain strings should arrive here. A ref
+ * that still leaks through is dropped (never passed to the process as a
+ * literal "{ secretRef }" value) and logged by key name only.
+ */
+function plainWorkspaceEnv(
+  env: Readonly<Record<string, WorkspaceEnvValue>> | undefined,
+  runId: string,
+): Record<string, string> {
+  const plain: Record<string, string> = {}
+  for (const [key, value] of Object.entries(env ?? {})) {
+    if (isWorkspaceSecretRef(value)) {
+      getLogger('agent').warn(
+        { runId, key },
+        'Unresolved secret env ref reached the Adapter; the variable was omitted.',
+      )
+      continue
+    }
+    plain[key] = value
+  }
+  return plain
+}
+
 function processEnvironment(
   request: AgentStartRequest,
   launch: CliAgentLaunch,
 ): Readonly<Record<string, string>> {
   return {
-    ...request.workspace.env,
+    ...plainWorkspaceEnv(request.workspace.env, request.runId),
     ...request.environment,
     ...launch.env,
     ...(request.handoffPath !== undefined ? { TESKRA_HANDOFF_PATH: request.handoffPath } : {}),

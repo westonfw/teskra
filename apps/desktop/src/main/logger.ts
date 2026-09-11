@@ -16,7 +16,7 @@ import { redactSecrets } from './redact'
  *
  * Main process only — the sandboxed preload never touches pino.
  */
-export const LOG_SCOPES = ['app', 'runtime', 'agent', 'process', 'ipc', 'git'] as const
+export const LOG_SCOPES = ['app', 'runtime', 'agent', 'process', 'ipc', 'git', 'security'] as const
 export type LogScope = (typeof LOG_SCOPES)[number]
 
 export interface LoggerFactoryOptions {

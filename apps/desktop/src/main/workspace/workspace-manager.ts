@@ -2,10 +2,15 @@ import { randomUUID } from 'node:crypto'
 import { statSync } from 'node:fs'
 import { basename, win32 } from 'node:path'
 
-import type { IpcResult, Workspace, WorkspaceRuntimeRef } from '@teskra/contracts'
+import type { IpcResult, Workspace, WorkspaceEnvValue, WorkspaceRuntimeRef } from '@teskra/contracts'
 
 import type { WorkspaceRepository } from '../db/repositories'
 import { type InternalAppError, toPublicError } from '../errors'
+import { containsSecretValue, looksLikeSecretKey } from '../redact'
+import {
+  workspaceEnvCredentialKey,
+  type CredentialStore,
+} from '../security/credential-store'
 import { validateWorkspaceDraft, type WorkspaceDraft } from './domain'
 import { createWorkspaceRuntime, type WorkspaceRuntime } from './runtime'
 
@@ -61,6 +66,13 @@ export interface WorkspaceManagerOptions {
    * host platform. Tests may inject a stub to control host-nativeness.
    */
   readonly createRuntime?: (ref: WorkspaceRuntimeRef) => IpcResult<WorkspaceRuntime>
+  /**
+   * TASK-088: when composed in, secret-looking env values are diverted into
+   * the Credential Store and only a `secretRef` is persisted in env_json.
+   * Without it (or when the cipher is unavailable), a secret-looking value
+   * fails the write instead of being persisted as plaintext.
+   */
+  readonly credentials?: CredentialStore
 }
 
 function fail(error: InternalAppError): { ok: false; error: ReturnType<typeof toPublicError> } {
@@ -111,6 +123,46 @@ export function createWorkspaceManager(
     return probeDirectory(path, runtime.data.hostNative)
   }
 
+  /**
+   * TASK-088: splits caller-supplied env into plain values (persisted in
+   * env_json) and secret-looking values (key shape or token shape, TASK-004
+   * patterns). Secrets go to the Credential Store under
+   * `workspace/<id>/<KEY>`; env_json keeps only the reference. When the store
+   * cannot encrypt, the write fails explicitly — never a plaintext fallback.
+   */
+  const divertEnvSecrets = (
+    workspaceId: string,
+    env: Record<string, string> | undefined,
+  ): IpcResult<Record<string, WorkspaceEnvValue> | undefined> => {
+    if (env === undefined) {
+      return { ok: true, data: undefined }
+    }
+    const diverted: Record<string, WorkspaceEnvValue> = {}
+    for (const [key, value] of Object.entries(env)) {
+      if (!looksLikeSecretKey(key) && !containsSecretValue(value)) {
+        diverted[key] = value
+        continue
+      }
+      const store = options.credentials
+      if (store === undefined || !store.isAvailable()) {
+        return fail({
+          code: 'CAPABILITY_NOT_AVAILABLE',
+          message:
+            'This environment cannot securely store secrets; sensitive environment variables were not persisted.',
+          retryable: false,
+          detail: `env key ${JSON.stringify(key)} looks sensitive but the Credential Store is unavailable`,
+        })
+      }
+      const ref = workspaceEnvCredentialKey(workspaceId, key)
+      const stored = store.set(ref, value)
+      if (!stored.ok) {
+        return stored
+      }
+      diverted[key] = { secretRef: ref }
+    }
+    return { ok: true, data: diverted }
+  }
+
   const manager: WorkspaceManager = {
     create(input) {
       const draft = validateWorkspaceDraft(input)
@@ -129,7 +181,12 @@ export function createWorkspaceManager(
           detail: `duplicate of workspace ${existing.data.id}; use open() for idempotent opens`,
         })
       }
-      return repository.create({ id: randomUUID(), ...draft.data }, now())
+      const id = randomUUID()
+      const env = divertEnvSecrets(id, draft.data.env)
+      if (!env.ok) {
+        return env
+      }
+      return repository.create({ id, ...draft.data, env: env.data }, now())
     },
 
     open(input) {
@@ -175,8 +232,13 @@ export function createWorkspaceManager(
       }
 
       const timestamp = now()
+      const id = randomUUID()
+      const env = divertEnvSecrets(id, draft.data.env)
+      if (!env.ok) {
+        return env
+      }
       return repository.create(
-        { id: randomUUID(), ...draft.data, lastOpenedAt: timestamp },
+        { id, ...draft.data, env: env.data, lastOpenedAt: timestamp },
         timestamp,
       )
     },

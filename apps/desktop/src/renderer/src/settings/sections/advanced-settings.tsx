@@ -30,8 +30,8 @@ export function AdvancedSettingsSection() {
         type="info"
         showIcon
         icon={<SafetyCertificateOutlined />}
-        message="Sensitive settings are unavailable"
-        description="API keys, tokens, and other secrets cannot be entered until Credential Store support is available. Teskra will not save them in config files."
+        message="Sensitive settings use the Credential Store"
+        description="API keys, tokens, and other secrets are stored encrypted via the Credential Store (see the Security section). Teskra will not save them in config files."
       />
     </Space>
   )

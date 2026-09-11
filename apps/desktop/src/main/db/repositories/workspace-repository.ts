@@ -1,8 +1,8 @@
 import type Database from 'better-sqlite3'
 import { z } from 'zod'
 
-import type { IpcResult, Workspace, WorkspaceRuntimeRef } from '@teskra/contracts'
-import { workspaceRuntimeRefSchema } from '@teskra/contracts'
+import type { IpcResult, Workspace, WorkspaceEnvValue, WorkspaceRuntimeRef } from '@teskra/contracts'
+import { workspaceEnvValueSchema, workspaceRuntimeRefSchema } from '@teskra/contracts'
 
 import {
   decodeJson,
@@ -36,7 +36,7 @@ const workspaceRowSchema = z.strictObject({
   path: z.string(),
   gitRoot: z.string().optional(),
   defaultBranch: z.string().optional(),
-  env: z.record(z.string(), z.string()).optional(),
+  env: z.record(z.string(), workspaceEnvValueSchema).optional(),
   lastOpenedAt: isoTimestampSchema.optional(),
   createdAt: isoTimestampSchema,
   updatedAt: isoTimestampSchema,
@@ -65,7 +65,7 @@ export interface CreateWorkspaceInput {
   readonly path: string
   readonly gitRoot?: string
   readonly defaultBranch?: string
-  readonly env?: Record<string, string>
+  readonly env?: Record<string, WorkspaceEnvValue>
   readonly lastOpenedAt?: string
 }
 
@@ -76,7 +76,7 @@ export interface UpdateWorkspaceInput {
   readonly path?: string
   readonly gitRoot?: string | null
   readonly defaultBranch?: string | null
-  readonly env?: Record<string, string> | null
+  readonly env?: Record<string, WorkspaceEnvValue> | null
   readonly lastOpenedAt?: string | null
 }
 
@@ -98,7 +98,12 @@ export interface WorkspaceRepository {
 const ENTITY = 'workspace'
 
 function toDomain(row: WorkspaceRow): IpcResult<Workspace> {
-  const env = decodeJson(z.record(z.string(), z.string()), ENTITY, 'env_json', row.env_json)
+  const env = decodeJson(
+    z.record(z.string(), workspaceEnvValueSchema),
+    ENTITY,
+    'env_json',
+    row.env_json,
+  )
   if (!env.ok) {
     return env
   }

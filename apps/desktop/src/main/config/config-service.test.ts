@@ -35,6 +35,7 @@ function stubPaths(): TeskraPaths {
     }),
     worktreeRoot: (wsId) => ({ ok: true, data: `/teskra-home/worktrees/${wsId}` }),
     config: () => GLOBAL_CONFIG_PATH,
+    credentials: () => '/teskra-home/credentials.json',
     repoConfig: (repoRoot) => `${repoRoot}/.teskra/config.json`,
     repoPromptsDir: (repoRoot) => `${repoRoot}/.teskra/prompts`,
     repoWorkflowsDir: (repoRoot) => `${repoRoot}/.teskra/workflows`,
@@ -262,6 +263,28 @@ describe('ConfigService.resolve — repo-local secret scanning', () => {
     expect(resolved.ok).toBe(true)
     if (!resolved.ok) return
     expect(resolved.data.warnings[0]?.message).toContain('Invalid global config field')
+  })
+
+  it('TASK-088 pinning: a committable repo config never contributes secret values', () => {
+    const secret = 'ghp_1234567890abcdef'
+    const service = createConfigService(
+      makeDeps({
+        [`${REPO_ROOT}/.teskra/config.json`]: JSON.stringify({
+          githubToken: secret,
+          concurrency: { maxGlobalRuns: 6 },
+        }),
+      }),
+    )
+    const resolved = service.resolve({ workspaceId: 'ws1' })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    // Stripped on read with a warning; the secret reaches no resolved field.
+    expect(resolved.data.warnings[0]).toMatchObject({
+      layer: 'workspace',
+      fieldPath: 'githubToken',
+    })
+    expect(JSON.stringify(resolved.data.config)).not.toContain(secret)
+    expect(JSON.stringify(resolved.data.sources)).not.toContain(secret)
   })
 })
 

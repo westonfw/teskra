@@ -128,6 +128,7 @@ export default tseslint.config(
     ignores: [
       'apps/desktop/src/main/index.ts',
       'apps/desktop/src/main/events/renderer-event-bridge.ts',
+      'apps/desktop/src/main/security/safe-storage-cipher.ts',
       'apps/desktop/src/**/*.test.ts',
     ],
     rules: {
@@ -204,6 +205,35 @@ export default tseslint.config(
               group: ['node:child_process'],
               message:
                 'Interactive processes use node-pty here; one-shot commands belong to CommandRunner.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // TASK-088: the safeStorage cipher adapter is the only Runtime-adjacent
+    // module allowed to touch Electron; everything else in security/ receives
+    // the cipher by injection. Process backends stay prohibited here.
+    files: ['apps/desktop/src/main/security/safe-storage-cipher.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'child_process',
+              message: 'Inject CommandRunner for one-shot processes.',
+            },
+            {
+              name: 'node-pty',
+              message: 'Inject ProcessManager for interactive PTYs.',
+            },
+          ],
+          patterns: [
+            {
+              group: ['node:child_process'],
+              message: 'Inject CommandRunner for one-shot processes.',
             },
           ],
         },

@@ -1,5 +1,6 @@
 export * from './error'
 export * from './workspace'
+export * from './credential'
 export * from './task'
 export * from './criteria'
 export * from './agent'

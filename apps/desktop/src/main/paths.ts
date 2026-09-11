@@ -48,6 +48,11 @@ export interface TeskraPaths {
   /** <home>/config.json — resolution only; the file may not exist. */
   config(): string
   /**
+   * <home>/credentials.json (TASK-088 Credential Store, plan §60) — resolution
+   * only, no I/O. Holds cipher-encrypted secrets only, never plaintext.
+   */
+  credentials(): string
+  /**
    * <repoRoot>/.teskra/config.json (ADR-0003 repo-local config, TASK-080) —
    * resolution only, no I/O. Uses host path semantics; reading a WSL-side
    * repo from a Windows host is the WorkspaceRuntime's future concern, so a
@@ -150,6 +155,9 @@ export function createTeskraPaths(env: NodeJS.ProcessEnv = process.env): TeskraP
     },
     config() {
       return join(home(), 'config.json')
+    },
+    credentials() {
+      return join(home(), 'credentials.json')
     },
     repoConfig(repoRoot: string) {
       return join(repoRoot, TESKRA_DATA_DIR, 'config.json')

@@ -314,10 +314,15 @@ function fakeRuntime(): TeskraRuntime {
         }),
       ),
     },
+    credential: {
+      status: vi.fn(() => ok({ available: true })),
+      set: vi.fn(() => ok(undefined)),
+      delete: vi.fn(() => ok(true)),
+      list: vi.fn(() => ok(['OPENAI_API_KEY'])),
+    },
     settings: {
       resolveConfig: vi.fn(() =>
-        ok({
-          config: {
+        ok({          config: {
             logging: { level: 'info' as const },
             concurrency: { maxGlobalRuns: 4, maxRunsPerWorkspace: 3, maxRunsPerAgent: 2 },
             watchdog: { stalledThresholdMs: 600_000 },

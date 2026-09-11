@@ -6,6 +6,7 @@ import { registerIpcRouter } from './ipc/router'
 import { getLogger } from './logger'
 import { composeTeskraRuntime } from './runtime/compose'
 import type { TeskraRuntime } from './runtime/facade'
+import { createSafeStorageCipher } from './security/safe-storage-cipher'
 
 let runtime: TeskraRuntime | undefined
 let rendererBridge: RendererEventBridge | undefined
@@ -18,6 +19,7 @@ app.whenReady().then(async () => {
     appVersion: app.getVersion(),
     includeDevelopmentAgents: !app.isPackaged,
     openPath: (path) => shell.openPath(path),
+    credentialCipher: createSafeStorageCipher(),
     selectDirectory: async () => {
       const selected = await dialog.showOpenDialog({ properties: ['openDirectory'] })
       return selected.canceled ? null : (selected.filePaths[0] ?? null)

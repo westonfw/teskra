@@ -25,6 +25,12 @@ import {
 } from '../db/repositories'
 import { createEventBus, type EventBus } from '../events/event-bus'
 import { createTeskraPaths, type TeskraPaths } from '../paths'
+import {
+  createCredentialStore,
+  workspaceEnvCredentialKey,
+  type CredentialCipher,
+  type CredentialStore,
+} from '../security/credential-store'
 import type { CodingAgentAdapter } from './adapters/coding-agent-adapter'
 import { createAgentManager, type AgentManager } from './agent-manager'
 import { createBuiltInAgentRegistry } from './agent-registry'
@@ -98,7 +104,11 @@ function mockAdapter(
   }
 }
 
-function setup(concurrency?: ConcurrencyConfig, failAgentEventWrites = false): TestContext {
+function setup(
+  concurrency?: ConcurrencyConfig,
+  failAgentEventWrites = false,
+  credentials?: CredentialStore,
+): TestContext {
   const connection = new Database(':memory:')
   connection.pragma('foreign_keys = ON')
   const migrated = migrateDatabase(connection)
@@ -168,6 +178,7 @@ function setup(concurrency?: ConcurrencyConfig, failAgentEventWrites = false): T
     runLogs: createRunLogStore({ paths }),
     createRunId: () => `run-${String(nextRun++)}`,
     now: () => '2026-09-10T00:00:02.000Z',
+    ...(credentials === undefined ? {} : { credentials }),
     ...(concurrency === undefined
       ? {}
       : { resolveConcurrency: () => ({ ok: true as const, data: concurrency }) }),
@@ -1017,5 +1028,85 @@ describe('AgentManager permission projection (TASK-077)', () => {
     const files = context.paths.runFiles('run-1')
     if (!files.ok) throw new Error(files.error.message)
     expect(existsSync(join(files.data.directory, 'permission-settings.json'))).toBe(false)
+  })
+})
+
+/** Deterministic stand-in for safeStorage: reversibly "encrypts" via base64. */
+function mockCipher(available = true): CredentialCipher {
+  return {
+    isAvailable: () => available,
+    encrypt: (plaintext) => `enc:${Buffer.from(plaintext, 'utf8').toString('base64')}`,
+    decrypt: (ciphertext) =>
+      Buffer.from(ciphertext.slice('enc:'.length), 'base64').toString('utf8'),
+  }
+}
+
+describe('AgentManager workspace env secrets (TASK-088)', () => {
+  const SECRET = 'sk-live-secret-value'
+
+  function setupWithSecrets(cipherAvailable = true): {
+    context: TestContext
+    store: CredentialStore
+    ref: string
+    credentialPath: string
+  } {
+    const home = mkdtempSync(join(tmpdir(), 'teskra-agent-secrets-'))
+    homes.push(home)
+    const credentialPath = createTeskraPaths({ TESKRA_HOME: home }).credentials()
+    const store = createCredentialStore({
+      paths: createTeskraPaths({ TESKRA_HOME: home }),
+      cipher: mockCipher(cipherAvailable),
+    })
+    const context = setup(undefined, false, store)
+    const ref = workspaceEnvCredentialKey('workspace-1', 'OPENAI_API_KEY')
+    if (cipherAvailable) {
+      expect(store.set(ref, SECRET).ok).toBe(true)
+    }
+    const updated = context.workspaces.update('workspace-1', {
+      env: { PLAIN_VAR: 'visible', OPENAI_API_KEY: { secretRef: ref } },
+    })
+    if (!updated.ok) throw new Error(updated.error.message)
+    return { context, store, ref, credentialPath }
+  }
+
+  it('resolves secret refs into the process environment only — never into the Run directory', async () => {
+    const { context, ref, credentialPath } = setupWithSecrets()
+    const started = await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    if (!started.ok) throw new Error(started.error.message)
+
+    // The launched process receives the decrypted value.
+    const request = vi.mocked(context.adapters.codex.start).mock.calls[0]?.[0]
+    expect(request?.workspace.env).toEqual({ PLAIN_VAR: 'visible', OPENAI_API_KEY: SECRET })
+
+    // Acceptance: the secret appears neither in env_json nor in any Run file.
+    const persisted = context.workspaces.getById('workspace-1')
+    expect(persisted.ok && persisted.data?.env).toEqual({
+      PLAIN_VAR: 'visible',
+      OPENAI_API_KEY: { secretRef: ref },
+    })
+    const files = context.paths.runFiles('run-1')
+    if (!files.ok) throw new Error(files.error.message)
+    for (const file of [files.data.manifest, files.data.events, files.data.terminal]) {
+      expect(readFileSync(file, 'utf8')).not.toContain(SECRET)
+    }
+    // The credential file itself holds ciphertext only.
+    expect(readFileSync(credentialPath, 'utf8')).not.toContain(SECRET)
+  })
+
+  it('fails the Run explicitly when the referenced credential is missing', async () => {
+    const { context, store } = setupWithSecrets()
+    expect(store.delete(workspaceEnvCredentialKey('workspace-1', 'OPENAI_API_KEY')).ok).toBe(true)
+    const started = await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    expect(started.ok).toBe(false)
+    if (!started.ok) expect(started.error.code).toBe('VALIDATION_FAILED')
+    expect(vi.mocked(context.adapters.codex.start).mock.calls).toEqual([])
+  })
+
+  it('fails the Run explicitly when the cipher is unavailable', async () => {
+    const { context } = setupWithSecrets(false)
+    const started = await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    expect(started.ok).toBe(false)
+    if (!started.ok) expect(started.error.code).toBe('CAPABILITY_NOT_AVAILABLE')
+    expect(vi.mocked(context.adapters.codex.start).mock.calls).toEqual([])
   })
 })

@@ -53,6 +53,11 @@ import { createResumeService } from '../recovery/resume-service'
 import { createReviewCollector } from '../agents/review-collector'
 import { createReviewPanelService } from '../agents/review-panel-service'
 import { createReviewerService } from '../agents/reviewer-service'
+import {
+  createCredentialStore,
+  createUnavailableCipher,
+  type CredentialCipher,
+} from '../security/credential-store'
 import { createTerminalManager } from '../terminal/terminal-manager'
 import { createCriteriaManager } from '../tasks/criteria-manager'
 import { createTaskManager } from '../tasks/task-manager'
@@ -93,6 +98,12 @@ export interface ComposeRuntimeOptions {
   readonly includeDevelopmentAgents?: boolean
   /** Test/dev override for the repository-distributed Fake Agent script. */
   readonly fakeAgentScriptPath?: string
+  /**
+   * TASK-088: OS-backed encryption provider (Electron safeStorage), injected
+   * by main/index.ts to keep the Runtime Electron-free. Without it the
+   * Credential Store degrades explicitly to "unavailable".
+   */
+  readonly credentialCipher?: CredentialCipher
 }
 
 function createRepositories(connection: TeskraDatabase['connection']) {
@@ -178,8 +189,18 @@ export async function composeTeskraRuntime(
 
   const runtimeFor = (ref: WorkspaceRuntimeRef) =>
     createWorkspaceRuntime(ref, { paths, hostPlatform: options.hostPlatform, wsl: wslInfo })
+  const credentials = createCredentialStore({
+    paths,
+    cipher: options.credentialCipher ?? createUnavailableCipher(),
+  })
+  if (!credentials.isAvailable()) {
+    getLogger('security').warn(
+      'Credential encryption is unavailable; sensitive values will not be persisted.',
+    )
+  }
   const workspaceManager = createWorkspaceManager(repositories.workspaces, {
     createRuntime: runtimeFor,
+    credentials,
   })
   const processManager = createProcessManager({
     events,
@@ -190,6 +211,7 @@ export async function composeTeskraRuntime(
     events,
     workspaces: repositories.workspaces,
     resolveRuntime: (workspace) => runtimeFor(workspace.runtime),
+    credentials,
   })
   const taskManager = createTaskManager({
     tasks: repositories.tasks,
@@ -337,6 +359,7 @@ export async function composeTeskraRuntime(
     paths,
     runLogs,
     permissions: permissionManager,
+    credentials,
     resolveConcurrency: (workspaceId) => {
       const resolved = config.resolve({ workspaceId })
       return resolved.ok ? { ok: true, data: resolved.data.config.concurrency } : resolved
@@ -785,9 +808,14 @@ export async function composeTeskraRuntime(
       setDefaultWslDistribution: (name) => wsl.setDefaultDistribution(name),
       doctor: (request) => doctor.run(request),
     },
+    credential: {
+      status: () => ({ ok: true, data: { available: credentials.isAvailable() } }),
+      set: ({ key, value }) => credentials.set(key, value),
+      delete: ({ key }) => credentials.delete(key),
+      list: () => credentials.list(),
+    },
     settings: {
-      resolveConfig: (request = {}) => config.resolve(request),
-      updateConfig: (request) => {
+      resolveConfig: (request = {}) => config.resolve(request),      updateConfig: (request) => {
         if (request.layer === 'global') {
           return config.updateGlobal(request.patch)
         }

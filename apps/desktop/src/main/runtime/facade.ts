@@ -23,6 +23,8 @@ import type {
   CriterionIdRequest,
   CriterionScoreRecord,
   CreatePermissionRuleRequest,
+  CredentialStoreStatus,
+  DeleteCredentialRequest,
   DiffResult,
   DoctorReport,
   FutureRuntimePortName,
@@ -81,6 +83,7 @@ import type {
   SelectWorkspaceDirectoryRequest,
   SendAgentRunInputRequest,
   SetAgentExecutableOverrideRequest,
+  SetCredentialRequest,
   StartFullWorkflowRequest,
   StartReviewPanelRequest,
   FullWorkflowRunSummary,
@@ -164,6 +167,17 @@ export interface SettingsPort {
   resolveConfig(request?: ResolveConfigRequest): IpcResult<ResolvedConfig>
   updateConfig(request: UpdateConfigRequest): IpcResult<ResolvedConfig>
   openDirectory(request: OpenSystemDirectoryRequest): Promise<IpcResult<void>>
+}
+
+/**
+ * TASK-088: credential set/delete/list plus availability. There is no `get` —
+ * plaintext values never cross into the Renderer; `list` returns key names.
+ */
+export interface CredentialPort {
+  status(): IpcResult<CredentialStoreStatus>
+  set(request: SetCredentialRequest): IpcResult<void>
+  delete(request: DeleteCredentialRequest): IpcResult<boolean>
+  list(): IpcResult<readonly string[]>
 }
 
 /** TASK-079: externalized prompt templates (built-in + repo-local overrides). */
@@ -310,6 +324,7 @@ export interface TeskraRuntime {
   readonly terminal: TerminalPort
   readonly system: SystemPort
   readonly settings: SettingsPort
+  readonly credential: CredentialPort
   readonly prompts: PromptPort
   /** Main-process event source consumed only by RendererEventBridge. */
   readonly events: RuntimeEventSource

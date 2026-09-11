@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import {
   approvalModeSchema,
   DEFAULT_CONFIG,
+  isWorkspaceSecretRef,
   providerSessionRefSchema,
   type AgentDefinition,
   type AgentStartRequest,
@@ -17,6 +18,7 @@ import {
   type StartAgentRunRequest,
   type TaskStatus,
   type WorkbenchEvents,
+  type Workspace,
 } from '@teskra/contracts'
 
 import type { AgentEventRepository } from '../db/repositories/agent-event-repository'
@@ -30,6 +32,7 @@ import { type InternalAppError, toPublicError } from '../errors'
 import { getLogger } from '../logger'
 import type { TeskraPaths } from '../paths'
 import { buildHandoffContext } from '@teskra/shared'
+import { resolveEnvReferences, type CredentialStore } from '../security/credential-store'
 import type { AgentRegistry } from './agent-registry'
 import { createAgentOutputBatcher } from './agent-output-batcher'
 import { createHandoffCollector, type HandoffCollector } from './handoff-collector'
@@ -77,6 +80,14 @@ export interface AgentManagerDeps {
    * bare approval-mode default (TASK-077 behavior).
    */
   readonly permissions?: AgentPermissionPreparer
+  /**
+   * TASK-088: workspace env secret refs (`{ secretRef }`) are resolved to
+   * plaintext through the Credential Store at launch time. The plaintext is
+   * only ever handed to the process environment — never persisted, logged,
+   * or written to the Run directory. A Run whose secret cannot be resolved
+   * fails explicitly instead of launching without it.
+   */
+  readonly credentials?: CredentialStore
 }
 
 function fail<T>(error: InternalAppError): IpcResult<T> {
@@ -171,6 +182,22 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     deps.handoffCollector ??
     createHandoffCollector({ handoffs: deps.handoffs, paths: deps.paths, now })
   let advancingQueue = false
+
+  /**
+   * TASK-088: returns the workspace with env secret refs replaced by their
+   * resolved plaintext for process launch. Workspaces without refs pass
+   * through untouched.
+   */
+  const resolveLaunchWorkspace = (workspace: Workspace): IpcResult<Workspace> => {
+    if (
+      workspace.env === undefined ||
+      !Object.values(workspace.env).some(isWorkspaceSecretRef)
+    ) {
+      return { ok: true, data: workspace }
+    }
+    const env = resolveEnvReferences(workspace.env, deps.credentials)
+    return env.ok ? { ok: true, data: { ...workspace, env: env.data } } : env
+  }
 
   const appendEvent = (
     runId: string,
@@ -520,6 +547,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       const workspace = deps.workspaces.getById(request.workspaceId)
       if (!workspace.ok) return workspace
       if (workspace.data === null) return missing('workspace', request.workspaceId)
+      const launchWorkspace = resolveLaunchWorkspace(workspace.data)
+      if (!launchWorkspace.ok) return launchWorkspace
 
       const detected = await adapter.detect({ runtime: workspace.data.runtime })
       if (!detected.ok) return detected
@@ -662,7 +691,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         resumed: false,
         request: {
           runId,
-          workspace: workspace.data,
+          workspace: launchWorkspace.data,
           ...(task === undefined ? {} : { task }),
           mode,
           approvalMode,
@@ -722,6 +751,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       const workspace = deps.workspaces.getById(run.workspaceId)
       if (!workspace.ok) return workspace
       if (workspace.data === null) return missing('workspace', run.workspaceId)
+      const launchWorkspace = resolveLaunchWorkspace(workspace.data)
+      if (!launchWorkspace.ok) return launchWorkspace
       const detected = await adapter.detect({ runtime: workspace.data.runtime, refresh: true })
       if (!detected.ok) return detected
       if (!detected.data.installed) {
@@ -806,7 +837,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         ...(resumeSession === undefined ? {} : { resumeSession }),
         request: {
           runId: run.id,
-          workspace: workspace.data,
+          workspace: launchWorkspace.data,
           ...(task?.data === null || task?.data === undefined ? {} : { task: task.data }),
           mode: 'interactive',
           approvalMode: run.approvalMode,

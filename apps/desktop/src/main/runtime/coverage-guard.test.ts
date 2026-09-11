@@ -21,6 +21,7 @@ const COVERED_MODULES = [
   'config',
   'prompts',
   'workflows',
+  'security',
 ]
 
 /** Type declarations and pure data definitions carry no runtime behavior. */
@@ -30,6 +31,10 @@ const EXEMPT = new Set([
   // Pure AgentDefinition data; exercised through the fake agent adapter and
   // registry tests, which import it via the definitions barrel.
   'agents/definitions/fake.ts',
+  // Thin electron safeStorage adapter (TASK-088); importable only inside the
+  // Electron main process, so it is wired by main/index.ts and exercised via
+  // the injected CredentialCipher interface in credential-store tests.
+  'security/safe-storage-cipher.ts',
 ])
 
 function collect(dir: string, predicate: (entry: string) => boolean): string[] {

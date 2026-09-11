@@ -46,6 +46,14 @@ import {
   type RecordArtifactRequest,
   type ScanRunArtifactsRequest,
 } from './artifact'
+import {
+  credentialStoreStatusSchema,
+  deleteCredentialRequestSchema,
+  setCredentialRequestSchema,
+  type CredentialStoreStatus,
+  type DeleteCredentialRequest,
+  type SetCredentialRequest,
+} from './credential'
 import { ipcResultSchema, type IpcResult } from './error'
 import { handoffRecordSchema, type HandoffRecord } from './handoff'
 import {
@@ -374,6 +382,10 @@ export const IPC_CHANNELS = {
   runtimeRequireCapability: 'teskra:runtime:require-capability',
   settingsResolveConfig: 'teskra:settings:config:resolve',
   settingsUpdateConfig: 'teskra:settings:config:update',
+  credentialStatus: 'teskra:credential:status',
+  credentialSet: 'teskra:credential:set',
+  credentialDelete: 'teskra:credential:delete',
+  credentialList: 'teskra:credential:list',
   systemOpenDirectory: 'teskra:system:directory:open',
   doctorRun: 'teskra:doctor:run',
   promptListTemplates: 'teskra:prompt:list-templates',
@@ -828,6 +840,28 @@ export const settingsUpdateConfigChannel = channel(
   updateConfigRequestSchema,
   resolvedConfigSchema,
 )
+// TASK-088: the Renderer can store/delete/enumerate credential keys, but no
+// channel returns a plaintext value.
+export const credentialStatusChannel = channel(
+  IPC_CHANNELS.credentialStatus,
+  noRequestSchema,
+  credentialStoreStatusSchema,
+)
+export const credentialSetChannel = channel(
+  IPC_CHANNELS.credentialSet,
+  setCredentialRequestSchema,
+  voidResponseSchema,
+)
+export const credentialDeleteChannel = channel(
+  IPC_CHANNELS.credentialDelete,
+  deleteCredentialRequestSchema,
+  z.boolean(),
+)
+export const credentialListChannel = channel(
+  IPC_CHANNELS.credentialList,
+  noRequestSchema,
+  z.array(z.string()),
+)
 export const systemOpenDirectoryChannel = channel(
   IPC_CHANNELS.systemOpenDirectory,
   openSystemDirectoryRequestSchema,
@@ -990,6 +1024,10 @@ export const ipcChannelDefinitions = {
   runtimeRequireCapability: runtimeRequireCapabilityChannel,
   settingsResolveConfig: settingsResolveConfigChannel,
   settingsUpdateConfig: settingsUpdateConfigChannel,
+  credentialStatus: credentialStatusChannel,
+  credentialSet: credentialSetChannel,
+  credentialDelete: credentialDeleteChannel,
+  credentialList: credentialListChannel,
   systemOpenDirectory: systemOpenDirectoryChannel,
   doctorRun: doctorRunChannel,
   promptListTemplates: promptListTemplatesChannel,
@@ -1134,6 +1172,13 @@ export interface TeskraBridge {
     resolveConfig(request?: ResolveConfigRequest): Promise<IpcResult<ResolvedConfig>>
     updateConfig(request: UpdateConfigRequest): Promise<IpcResult<ResolvedConfig>>
     openDirectory(request: OpenSystemDirectoryRequest): Promise<IpcResult<void>>
+  }
+  readonly credential: {
+    status(): Promise<IpcResult<CredentialStoreStatus>>
+    set(request: SetCredentialRequest): Promise<IpcResult<void>>
+    delete(request: DeleteCredentialRequest): Promise<IpcResult<boolean>>
+    /** Key names only — plaintext values never cross into the Renderer. */
+    list(): Promise<IpcResult<string[]>>
   }
   readonly prompts: {
     list(request?: ListPromptTemplatesRequest): Promise<IpcResult<PromptTemplateInfo[]>>

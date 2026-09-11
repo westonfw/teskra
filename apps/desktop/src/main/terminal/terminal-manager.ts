@@ -13,6 +13,10 @@ import type { WorkspaceRepository } from '../db/repositories'
 import type { EventBus } from '../events/event-bus'
 import { type InternalAppError, toPublicError } from '../errors'
 import type { ProcessManager } from '../process/process-manager'
+import {
+  resolveEnvReferencesBestEffort,
+  type CredentialStore,
+} from '../security/credential-store'
 import { createWorkspaceRuntime, type WorkspaceRuntime } from '../workspace/runtime'
 
 type TerminalProcesses = Pick<ProcessManager, 'start' | 'write' | 'resize' | 'stop'>
@@ -35,6 +39,12 @@ export interface TerminalManagerDeps {
   readonly resolveRuntime?: (workspace: Workspace) => IpcResult<WorkspaceRuntime>
   readonly now?: () => string
   readonly createId?: () => string
+  /**
+   * TASK-088: workspace env secret refs are resolved through the Credential
+   * Store for the terminal process. Unresolvable secrets are omitted (logged
+   * by key name) rather than blocking terminal creation.
+   */
+  readonly credentials?: CredentialStore
 }
 
 const DEFAULT_TITLES: Record<TerminalShell, string> = {
@@ -131,7 +141,12 @@ export function createTerminalManager(deps: TerminalManagerDeps): TerminalManage
         command: launch.data.command,
         args: launch.data.args,
         cwd: workspace.data.path,
-        env: workspace.data.env,
+        env:
+          workspace.data.env === undefined
+            ? undefined
+            : resolveEnvReferencesBestEffort(workspace.data.env, deps.credentials, {
+                workspaceId: workspace.data.id,
+              }),
         cols: request.cols,
         rows: request.rows,
         workspaceId: workspace.data.id,

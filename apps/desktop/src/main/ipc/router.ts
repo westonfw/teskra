@@ -475,6 +475,22 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.settings.updateConfig(request)),
   )
   register(
+    ipcChannelDefinitions.credentialStatus,
+    withRuntime((runtime) => runtime.credential.status()),
+  )
+  register(
+    ipcChannelDefinitions.credentialSet,
+    withRuntime((runtime, request) => runtime.credential.set(request)),
+  )
+  register(
+    ipcChannelDefinitions.credentialDelete,
+    withRuntime((runtime, request) => runtime.credential.delete(request)),
+  )
+  register(
+    ipcChannelDefinitions.credentialList,
+    withRuntime((runtime) => runtime.credential.list()),
+  )
+  register(
     ipcChannelDefinitions.systemOpenDirectory,
     withRuntime((runtime, request) => runtime.settings.openDirectory(request)),
   )

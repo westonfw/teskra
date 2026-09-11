@@ -191,6 +191,70 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     composed.data.dispose()
   })
 
+  it('mounts the Credential Store port with an explicit unavailable degrade (TASK-088)', async () => {
+    const home = makeHome()
+    const composed = await composeTeskraRuntime({
+      paths: createTeskraPaths({ TESKRA_HOME: home }),
+      commands: wslCommands(),
+      hostPlatform: 'linux',
+      initializeLogs: false,
+    })
+    if (!composed.ok) throw new Error('expected runtime')
+
+    // No cipher injected → explicit degrade, never silent plaintext.
+    expect(composed.data.credential.status()).toEqual({ ok: true, data: { available: false } })
+    const set = composed.data.credential.set({ key: 'OPENAI_API_KEY', value: 'sk-compose-secret' })
+    expect(set.ok).toBe(false)
+    if (!set.ok) expect(set.error.code).toBe('CAPABILITY_NOT_AVAILABLE')
+    expect(existsSync(join(home, 'credentials.json'))).toBe(false)
+
+    // Workspace env secrets are refused end-to-end while unavailable.
+    const repo = join(home, 'repo')
+    mkdirSync(repo)
+    const workspace = composed.data.workspace.create({
+      name: 'Demo',
+      runtime: { kind: 'wsl', distro: 'Ubuntu-24.04' },
+      path: repo,
+      env: { OPENAI_API_KEY: 'sk-compose-secret' },
+    })
+    expect(workspace.ok).toBe(false)
+    if (!workspace.ok) expect(workspace.error.code).toBe('CAPABILITY_NOT_AVAILABLE')
+    composed.data.dispose()
+  })
+
+  it('stores and resolves credentials through an injected cipher (TASK-088)', async () => {
+    const home = makeHome()
+    const composed = await composeTeskraRuntime({
+      paths: createTeskraPaths({ TESKRA_HOME: home }),
+      commands: wslCommands(),
+      hostPlatform: 'linux',
+      initializeLogs: false,
+      credentialCipher: {
+        isAvailable: () => true,
+        encrypt: (plaintext) => `enc:${Buffer.from(plaintext, 'utf8').toString('base64')}`,
+        decrypt: (ciphertext) =>
+          Buffer.from(ciphertext.slice('enc:'.length), 'base64').toString('utf8'),
+      },
+    })
+    if (!composed.ok) throw new Error('expected runtime')
+
+    expect(composed.data.credential.status()).toEqual({ ok: true, data: { available: true } })
+    expect(composed.data.credential.set({ key: 'OPENAI_API_KEY', value: 'sk-compose-secret' })).toEqual({
+      ok: true,
+      data: undefined,
+    })
+    // list exposes key names only; no get channel exists on the facade.
+    expect(composed.data.credential.list()).toEqual({ ok: true, data: ['OPENAI_API_KEY'] })
+    expect(readFileSync(join(home, 'credentials.json'), 'utf8')).not.toContain(
+      'sk-compose-secret',
+    )
+    expect(composed.data.credential.delete({ key: 'OPENAI_API_KEY' })).toEqual({
+      ok: true,
+      data: true,
+    })
+    composed.data.dispose()
+  })
+
   it('runs the repository Fake Agent through the composed Agent lifecycle', async () => {
     const home = makeHome()
     const composed = await composeTeskraRuntime({
