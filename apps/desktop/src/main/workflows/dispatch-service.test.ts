@@ -86,6 +86,7 @@ interface Fixture {
   readonly commands: CommandRunner
   readonly adapters: { readonly codex: CodingAgentAdapter; readonly fake: CodingAgentAdapter }
   readonly agents: ReturnType<typeof createAgentManager>
+  readonly engine: ReturnType<typeof createWorkflowEngine>
   readonly worktrees: ReturnType<typeof createWorktreeRepository>
   readonly handoffs: ReturnType<typeof createHandoffRepository>
   readonly workflowRuns: ReturnType<typeof createWorkflowRunRepository>
@@ -214,6 +215,7 @@ async function setup(): Promise<Fixture> {
     commands,
     adapters: { codex, fake },
     agents,
+    engine,
     worktrees,
     handoffs,
     workflowRuns,
@@ -365,6 +367,36 @@ describe('DispatchService (TASK-059)', () => {
     const result = requireOk(await dispatched)
     expect(result.run.status).toBe('failed')
     expect(result.agentRun.status).toBe('failed')
+  })
+
+  /**
+   * Regression: cancelling a running dispatch cancelled the AgentRun, but
+   * dispatch mapped the cancelled step (status 'failed' with
+   * result.cancelled) to run 'failed' — overwriting the 'cancelled' status
+   * the engine had just set.
+   */
+  it('reports the run cancelled when the user cancels the dispatch', async () => {
+    const fixture = await setup()
+
+    const dispatched = fixture.service.dispatch({
+      workspaceId: 'workspace-1',
+      taskId: 'task-1',
+      agent: 'codex',
+    })
+    const start = await awaitAdapterStart(fixture.adapters.codex)
+    await vi.waitFor(() => {
+      const agentRun = fixture.agents.get(start.runId)
+      expect(agentRun.ok && agentRun.data?.status).toBe('running')
+    })
+    const workflowRun = requireOk(fixture.workflowRuns.listRuns())[0]
+    if (workflowRun === undefined) throw new Error('expected a workflow run')
+
+    const cancelled = await fixture.engine.cancel(workflowRun.id)
+    expect(cancelled.ok).toBe(true)
+
+    const result = requireOk(await dispatched)
+    expect(result.run.status).toBe('cancelled')
+    expect(result.agentRun.status).toBe('cancelled')
   })
 
   it('refuses unknown agents and tasks from another workspace without creating a worktree', async () => {

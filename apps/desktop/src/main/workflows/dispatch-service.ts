@@ -296,10 +296,13 @@ export function createDispatchService(deps: DispatchServiceDeps): DispatchServic
       const step = settled.data.steps.find(
         (entry) => entry.nodeId === DISPATCH_NODE_ID && entry.iteration === run.currentIteration,
       )
+      // A cancelled agent settles its step 'failed' with result.cancelled
+      // (the engine's outcome model has no cancel outcome) — do not report
+      // a user cancellation as a failure.
       const finalStatus: WorkflowRunStatus =
         step?.status === 'completed'
           ? 'completed'
-          : step?.status === 'cancelled'
+          : step?.status === 'cancelled' || step?.result?.['cancelled'] === true
             ? 'cancelled'
             : 'failed'
       const finalized = deps.runs.setRunStatus(run.id, finalStatus)
