@@ -57,6 +57,7 @@ export function MemoryPanel({ workspaceId, taskId }: MemoryPanelProps) {
   const saving = useMemoryStore((state) => state.saving)
   const error = useMemoryStore((state) => state.error)
   const synchronize = useMemoryStore((state) => state.synchronize)
+  const previewContext = useMemoryStore((state) => state.previewContext)
   const create = useMemoryStore((state) => state.create)
   const update = useMemoryStore((state) => state.update)
   const remove = useMemoryStore((state) => state.remove)
@@ -76,12 +77,14 @@ export function MemoryPanel({ workspaceId, taskId }: MemoryPanelProps) {
   const handlePreview = async (): Promise<void> => {
     setPreviewing(true)
     try {
-      const built = await window.teskra.context.preview({
+      // Failures surface through the store's error alert; only a successful
+      // build opens the preview modal.
+      const built = await previewContext({
         workspaceId,
         ...(taskId === undefined ? {} : { taskId }),
       })
-      if (built.ok) {
-        setPreview(built.data)
+      if (built !== undefined) {
+        setPreview(built)
         setPreviewOpen(true)
       }
     } finally {

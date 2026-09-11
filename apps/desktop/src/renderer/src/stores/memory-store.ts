@@ -1,4 +1,6 @@
 import type {
+  BuildContextRequest,
+  BuiltContext,
   CreateMemoryRequest,
   IpcResult,
   ListMemoriesRequest,
@@ -16,6 +18,9 @@ export interface MemoryStoreBridge {
     update(request: UpdateMemoryRequest): Promise<IpcResult<Memory | null>>
     delete(request: MemoryIdRequest): Promise<IpcResult<boolean>>
   }
+  readonly context: {
+    preview(request: BuildContextRequest): Promise<IpcResult<BuiltContext>>
+  }
 }
 
 interface MemoryState {
@@ -25,6 +30,8 @@ interface MemoryState {
   readonly saving: boolean
   readonly error?: PublicAppError
   synchronize(workspaceId: string): Promise<void>
+  /** Builds the Run-context preview; undefined on failure (error is set). */
+  previewContext(request: BuildContextRequest): Promise<BuiltContext | undefined>
   create(request: CreateMemoryRequest): Promise<boolean>
   update(request: UpdateMemoryRequest): Promise<boolean>
   remove(id: string): Promise<boolean>
@@ -63,6 +70,21 @@ export function createMemoryStore(getBridge: () => MemoryStoreBridge) {
         set({ memories: listed.data, loading: false })
       } catch {
         if (generation === loadGeneration) set({ loading: false, error: transportError })
+      }
+    },
+
+    async previewContext(request) {
+      set({ error: undefined })
+      try {
+        const result = await getBridge().context.preview(request)
+        if (!result.ok) {
+          set({ error: result.error })
+          return undefined
+        }
+        return result.data
+      } catch {
+        set({ error: transportError })
+        return undefined
       }
     },
 
