@@ -44,6 +44,20 @@ describe('redactSecrets (TASK-004)', () => {
     expect(redactSecrets(input)).toEqual(input)
   })
 
+  it('serializes Error instances instead of dropping their message and stack', () => {
+    const redacted = redactSecrets({ runId: 'r1', cause: new Error('spawn failed') }) as {
+      cause: Record<string, unknown>
+    }
+    expect(redacted['cause']).toMatchObject({ name: 'Error', message: 'spawn failed' })
+    expect(typeof redacted['cause']['stack']).toBe('string')
+  })
+
+  it('still redacts secrets inside an Error message and stack', () => {
+    const error = new Error('auth failed for ghp_leakedtoken000')
+    const redacted = redactSecrets({ cause: error }) as { cause: Record<string, unknown> }
+    expect(JSON.stringify(redacted)).not.toContain('ghp_leakedtoken000')
+  })
+
   it('does not recurse forever on cyclic structures', () => {
     const cyclic: Record<string, unknown> = { token: 'x' }
     cyclic['self'] = cyclic

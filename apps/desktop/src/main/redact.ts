@@ -54,6 +54,22 @@ function redactValue(value: unknown, seen: Map<object, unknown>): unknown {
   if (typeof value === 'string') {
     return redactString(value)
   }
+  if (value instanceof Error) {
+    // Error message/stack are non-enumerable, so the generic object walk
+    // below would serialize every Error as {} — losing it from the log.
+    if (seen.has(value)) {
+      return seen.get(value)
+    }
+    const serialized: Record<string, unknown> = {
+      name: value.name,
+      message: redactString(value.message),
+    }
+    seen.set(value, serialized)
+    if (value.stack !== undefined) {
+      serialized['stack'] = redactString(value.stack)
+    }
+    return serialized
+  }
   if (Array.isArray(value)) {
     if (seen.has(value)) {
       return seen.get(value)
