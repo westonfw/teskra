@@ -33,6 +33,7 @@ import { agentRuntimeKey, useAgentStore } from '../stores/agent-store'
 import { useTaskStore } from '../stores/task-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
 import { RunWorktreePanel } from './run-worktree-panel'
+import { taskDraftResetKey } from './task-draft'
 import { CriteriaPanel } from './criteria-panel'
 import { MemoryPanel } from './memory-panel'
 import { ArtifactPanel } from './artifact-panel'
@@ -111,11 +112,15 @@ export function TaskPage() {
     }
   }, [loadDefinitions, loadHealth, startRunSynchronization, startTaskSynchronization, workspace])
 
+  // Re-initialize the draft fields only when the Task they were derived from
+  // actually changes — a refresh that only touches status/updatedAt must not
+  // wipe the edits in progress (taskDraftResetKey).
+  const draftResetKey = taskDraftResetKey(selected)
   useEffect(() => {
     setTitle(selected?.title ?? '')
     setDescription(selected?.description ?? '')
     setPrompt(selected?.description ?? selected?.title ?? '')
-  }, [selected])
+  }, [draftResetKey])
 
   useEffect(() => {
     if (agentId === undefined && definitions[0] !== undefined) setAgentId(definitions[0].id)
