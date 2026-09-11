@@ -233,13 +233,19 @@ export function createGitManager(deps: GitManagerDeps): GitManager {
         .split('\n')
         .filter((line) => line.length > 0)
         .map((line) => ({ current: line.startsWith('*\0'), name: line.slice(2).trimEnd() }))
-      const current = branches.find((branch) => branch.current)?.name
+      // In a detached HEAD git lists a pseudo-ref as the current "branch"
+      // (`(HEAD detached at …)` / `(no branch, rebasing …)`): it is not a real
+      // branch, so it must not surface as `current` or in the branch list.
+      const isPseudoRef = (entry: { current: boolean; name: string }): boolean =>
+        entry.current && /^\((?:HEAD detached|no branch)\b/u.test(entry.name)
+      const real = branches.filter((entry) => !isPseudoRef(entry))
+      const current = real.find((branch) => branch.current)?.name
       return {
         ok: true,
         data: {
           current,
           detached: current === undefined,
-          branches: branches.map(({ name }) => name),
+          branches: real.map(({ name }) => name),
         },
       }
     },

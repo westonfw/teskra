@@ -119,6 +119,61 @@ describe('GitManager (TASK-035)', () => {
     })
   })
 
+  it('reports a detached HEAD as detached, not as a pseudo-branch', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'teskra-git-detached-'))
+    directories.push(directory)
+    const commands = createCommandRunner({ hostPlatform: 'linux' })
+    for (const args of [
+      ['init', '--initial-branch=main'],
+      ['config', 'user.name', 'Teskra Test'],
+      ['config', 'user.email', 'teskra@example.invalid'],
+    ]) {
+      const result = await commands.run({ command: 'git', args, cwd: directory, timeoutMs: 15_000 })
+      if (!result.ok || result.data.exitCode !== 0) throw new Error('Git fixture setup failed')
+    }
+    writeFileSync(join(directory, 'a.txt'), 'a\n')
+    await commands.run({ command: 'git', args: ['add', '--all'], cwd: directory, timeoutMs: 15_000 })
+    await commands.run({
+      command: 'git',
+      args: ['commit', '--message', 'fixture'],
+      cwd: directory,
+      timeoutMs: 15_000,
+    })
+    const workspaces = repository()
+    workspaces.create({
+      id: 'workspace-1',
+      name: 'Detached fixture',
+      runtime: { kind: 'wsl' },
+      path: directory,
+    })
+    const manager = createGitManager({
+      commands,
+      workspaces,
+      events: createEventBus(),
+      resolveRuntime: (candidate) =>
+        createWorkspaceRuntime(candidate.runtime, { hostPlatform: 'linux' }),
+    })
+
+    expect(await manager.branch('workspace-1')).toMatchObject({
+      ok: true,
+      data: { current: 'main', detached: false, branches: ['main'] },
+    })
+
+    const detached = await commands.run({
+      command: 'git',
+      args: ['checkout', '--detach', 'HEAD'],
+      cwd: directory,
+      timeoutMs: 15_000,
+    })
+    if (!detached.ok || detached.data.exitCode !== 0) throw new Error('git checkout --detach failed')
+
+    const result = await manager.branch('workspace-1')
+    expect(result).toMatchObject({
+      ok: true,
+      data: { current: undefined, detached: true, branches: ['main'] },
+    })
+  })
+
   it('uses a Windows WorkspaceRuntime and returns sanitized structured Git errors', async () => {
     const workspaces = repository()
     const workspace = workspaces.create({
