@@ -212,7 +212,7 @@ describe('ReconciliationService (TASK-040)', () => {
     // nothing about the worktree — it must not be reclassified as orphaned.
     context.commands.run = vi.fn(async () => ({
       ok: false as const,
-      error: { code: 'COMMAND_TIMEOUT', message: 'timed out', retryable: true },
+      error: { code: 'COMMAND_TIMEOUT' as const, message: 'timed out', retryable: true },
     }))
 
     const result = await context.service().reconcile()
