@@ -444,7 +444,13 @@ export function registerIpcRouter(
   )
   register(
     ipcChannelDefinitions.runtimeRequireCapability,
-    withRuntime((runtime, request) => requireRuntimePort(runtime, request.name)),
+    withRuntime((runtime, request) => {
+      const result = requireRuntimePort(runtime, request.name)
+      // A runtime port is a live Main-process object with methods; it cannot
+      // survive Electron structured clone. The channel is a capability probe,
+      // so only the availability signal crosses IPC.
+      return result.ok ? { ok: true, data: null } : result
+    }),
   )
   register(
     ipcChannelDefinitions.doctorRun,

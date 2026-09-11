@@ -812,6 +812,20 @@ describe('Typed IPC Router (TASK-020)', () => {
     expect(runtime.workflow.startFullWorkflow).toHaveBeenCalledTimes(1)
   })
 
+  it('returns a clone-safe capability signal instead of the live runtime port', async () => {
+    const ipc = new FakeIpcMain()
+    registerIpcRouter(ipc, fakeRuntime)
+
+    const result = (await ipc.invoke(IPC_CHANNELS.runtimeRequireCapability, {
+      name: 'task',
+    })) as IpcResult<unknown>
+    expect(result.ok).toBe(true)
+    // The response crosses Electron structured clone; a live port object with
+    // methods would make ipcRenderer.invoke reject with an unstructured error
+    // instead of resolving to an IpcResult.
+    expect(() => structuredClone(result)).not.toThrow()
+  })
+
   it('removes all handlers on dispose without touching the runtime', () => {
     const ipc = new FakeIpcMain()
     const runtime = fakeRuntime()
