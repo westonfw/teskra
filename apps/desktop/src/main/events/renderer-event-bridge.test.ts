@@ -17,9 +17,11 @@ const electron = vi.hoisted(() => {
       send: vi.fn(),
     }
     readonly show = vi.fn()
+    readonly focus = vi.fn()
     readonly loadURL = vi.fn(async () => undefined)
     readonly loadFile = vi.fn(async () => undefined)
     readonly listeners = new Map<string, () => void>()
+    minimized = false
     destroyed = false
 
     constructor(readonly options: unknown) {
@@ -33,6 +35,14 @@ const electron = vi.hoisted(() => {
     isDestroyed(): boolean {
       return this.destroyed
     }
+
+    isMinimized(): boolean {
+      return this.minimized
+    }
+
+    readonly restore = vi.fn(function (this: MockBrowserWindow) {
+      this.minimized = false
+    })
   }
 
   return { MockBrowserWindow }
@@ -87,6 +97,34 @@ describe('RendererEventBridge', () => {
         payload: { processId: 'process-1', data: 'hello' },
       })
     }
+  })
+
+  it('focuses the existing window on focusOrCreateWindow and restores it when minimized', () => {
+    const bridge = createRendererEventBridge(undefined, {
+      preloadPath: '/app/preload.js',
+      rendererHtmlPath: '/app/index.html',
+    })
+    bridge.createWindow()
+    const window = electron.MockBrowserWindow.windows[0]
+    if (window === undefined) throw new Error('expected test window')
+    window.minimized = true
+
+    bridge.focusOrCreateWindow()
+
+    expect(window.restore).toHaveBeenCalledOnce()
+    expect(window.focus).toHaveBeenCalledOnce()
+    expect(electron.MockBrowserWindow.windows).toHaveLength(1)
+  })
+
+  it('creates a window on focusOrCreateWindow when every window was closed', () => {
+    const bridge = createRendererEventBridge(undefined, {
+      preloadPath: '/app/preload.js',
+      rendererHtmlPath: '/app/index.html',
+    })
+
+    bridge.focusOrCreateWindow()
+
+    expect(electron.MockBrowserWindow.windows).toHaveLength(1)
   })
 
   it('skips closed pages and removes all EventBus listeners on dispose', () => {

@@ -17,6 +17,8 @@ export interface RendererWindowOptions {
 
 export interface RendererEventBridge {
   createWindow(): void
+  /** Brings the existing window to the front, or opens one when none exists. */
+  focusOrCreateWindow(): void
   hasWindows(): boolean
   dispose(): void
 }
@@ -67,6 +69,18 @@ export function createRendererEventBridge(
 
     hasWindows() {
       return BrowserWindow.getAllWindows().length > 0
+    },
+
+    focusOrCreateWindow() {
+      const [window] = BrowserWindow.getAllWindows()
+      if (window === undefined) {
+        this.createWindow()
+        return
+      }
+      if (window.isMinimized()) {
+        window.restore()
+      }
+      window.focus()
     },
 
     dispose() {
