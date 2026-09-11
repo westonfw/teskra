@@ -1,10 +1,11 @@
 import { FolderOpenOutlined } from '@ant-design/icons'
-import { Button, Form, Input, Modal, Radio, Select, Space } from 'antd'
+import { Alert, Button, Form, Input, Modal, Radio, Select, Space } from 'antd'
 import { useEffect, useState } from 'react'
 
 import type { RuntimeKind, WorkspaceRuntimeRef, WslDistribution } from '@teskra/contracts'
 
 import { useWorkspaceStore } from '../stores/workspace-store'
+import { detectWslDistributions } from './wsl-distributions'
 
 interface WorkspaceFormValues {
   readonly name?: string
@@ -23,6 +24,7 @@ export function WorkspaceDialog({ open, onClose, onOpened }: WorkspaceDialogProp
   const [form] = Form.useForm<WorkspaceFormValues>()
   const [distributions, setDistributions] = useState<readonly WslDistribution[]>([])
   const [detecting, setDetecting] = useState(false)
+  const [detectionError, setDetectionError] = useState<string>()
   const loading = useWorkspaceStore((state) => state.loading)
   const openWorkspace = useWorkspaceStore((state) => state.openWorkspace)
   const selectDirectory = useWorkspaceStore((state) => state.selectDirectory)
@@ -30,13 +32,18 @@ export function WorkspaceDialog({ open, onClose, onOpened }: WorkspaceDialogProp
 
   useEffect(() => {
     if (!open) return
+    let cancelled = false
     setDetecting(true)
-    window.teskra.runtime
-      .listWslDistributions()
-      .then((result) => {
-        if (result.ok) setDistributions(result.data)
-      })
-      .finally(() => setDetecting(false))
+    setDetectionError(undefined)
+    void detectWslDistributions(window.teskra.runtime).then((outcome) => {
+      if (cancelled) return
+      if (outcome.ok) setDistributions(outcome.distributions)
+      else setDetectionError(outcome.message)
+      setDetecting(false)
+    })
+    return () => {
+      cancelled = true
+    }
   }, [open])
 
   const runtimeFor = (values: WorkspaceFormValues): WorkspaceRuntimeRef =>
@@ -73,6 +80,14 @@ export function WorkspaceDialog({ open, onClose, onOpened }: WorkspaceDialogProp
             <Radio.Button value="wsl">WSL</Radio.Button>
           </Radio.Group>
         </Form.Item>
+        {kind === 'wsl' && detectionError !== undefined && (
+          <Alert
+            type="warning"
+            showIcon
+            message="WSL distributions could not be detected"
+            description={detectionError}
+          />
+        )}
         {kind === 'wsl' && (
           <Form.Item
             label="WSL distribution"
