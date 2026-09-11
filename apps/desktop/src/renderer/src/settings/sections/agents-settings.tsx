@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import type { AgentDefinition, WorkspaceRuntimeRef } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../../components/app-error-alert'
+import { permissionEnforcementInfo } from '../../permissions/permission-view-model'
 import { agentRuntimeKey, useAgentStore } from '../../stores/agent-store'
 import { useWorkspaceStore } from '../../stores/workspace-store'
 
@@ -120,7 +121,10 @@ export function AgentsSettingsSection() {
                     <Typography.Text code>{definition.executable.command}</Typography.Text>
                   </Typography.Text>
                   <Typography.Text type="secondary">
-                    Permission enforcement: {definition.permissionEnforcement}
+                    Permission enforcement:{' '}
+                    {permissionEnforcementInfo(definition.permissionEnforcement).label} (
+                    {definition.permissionEnforcement}) —{' '}
+                    {permissionEnforcementInfo(definition.permissionEnforcement).description}
                   </Typography.Text>
                   <Space size={[6, 6]} wrap>
                     {definition.routing?.strengths?.map((strength) => (

@@ -12,6 +12,7 @@ import {
   Select,
   Space,
   Spin,
+  Tabs,
   Tag,
   Timeline,
   Typography,
@@ -27,6 +28,7 @@ import { useEffect, useState } from 'react'
 import { AgentPicker } from '../agents/agent-picker'
 import { AgentRunTerminal } from '../agents/agent-run-terminal'
 import { AppErrorAlert } from '../components/app-error-alert'
+import { RunCommandsPanel } from '../permissions/run-commands-panel'
 import { useAgentStore } from '../stores/agent-store'
 import { useTaskStore } from '../stores/task-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
@@ -391,9 +393,35 @@ export function TaskPage() {
               <Tag>{label(openRun.status)}</Tag>
               <Typography.Text code>{openRun.id}</Typography.Text>
             </Space>
-            <RunWorktreePanel run={openRun} workspace={workspace} />
-            <FindingsPanel runId={openRun.id} />
-            <AgentRunTerminal key={openRun.id} run={openRun} initialData={output[openRun.id]} />
+            <Tabs
+              items={[
+                {
+                  key: 'output',
+                  label: 'Output',
+                  children: (
+                    <Space direction="vertical" size={16} className="run-detail-tab">
+                      <RunWorktreePanel run={openRun} workspace={workspace} />
+                      <FindingsPanel runId={openRun.id} />
+                      <AgentRunTerminal
+                        key={openRun.id}
+                        run={openRun}
+                        initialData={output[openRun.id]}
+                      />
+                    </Space>
+                  ),
+                },
+                {
+                  key: 'commands',
+                  label: 'Commands',
+                  children: (
+                    <RunCommandsPanel
+                      run={openRun}
+                      definition={definitions.find(({ id }) => id === openRun.agentType)}
+                    />
+                  ),
+                },
+              ]}
+            />
           </Space>
         )}
       </Drawer>

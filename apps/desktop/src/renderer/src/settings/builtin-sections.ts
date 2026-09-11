@@ -2,6 +2,7 @@ import { AdvancedSettingsSection } from './sections/advanced-settings'
 import { AgentsSettingsSection } from './sections/agents-settings'
 import { EnvironmentSettingsSection } from './sections/environment-settings'
 import { GeneralSettingsSection } from './sections/general-settings'
+import { PermissionsSettingsSection } from './sections/permissions-settings'
 import type { SettingsSectionRegistry } from './registry'
 
 export function registerBuiltInSettings(registry: SettingsSectionRegistry): void {
@@ -11,6 +12,13 @@ export function registerBuiltInSettings(registry: SettingsSectionRegistry): void
     description: 'Installed coding Agent integrations',
     order: 30,
     component: AgentsSettingsSection,
+  })
+  registry.register({
+    id: 'permissions',
+    title: 'Permissions',
+    description: 'Agent permission rules and the command audit trail',
+    order: 40,
+    component: PermissionsSettingsSection,
   })
   registry.register({
     id: 'general',
