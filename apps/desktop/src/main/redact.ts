@@ -16,8 +16,9 @@ const SECRET_KEY_PATTERN = /(token|secret|password|passwd|api_?key|credential|pr
 // Base patterns without the global flag, so they can be reused for stateless
 // detection (a /g regex carries lastIndex across .test() calls).
 const SECRET_VALUE_SOURCES: string[] = [
-  // OpenAI-style API keys
-  'sk-[A-Za-z0-9_-]+',
+  // OpenAI-style API keys. The lookbehind keeps ordinary hyphenated words
+  // ("task-manager", "flask-app", "disk-image") from being mangled.
+  '(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]+',
   // GitHub tokens (ghp_, gho_, ghu_, ghs_, ghr_) and fine-grained PATs
   'gh[pousr]_[A-Za-z0-9]+',
   'github_pat_[A-Za-z0-9_]+',

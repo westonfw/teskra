@@ -58,6 +58,18 @@ describe('redactSecrets (TASK-004)', () => {
     expect(JSON.stringify(redacted)).not.toContain('ghp_leakedtoken000')
   })
 
+  it('does not mangle ordinary hyphenated words containing "sk-"', () => {
+    for (const word of ['task-manager', 'flask-app', 'disk-image', 'mask-based', 'desk-top']) {
+      expect(redactSecrets(`working on ${word} now`)).toBe(`working on ${word} now`)
+    }
+  })
+
+  it('still masks sk- tokens at string boundaries after the word guard', () => {
+    expect(redactSecrets('key is sk-abc123XYZ_ok')).toBe(`key is ${REDACTED}`)
+    expect(redactSecrets('"sk-abc123XYZ_ok"')).toBe(`"${REDACTED}"`)
+    expect(redactSecrets('sk-abc123XYZ_ok')).toBe(REDACTED)
+  })
+
   it('does not recurse forever on cyclic structures', () => {
     const cyclic: Record<string, unknown> = { token: 'x' }
     cyclic['self'] = cyclic
