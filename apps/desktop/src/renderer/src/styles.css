@@ -868,6 +868,21 @@ body {
   border-radius: 6px;
 }
 
+.context-preview-content {
+  max-height: 60vh;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 6px;
+}
+
+.memory-content {
+  margin-bottom: 0;
+}
+
 @media (max-width: 1050px) {
   .task-workbench {
     grid-template-columns: 220px minmax(0, 1fr);

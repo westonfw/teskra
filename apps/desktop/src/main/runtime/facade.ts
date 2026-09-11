@@ -15,6 +15,8 @@ import type {
   ArtifactContent,
   ArtifactIdRequest,
   BindRunCriteriaRequest,
+  BuildContextRequest,
+  BuiltContext,
   CreateCriteriaSetRequest,
   CreateTaskRequest,
   CreateTerminalRequest,
@@ -23,6 +25,7 @@ import type {
   CriterionIdRequest,
   CriterionScoreRecord,
   CreatePermissionRuleRequest,
+  CreateMemoryRequest,
   CredentialStoreStatus,
   DeleteCredentialRequest,
   DiffResult,
@@ -46,6 +49,7 @@ import type {
   ListArtifactsRequest,
   ListCriteriaSetsRequest,
   ListCriterionScoresRequest,
+  ListMemoriesRequest,
   ListPermissionAuditRequest,
   ListPermissionRulesRequest,
   ListPromptTemplatesRequest,
@@ -56,6 +60,8 @@ import type {
   ListWorkflowDefinitionsRequest,
   ListWorkflowRunsRequest,
   LoadWorkflowDefinitionRequest,
+  Memory,
+  MemoryIdRequest,
   MergePreflightResult,
   OpenWorkspaceRequest,
   OpenSystemDirectoryRequest,
@@ -102,6 +108,7 @@ import type {
   TerminalWriteRequest,
   UpdateConfigRequest,
   UpdateCriterionRequest,
+  UpdateMemoryRequest,
   UpdatePermissionRuleRequest,
   UpdateTaskRequest,
   Workspace,
@@ -220,6 +227,28 @@ export interface HandoffPort {
 }
 
 /**
+ * TASK-067: Workspace Memory CRUD (plan §45/§46). Repo-local memories from
+ * `<repo>/.teskra/memory/` appear in `list` as read-only `file:` records;
+ * mutating them returns VALIDATION_FAILED.
+ */
+export interface MemoryPort {
+  list(request: ListMemoriesRequest): IpcResult<readonly Memory[]>
+  get(request: MemoryIdRequest): IpcResult<Memory | null>
+  create(request: CreateMemoryRequest): IpcResult<Memory>
+  update(request: UpdateMemoryRequest): IpcResult<Memory | null>
+  delete(request: MemoryIdRequest): IpcResult<boolean>
+}
+
+/**
+ * TASK-068: ContextBuilder (plan §47). `preview` returns the packed,
+ * budget-limited context (with `omittedCount` for dropped sections) so the
+ * UI can show exactly what an Agent would receive before a Run starts.
+ */
+export interface ContextPort {
+  preview(request: BuildContextRequest): IpcResult<BuiltContext>
+}
+
+/**
  * TASK-065 (ADR-0002): rule CRUD, layered profile resolution (with `ask`
  * downgrade notices), approval decisions, and the post-hoc audit trail.
  */
@@ -332,6 +361,8 @@ export interface TeskraRuntime {
   readonly criteria: CriteriaPort
   readonly artifact: ArtifactPort
   readonly handoff: HandoffPort
+  readonly memory: MemoryPort
+  readonly context: ContextPort
   readonly permission: PermissionPort
   readonly review: ReviewPort
   readonly agent: AgentCatalogPort

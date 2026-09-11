@@ -442,6 +442,78 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     runtime.dispose()
   })
 
+  it('previews the ContextBuilder output through the facade (TASK-067/068)', async () => {
+    const home = makeHome()
+    const paths = createTeskraPaths({ TESKRA_HOME: home })
+    const composed = await composeTeskraRuntime({
+      paths,
+      commands: wslCommands(),
+      hostPlatform: 'linux',
+      initializeLogs: false,
+    })
+    if (!composed.ok) throw new Error('expected runtime')
+    const runtime = composed.data
+
+    const repo = join(home, 'repo')
+    mkdirSync(repo)
+    const workspace = runtime.workspace.create({
+      name: 'Demo',
+      runtime: { kind: 'wsl', distro: 'Ubuntu-24.04' },
+      path: repo,
+    })
+    if (!workspace.ok) throw new Error('expected workspace')
+    const workspaceId = workspace.data.id
+
+    // Repo-local memory file + one stored memory; both must be packed.
+    mkdirSync(paths.repoMemoryDir(repo), { recursive: true })
+    writeFileSync(join(paths.repoMemoryDir(repo), 'known-issues.md'), 'Flaky CI runner.')
+    const stored = runtime.memory.create({
+      workspaceId,
+      type: 'convention',
+      content: 'Use Conventional Commits.',
+    })
+    expect(stored.ok).toBe(true)
+    const secret = runtime.memory.create({
+      workspaceId,
+      type: 'command',
+      content: 'deploy with ghp_0123456789abcdef',
+    })
+    expect(secret).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+
+    const task = runtime.task.create({ workspaceId, title: 'Preview me' })
+    if (!task.ok) throw new Error('expected task')
+
+    const preview = runtime.context.preview({ workspaceId, taskId: task.data.id })
+    expect(preview.ok).toBe(true)
+    if (!preview.ok) return
+    expect(preview.data.totalChars).toBe(preview.data.content.length)
+    expect(preview.data.totalChars).toBeLessThanOrEqual(preview.data.budgetChars)
+    expect(preview.data.omittedCount).toBe(0)
+    expect(preview.data.content).toContain('## Task: Preview me')
+    expect(preview.data.content).toContain('### Memory · convention\nUse Conventional Commits.')
+    expect(preview.data.content).toContain('### Memory · known_issue\nFlaky CI runner.')
+
+    // The packed memory section renders into the built-in template verbatim.
+    const memoryOnly = runtime.context.preview({ workspaceId })
+    if (!memoryOnly.ok) throw new Error('expected memory context')
+    const rendered = runtime.prompts.render({
+      name: 'implement',
+      workspaceId,
+      context: {
+        task: { title: 'Preview me', description: '' },
+        role: 'implementer',
+        memory: memoryOnly.data.content,
+        env: { TESKRA_HANDOFF_PATH: '/tmp/h.json', TESKRA_ARTIFACT_DIR: '/tmp/a' },
+      },
+    })
+    expect(rendered.ok).toBe(true)
+    if (rendered.ok) {
+      expect(rendered.data.content).toContain('Use Conventional Commits.')
+      expect(rendered.data.content).not.toMatch(/\{\{[^{}]*\}\}/)
+    }
+    runtime.dispose()
+  })
+
   it('reports every not-yet-mounted port as CAPABILITY_NOT_AVAILABLE', async () => {
     const composed = await composeTeskraRuntime({
       paths: createTeskraPaths({ TESKRA_HOME: makeHome() }),

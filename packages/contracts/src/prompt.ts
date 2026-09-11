@@ -7,8 +7,9 @@ import { z } from 'zod'
  * variable that is unknown or was not provided fails validation instead of
  * silently leaving `{{...}}` in the output.
  *
- * `memory` is a placeholder for Workspace Memory / ContextBuilder (TASK-068):
- * until then it renders as an empty string.
+ * `memory` is fed by the ContextBuilder (TASK-068): callers that wire it pass
+ * the packed Workspace Memory section; when omitted it renders as an empty
+ * string.
  */
 
 /** Names of the templates shipped under apps/desktop/resources/prompts/. */
@@ -38,7 +39,7 @@ export const promptTemplateContextSchema = z.strictObject({
   /** Acceptance Criteria (TASK-048 confirmed set), rendered as a bullet list. */
   criteria: z.array(z.string()).optional(),
   role: z.string().optional(),
-  /** Workspace Memory placeholder (ContextBuilder, TASK-068); renders empty until then. */
+  /** Workspace Memory section packed by the ContextBuilder (TASK-068); empty when unwired. */
   memory: z.string().optional(),
   previousHandoff: z.string().optional(),
   /** ADR-0004 handoff contract paths injected into the agent environment. */

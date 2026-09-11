@@ -60,6 +60,8 @@ import {
 } from '../security/credential-store'
 import { createTerminalManager } from '../terminal/terminal-manager'
 import { createCriteriaManager } from '../tasks/criteria-manager'
+import { createMemoryManager } from '../memory/memory-manager'
+import { createContextBuilder } from '../memory/context-builder'
 import { createTaskManager } from '../tasks/task-manager'
 import { createWorkflowDefinitionLoader } from '../workflows/definition-loader'
 import { createCriteriaGateStepExecutor } from '../workflows/criteria-gate-step-executor'
@@ -251,6 +253,18 @@ export async function composeTeskraRuntime(
     runs: repositories.agentRuns,
     events,
   })
+  const memoryManager = createMemoryManager({
+    memory: repositories.memory,
+    workspaces: repositories.workspaces,
+    paths,
+  })
+  const contextBuilder = createContextBuilder({
+    tasks: repositories.tasks,
+    criteria: repositories.criteria,
+    runs: repositories.agentRuns,
+    handoffs: repositories.handoffs,
+    memory: memoryManager,
+  })
   const artifactStore = createArtifactStore({
     artifacts: repositories.artifacts,
     tasks: repositories.tasks,
@@ -440,6 +454,7 @@ export async function composeTeskraRuntime(
     agents: agentManager,
     handoffs: repositories.handoffs,
     promptTemplates,
+    contextBuilder,
     paths,
     events,
   })
@@ -602,6 +617,16 @@ export async function composeTeskraRuntime(
     },
     handoff: {
       get: ({ runId }) => repositories.handoffs.getByRunId(runId),
+    },
+    memory: {
+      list: (request) => memoryManager.list(request),
+      get: (request) => memoryManager.get(request),
+      create: (request) => memoryManager.create(request),
+      update: (request) => memoryManager.update(request),
+      delete: (request) => memoryManager.delete(request),
+    },
+    context: {
+      preview: (request) => contextBuilder.buildContext(request),
     },
     permission: {
       listRules: (request) => permissionManager.listRules(request),

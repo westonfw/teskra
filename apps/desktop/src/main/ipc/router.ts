@@ -187,6 +187,30 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.handoff.get(request)),
   )
   register(
+    ipcChannelDefinitions.memoryList,
+    withRuntime((runtime, request) => runtime.memory.list(request)),
+  )
+  register(
+    ipcChannelDefinitions.memoryGet,
+    withRuntime((runtime, request) => runtime.memory.get(request)),
+  )
+  register(
+    ipcChannelDefinitions.memoryCreate,
+    withRuntime((runtime, request) => runtime.memory.create(request)),
+  )
+  register(
+    ipcChannelDefinitions.memoryUpdate,
+    withRuntime((runtime, request) => runtime.memory.update(request)),
+  )
+  register(
+    ipcChannelDefinitions.memoryDelete,
+    withRuntime((runtime, request) => runtime.memory.delete(request)),
+  )
+  register(
+    ipcChannelDefinitions.contextPreview,
+    withRuntime((runtime, request) => runtime.context.preview(request)),
+  )
+  register(
     ipcChannelDefinitions.reviewListFindings,
     withRuntime((runtime, request) => runtime.review.listFindings(request)),
   )
