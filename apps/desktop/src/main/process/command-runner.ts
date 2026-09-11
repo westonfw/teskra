@@ -243,10 +243,18 @@ export function createCommandRunner(deps: CommandRunnerDeps = {}): CommandRunner
 
         const stdoutChunks: Buffer[] = []
         const stderrChunks: Buffer[] = []
-        let buffered = 0
-        const onChunk = (chunk: Buffer): void => {
-          buffered += chunk.length
-          if (buffered > maxBuffer) {
+        let stdoutBuffered = 0
+        let stderrBuffered = 0
+        // The ceiling is PER STREAM (see CommandRequest.maxBuffer): stdout and
+        // stderr are buffered independently, so a loud-but-legal stderr must
+        // not eat stdout's budget.
+        const onChunk = (stream: 'stdout' | 'stderr', chunk: Buffer): void => {
+          if (stream === 'stdout') {
+            stdoutBuffered += chunk.length
+          } else {
+            stderrBuffered += chunk.length
+          }
+          if (stdoutBuffered > maxBuffer || stderrBuffered > maxBuffer) {
             terminate(active, {
               code: 'UNKNOWN',
               message: `Command "${request.command}" exceeded the output limit.`,
@@ -257,11 +265,11 @@ export function createCommandRunner(deps: CommandRunnerDeps = {}): CommandRunner
         }
         child.stdout?.on('data', (chunk: Buffer) => {
           stdoutChunks.push(chunk)
-          onChunk(chunk)
+          onChunk('stdout', chunk)
         })
         child.stderr?.on('data', (chunk: Buffer) => {
           stderrChunks.push(chunk)
-          onChunk(chunk)
+          onChunk('stderr', chunk)
         })
 
         child.on('error', (cause) => {

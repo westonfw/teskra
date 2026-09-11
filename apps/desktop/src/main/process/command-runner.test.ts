@@ -159,6 +159,26 @@ describe('CommandRunner (TASK-012)', () => {
     expect(await eventually(() => !pidAlive(childPid as number))).toBe(true)
   })
 
+  it('applies maxBuffer per stream, not to the combined stdout+stderr volume', async () => {
+    // 5 MiB per stream, 8 MiB ceiling: each stream fits, so the command must
+    // complete even though the combined 10 MiB exceeds the ceiling.
+    const fiveMiB = 5 * 1024 * 1024
+    const result = await runner.run({
+      command: NODE,
+      args: nodeArgs(
+        `process.stdout.write("x".repeat(${String(fiveMiB)}));
+         process.stderr.write("y".repeat(${String(fiveMiB)}));`,
+      ),
+      timeoutMs: 10_000,
+      maxBuffer: 8 * 1024 * 1024,
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.stdout).toHaveLength(fiveMiB)
+    expect(result.data.stderr).toHaveLength(fiveMiB)
+    expect(result.data.exitCode).toBe(0)
+  })
+
   it('returns a structured error when the executable does not exist', async () => {
     const result = await runner.run({
       command: 'teskra-no-such-binary-anywhere',
