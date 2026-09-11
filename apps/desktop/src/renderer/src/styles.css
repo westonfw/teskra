@@ -25,6 +25,13 @@ body,
   margin: 0;
 }
 
+/* antd <App> renders an unstyled .ant-app wrapper inside #root; without an
+   explicit height the whole shell collapses to its intrinsic height (~505px)
+   instead of filling the window. */
+.ant-app {
+  height: 100%;
+}
+
 body {
   min-height: 100vh;
   background:
