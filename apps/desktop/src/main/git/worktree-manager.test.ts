@@ -25,7 +25,7 @@ const directories: string[] = []
 
 afterEach(() => {
   for (const database of databases.splice(0)) database.close()
-  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true })
+  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 interface Fixture {
@@ -237,7 +237,7 @@ describe('WorktreeManager (TASK-043)', () => {
       state: 'dirty',
     })
 
-    rmSync(created.path, { recursive: true, force: true })
+    rmSync(created.path, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
     expect(requireOk(await fixture.manager.validate({ worktreeId: created.id }))).toMatchObject({
       state: 'missing',
     })
@@ -325,7 +325,7 @@ describe('WorktreeManager (TASK-043)', () => {
     const created = requireOk(
       await fixture.manager.create({ workspaceId: 'workspace-1', runId: 'run-1' }),
     )
-    rmSync(created.path, { recursive: true, force: true })
+    rmSync(created.path, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
     const removed = requireOk(
       await fixture.manager.discard({ worktreeId: created.id, confirm: true }),
     )
@@ -527,7 +527,7 @@ describe('WorktreeManager lifecycle state (TASK-044)', () => {
     expect(persistedState()).toBe('ready')
 
     // DB says ready, the directory was deleted out of band → missing.
-    rmSync(created.path, { recursive: true, force: true })
+    rmSync(created.path, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
     expect(requireOk(await fixture.manager.validate({ worktreeId: created.id }))).toMatchObject({
       state: 'missing',
     })
@@ -714,7 +714,7 @@ describe('WorktreeManager lifecycle verbs (TASK-047)', () => {
     const missing = requireOk(
       await fixture.manager.create({ workspaceId: 'workspace-1', runId: 'run-missing' }),
     )
-    rmSync(missing.path, { recursive: true, force: true })
+    rmSync(missing.path, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
     requireOk(await fixture.manager.validate({ worktreeId: missing.id }))
 
     const orphanDir = join(fixture.dataRoot, 'worktrees', 'workspace-1', 'run-orphan')

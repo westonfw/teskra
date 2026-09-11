@@ -10,15 +10,22 @@ import { buildHandoffContext } from '@teskra/shared'
 import { createTeskraPaths } from '../paths'
 import type { CommandRunner } from '../process/command-runner'
 import { composeTeskraRuntime } from './compose'
-import { requireRuntimePort } from './facade'
+import { requireRuntimePort, type TeskraRuntime } from './facade'
 
 const tempHomes: string[] = []
+const runtimes: TeskraRuntime[] = []
 
 afterEach(() => {
+  // Dispose before deleting the home dir: on Windows an open SQLite handle
+  // makes the unlink fail with EBUSY even when a test bailed out early.
+  // dispose() is idempotent, so runtimes the test already disposed are fine.
+  for (const runtime of runtimes.splice(0)) {
+    runtime.dispose()
+  }
   for (const path of tempHomes.splice(0)) {
-    // Windows cannot unlink an open SQLite file (EBUSY); if a test fails
-    // before dispose(), give the handle a moment to be released.
-    rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    // Windows cannot unlink an open SQLite file (EBUSY); give handles a
+    // moment to be released.
+    rmSync(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
   }
 })
 
@@ -76,6 +83,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     })
     expect(composed.ok).toBe(true)
     if (!composed.ok) return
+    runtimes.push(composed.data)
     const runtime = composed.data
 
     const workspacePath = join(home, 'repo')
@@ -133,6 +141,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       initializeLogs: false,
     })
     if (!composed.ok) throw new Error('expected runtime')
+    runtimes.push(composed.data)
 
     const listed = await composed.data.system.listWslDistributions()
     expect(listed.ok && listed.data.map((item) => item.name)).toEqual(['Ubuntu-24.04', 'Debian'])
@@ -164,6 +173,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       selectDirectory,
     })
     if (!composed.ok) throw new Error('expected runtime')
+    runtimes.push(composed.data)
 
     const repo = join(home, 'repo')
     mkdirSync(repo)
@@ -212,6 +222,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       initializeLogs: false,
     })
     if (!composed.ok) throw new Error('expected runtime')
+    runtimes.push(composed.data)
 
     // No cipher injected → explicit degrade, never silent plaintext.
     expect(composed.data.credential.status()).toEqual({ ok: true, data: { available: false } })
@@ -249,6 +260,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       },
     })
     if (!composed.ok) throw new Error('expected runtime')
+    runtimes.push(composed.data)
 
     expect(composed.data.credential.status()).toEqual({ ok: true, data: { available: true } })
     expect(composed.data.credential.set({ key: 'OPENAI_API_KEY', value: 'sk-compose-secret' })).toEqual({
@@ -280,6 +292,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       fakeAgentScriptPath: join(process.cwd(), 'tools', 'fake-agent.js'),
     })
     if (!composed.ok) throw new Error('expected runtime')
+    runtimes.push(composed.data)
 
     const repo = join(home, 'repo')
     mkdirSync(repo)
@@ -289,8 +302,21 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       path: repo,
     })
     if (!workspace.ok) throw new Error(workspace.error.message)
+    // The Fake Agent definition spawns a bare `node`; pin the absolute Node
+    // binary running this test so the PTY spawn never depends on resolving an
+    // extension-less executable through PATH (suspected Windows CI failure).
+    const executableOverride = composed.data.agent.setExecutableOverride({
+      agentId: 'fake',
+      runtime: workspace.data.runtime,
+      path: process.execPath,
+    })
+    if (!executableOverride.ok) throw new Error(executableOverride.error.message)
     const completed = new Promise<{ runId: string; exitCode: number }>((resolveCompleted) => {
       composed.data.events.subscribe('agent.completed', resolveCompleted)
+      // A failed run must resolve too, or the test hangs until the timeout.
+      composed.data.events.subscribe('agent.failed', ({ runId }) =>
+        resolveCompleted({ runId, exitCode: -1 }),
+      )
     })
 
     const started = await composed.data.agent.start({
@@ -299,9 +325,20 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       executionMode: 'attended',
       environment: { TESKRA_FAKE_SCENARIO: 'success' },
     })
-    expect(started).toMatchObject({ ok: true, data: { status: 'running' } })
+    expect(
+      started.ok && started.data.status === 'running',
+      // Windows CI diagnostics: surface the run error and captured PTY output
+      // when the Fake Agent never reaches the running state.
+      started.ok
+        ? `status=${started.data.status} error=${JSON.stringify(started.data.error ?? null)} output=${JSON.stringify(composed.data.agent.getOutput({ runId: started.data.id }))}`
+        : `start failed: ${JSON.stringify(started.error)}`,
+    ).toBe(true)
     const exit = await completed
-    expect(exit.exitCode).toBe(0)
+    const finished = composed.data.agent.get({ runId: exit.runId })
+    expect(
+      exit.exitCode,
+      `run=${JSON.stringify(finished.ok ? (finished.data?.error ?? null) : finished.error)}`,
+    ).toBe(0)
     expect(composed.data.agent.get({ runId: exit.runId })).toMatchObject({
       ok: true,
       data: { status: 'completed', exitCode: 0 },
@@ -357,6 +394,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       fakeAgentScriptPath: join(process.cwd(), 'tools', 'fake-agent.js'),
     })
     if (!composed.ok) throw new Error('expected runtime')
+    runtimes.push(composed.data)
 
     const repo = join(home, 'repo')
     mkdirSync(repo)
@@ -366,8 +404,21 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       path: repo,
     })
     if (!workspace.ok) throw new Error(workspace.error.message)
+    // The Fake Agent definition spawns a bare `node`; pin the absolute Node
+    // binary running this test so the PTY spawn never depends on resolving an
+    // extension-less executable through PATH (suspected Windows CI failure).
+    const executableOverride = composed.data.agent.setExecutableOverride({
+      agentId: 'fake',
+      runtime: workspace.data.runtime,
+      path: process.execPath,
+    })
+    if (!executableOverride.ok) throw new Error(executableOverride.error.message)
     const completed = new Promise<{ runId: string; exitCode: number }>((resolveCompleted) => {
       composed.data.events.subscribe('agent.completed', resolveCompleted)
+      // A failed run must resolve too, or the test hangs until the timeout.
+      composed.data.events.subscribe('agent.failed', ({ runId }) =>
+        resolveCompleted({ runId, exitCode: -1 }),
+      )
     })
 
     const started = await composed.data.agent.start({
@@ -376,7 +427,14 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       executionMode: 'attended',
       environment: { TESKRA_FAKE_SCENARIO: 'bad-handoff' },
     })
-    expect(started).toMatchObject({ ok: true, data: { status: 'running' } })
+    expect(
+      started.ok && started.data.status === 'running',
+      // Windows CI diagnostics: surface the run error and captured PTY output
+      // when the Fake Agent never reaches the running state.
+      started.ok
+        ? `status=${started.data.status} error=${JSON.stringify(started.data.error ?? null)} output=${JSON.stringify(composed.data.agent.getOutput({ runId: started.data.id }))}`
+        : `start failed: ${JSON.stringify(started.error)}`,
+    ).toBe(true)
     const exit = await completed
 
     // The run still completes and the raw handoff file is preserved on disk.
@@ -405,6 +463,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       initializeLogs: false,
     })
     if (!composed.ok) throw new Error('expected runtime')
+    runtimes.push(composed.data)
     const runtime = composed.data
 
     const context = {
@@ -468,6 +527,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       initializeLogs: false,
     })
     if (!composed.ok) throw new Error('expected runtime')
+    runtimes.push(composed.data)
     const runtime = composed.data
 
     const repo = join(home, 'repo')
@@ -538,6 +598,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       initializeLogs: false,
     })
     if (!composed.ok) throw new Error('expected runtime')
+    runtimes.push(composed.data)
 
     for (const name of FUTURE_RUNTIME_PORTS.filter(
       (candidate) =>

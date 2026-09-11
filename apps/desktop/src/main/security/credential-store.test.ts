@@ -39,7 +39,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  rmSync(tempHome, { recursive: true, force: true })
+  rmSync(tempHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 describe('CredentialStore (TASK-088)', () => {

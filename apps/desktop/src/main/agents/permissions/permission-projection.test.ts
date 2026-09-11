@@ -31,7 +31,7 @@ function profile(approvalMode: TeskraPermissionProfile['approvalMode']): TeskraP
 }
 
 afterEach(() => {
-  for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true })
+  for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 describe('built-in Agent permission capability declarations (TASK-077)', () => {

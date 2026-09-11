@@ -313,7 +313,7 @@ describe('ConfigService — real filesystem smoke test', () => {
     } else {
       process.env['TESKRA_HOME'] = savedTeskraHome
     }
-    rmSync(tempHome, { recursive: true, force: true })
+    rmSync(tempHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
   })
 
   it('reads the global config through the real paths module', async () => {

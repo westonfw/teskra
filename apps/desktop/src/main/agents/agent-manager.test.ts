@@ -62,7 +62,7 @@ afterEach(() => {
     context.manager.dispose()
     context.connection.close()
   }
-  for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true })
+  for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 function mockAdapter(

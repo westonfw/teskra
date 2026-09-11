@@ -35,7 +35,7 @@ function readLogRecords(dir: string, scope: string): Array<Record<string, unknow
 
 afterAll(() => {
   for (const dir of tempRoots) {
-    rmSync(dir, { recursive: true, force: true })
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
   }
 })
 

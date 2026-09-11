@@ -39,7 +39,7 @@ const directories: string[] = []
 
 afterEach(() => {
   for (const database of databases.splice(0)) database.close()
-  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true })
+  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 interface Fixture {
@@ -284,7 +284,7 @@ describe('Worktree safety reference tests (TASK-075)', () => {
     const worktree = await createWorktree(fixture, 'run-1')
 
     // The directory is deleted out of band (crash, user, OS cleanup).
-    rmSync(worktree.path, { recursive: true, force: true })
+    rmSync(worktree.path, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 
     const validated = requireOk(await fixture.manager.validate({ worktreeId: worktree.id }))
     expect(validated.state).toBe('missing')
@@ -302,7 +302,7 @@ describe('Worktree safety reference tests (TASK-075)', () => {
     writeFileSync(join(active.path, 'dirty.txt'), 'uncommitted\n')
 
     const missing = await createWorktree(fixture, 'run-missing')
-    rmSync(missing.path, { recursive: true, force: true })
+    rmSync(missing.path, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
     requireOk(await fixture.manager.validate({ worktreeId: missing.id }))
 
     const merged = await createWorktree(fixture, 'run-merged')

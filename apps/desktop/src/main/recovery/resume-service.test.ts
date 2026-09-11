@@ -22,7 +22,7 @@ const homes: string[] = []
 
 afterEach(() => {
   for (const database of databases.splice(0)) database.close()
-  for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true })
+  for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 interface Fixture {
@@ -166,7 +166,7 @@ describe('ResumeService (TASK-042)', () => {
   it('refuses to resume when the workspace directory is gone', async () => {
     const fixture = setup()
     fixture.createRun()
-    rmSync(fixture.workspacePath, { recursive: true })
+    rmSync(fixture.workspacePath, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 
     const result = await fixture.service().resume({ runId: 'run-1' })
 

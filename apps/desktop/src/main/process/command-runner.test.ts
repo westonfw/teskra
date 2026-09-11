@@ -87,7 +87,7 @@ describe('CommandRunner (TASK-012)', () => {
       expect(await eventually(() => !pidAlive(childPid as number))).toBe(true)
       expect(await eventually(() => !pidAlive(grandchildPid))).toBe(true)
     } finally {
-      rmSync(dir, { recursive: true, force: true })
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
     }
   })
 

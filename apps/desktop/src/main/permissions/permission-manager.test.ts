@@ -38,7 +38,7 @@ afterEach(() => {
   for (const context of contexts.splice(0)) {
     context.manager.dispose()
     context.connection.close()
-    rmSync(context.home, { recursive: true, force: true })
+    rmSync(context.home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
   }
 })
 
