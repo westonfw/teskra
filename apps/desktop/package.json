@@ -15,7 +15,8 @@
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win",
     "dist:linux": "npm run build && electron-builder --linux",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
+    "test:e2e": "playwright test -c e2e/playwright.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.e2e.json"
   },
   "dependencies": {
     "@ant-design/icons": "6.3.4",
@@ -33,6 +34,7 @@
   },
   "devDependencies": {
     "@electron/rebuild": "4.2.0",
+    "@playwright/test": "1.63.0",
     "@types/better-sqlite3": "9.6.0",
     "@types/node": "22.20.1",
     "@types/react": "19.2.18",
