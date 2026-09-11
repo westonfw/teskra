@@ -217,13 +217,21 @@ import {
 } from './wsl'
 import {
   listWorkflowDefinitionsRequestSchema,
+  listWorkflowRunsRequestSchema,
   loadWorkflowDefinitionRequestSchema,
   workflowDefinitionFileInfoSchema,
   workflowDefinitionSchema,
+  workflowRunDetailSchema,
+  workflowRunIdRequestSchema,
+  workflowRunSchema,
   type ListWorkflowDefinitionsRequest,
+  type ListWorkflowRunsRequest,
   type LoadWorkflowDefinitionRequest,
   type WorkflowDefinition,
   type WorkflowDefinitionFileInfo,
+  type WorkflowRun,
+  type WorkflowRunDetail,
+  type WorkflowRunIdRequest,
 } from './workflow'
 
 export const IPC_CHANNELS = {
@@ -308,6 +316,8 @@ export const IPC_CHANNELS = {
   promptRender: 'teskra:prompt:render',
   workflowListDefinitions: 'teskra:workflow:definitions:list',
   workflowLoadDefinition: 'teskra:workflow:definition:load',
+  workflowRunList: 'teskra:workflow:run:list',
+  workflowRunGet: 'teskra:workflow:run:get',
 } as const
 export type IpcChannelName = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
 
@@ -727,6 +737,16 @@ export const workflowLoadDefinitionChannel = channel(
   loadWorkflowDefinitionRequestSchema,
   workflowDefinitionSchema,
 )
+export const workflowRunListChannel = channel(
+  IPC_CHANNELS.workflowRunList,
+  listWorkflowRunsRequestSchema,
+  z.array(workflowRunSchema),
+)
+export const workflowRunGetChannel = channel(
+  IPC_CHANNELS.workflowRunGet,
+  workflowRunIdRequestSchema,
+  workflowRunDetailSchema.nullable(),
+)
 
 export const ipcChannelDefinitions = {
   ping: pingChannel,
@@ -810,6 +830,8 @@ export const ipcChannelDefinitions = {
   promptRender: promptRenderChannel,
   workflowListDefinitions: workflowListDefinitionsChannel,
   workflowLoadDefinition: workflowLoadDefinitionChannel,
+  workflowRunList: workflowRunListChannel,
+  workflowRunGet: workflowRunGetChannel,
 } as const
 
 export interface TeskraBridge {
@@ -933,6 +955,8 @@ export interface TeskraBridge {
       request: ListWorkflowDefinitionsRequest,
     ): Promise<IpcResult<WorkflowDefinitionFileInfo[]>>
     loadDefinition(request: LoadWorkflowDefinitionRequest): Promise<IpcResult<WorkflowDefinition>>
+    listRuns(request?: ListWorkflowRunsRequest): Promise<IpcResult<WorkflowRun[]>>
+    getRun(request: WorkflowRunIdRequest): Promise<IpcResult<WorkflowRunDetail | null>>
   }
   readonly events: {
     subscribe<Name extends WorkbenchEventName>(

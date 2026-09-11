@@ -29,6 +29,15 @@ export interface Migration {
   readonly name: string
   /** Full SQL text, executed with `connection.exec` inside the transaction. */
   readonly sql: string
+  /**
+   * Table-rebuild migrations (SQLite cannot ALTER COLUMN) must run with
+   * foreign_keys OFF, otherwise DROP TABLE fires an implicit DELETE that
+   * cascades into referencing tables. The pragma is a no-op inside a
+   * transaction, so it is toggled OUTSIDE the migration transaction here,
+   * and `foreign_key_check` runs INSIDE the transaction — violations roll
+   * the migration back like any other failure.
+   */
+  readonly foreignKeysOff?: boolean
 }
 
 export interface MigrationRunResult {
@@ -60,9 +69,9 @@ function ensureSchemaMigrationsTable(connection: Database.Database): void {
 }
 
 function currentVersion(connection: Database.Database): number {
-  const row = connection
-    .prepare('SELECT MAX(version) AS version FROM schema_migrations')
-    .get() as { version: number | null }
+  const row = connection.prepare('SELECT MAX(version) AS version FROM schema_migrations').get() as {
+    version: number | null
+  }
   return row.version ?? 0
 }
 
@@ -151,10 +160,27 @@ export function runMigrations(
       continue
     }
     try {
-      connection.transaction(() => {
-        connection.exec(migration.sql)
-        recordVersion.run(migration.version, migration.name, new Date().toISOString())
-      })()
+      if (migration.foreignKeysOff === true) {
+        connection.pragma('foreign_keys = OFF')
+      }
+      try {
+        connection.transaction(() => {
+          connection.exec(migration.sql)
+          if (migration.foreignKeysOff === true) {
+            const violations = connection.pragma('foreign_key_check') as unknown[]
+            if (violations.length > 0) {
+              throw new Error(
+                `foreign_key_check reported ${String(violations.length)} violation(s) after the table rebuild`,
+              )
+            }
+          }
+          recordVersion.run(migration.version, migration.name, new Date().toISOString())
+        })()
+      } finally {
+        if (migration.foreignKeysOff === true) {
+          connection.pragma('foreign_keys = ON')
+        }
+      }
     } catch (cause) {
       return {
         ok: false,

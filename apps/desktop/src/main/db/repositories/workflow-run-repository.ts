@@ -7,69 +7,45 @@ import type {
   WorkflowRunStatus,
   WorkflowStepStatus,
 } from '@teskra/contracts'
-import {
-  workflowNodeTypeSchema,
-  workflowRunStatusSchema,
-  workflowStepStatusSchema,
-} from '@teskra/contracts'
+import { workflowDefinitionSchema, workflowRunSchema, workflowStepSchema } from '@teskra/contracts'
 
 import {
   decodeJson,
   encodeJson,
   execute,
-  isoTimestampSchema,
   jsonRecordSchema,
   mapRows,
   nowIso,
   requireFound,
   validateRow,
-  type JsonRecord,
 } from './common'
 
 /**
- * WorkflowRunRepository (TASK-007) — the `workflow_runs` and
- * `workflow_steps` tables (plan §139.1, 002_runs.sql lines 5249–5277).
- * Steps are an aggregate of their run, so both live behind one repository
- * and the Manager layer still never touches SQL.
+ * WorkflowRunRepository (TASK-007; TASK-056 revisions) — the `workflow_runs`
+ * and `workflow_steps` tables (plan §139.1, 002_runs.sql lines 5249–5277 as
+ * amended by 007_workflow_run_task_optional / ADR-0006). Steps are an
+ * aggregate of their run, so both live behind one repository and the Manager
+ * layer still never touches SQL.
  *
- * `definition_json` is the launch-time definition snapshot (NOT NULL);
- * `depends_on_json` is a string array of WorkflowNode ids; `result_json` is
- * an opaque node result object.
+ * `definition_json` is the launch-time definition snapshot (NOT NULL),
+ * validated against the TASK-055 WorkflowDefinition schema on every read —
+ * a restarted app must be able to interpret the snapshot. `depends_on_json`
+ * is a string array of WorkflowNode ids; `result_json` is an opaque node
+ * result object.
+ *
+ * TASK-056 / ADR-0006: `task_id` is nullable (WorkflowRun 独立于 Task), so
+ * `taskId` is optional on both the record and the create input.
  */
 
-export const workflowRunRecordSchema = z.strictObject({
-  id: z.string(),
-  taskId: z.string(),
-  workflowDefinitionId: z.string(),
-  definition: jsonRecordSchema,
-  status: workflowRunStatusSchema,
-  currentIteration: z.number().int().nonnegative(),
-  totalIterations: z.number().int().nonnegative(),
-  criteriaSetId: z.string().optional(),
-  createdAt: isoTimestampSchema,
-  completedAt: isoTimestampSchema.optional(),
-})
+export const workflowRunRecordSchema = workflowRunSchema
 export type WorkflowRun = z.infer<typeof workflowRunRecordSchema>
 
-export const workflowStepRecordSchema = z.strictObject({
-  id: z.string(),
-  workflowRunId: z.string(),
-  nodeId: z.string(),
-  nodeType: workflowNodeTypeSchema,
-  status: workflowStepStatusSchema,
-  iteration: z.number().int().nonnegative(),
-  attempt: z.number().int().positive(),
-  dependsOn: z.array(z.string()).optional(),
-  result: jsonRecordSchema.optional(),
-  startedAt: isoTimestampSchema.optional(),
-  finishedAt: isoTimestampSchema.optional(),
-  createdAt: isoTimestampSchema,
-})
+export const workflowStepRecordSchema = workflowStepSchema
 export type WorkflowStep = z.infer<typeof workflowStepRecordSchema>
 
 interface WorkflowRunRow {
   id: string
-  task_id: string
+  task_id: string | null
   workflow_definition_id: string
   definition_json: string
   status: string
@@ -97,9 +73,10 @@ interface WorkflowStepRow {
 
 export interface CreateWorkflowRunInput {
   readonly id: string
-  readonly taskId: string
+  /** Optional since ADR-0006: the run may be independent of any Task. */
+  readonly taskId?: string
   readonly workflowDefinitionId: string
-  readonly definition: JsonRecord
+  readonly definition: WorkflowRun['definition']
   /** Defaults to 'created'. */
   readonly status?: WorkflowRunStatus
   readonly currentIteration?: number
@@ -129,7 +106,7 @@ export interface CreateWorkflowStepInput {
 export interface UpdateWorkflowStepInput {
   readonly status?: WorkflowStepStatus
   readonly attempt?: number
-  readonly result?: JsonRecord | null
+  readonly result?: Record<string, unknown> | null
   readonly startedAt?: string | null
   readonly finishedAt?: string | null
 }
@@ -139,6 +116,8 @@ export interface WorkflowRunRepository {
   getRunById(id: string): IpcResult<WorkflowRun | null>
   updateRun(id: string, patch: UpdateWorkflowRunInput): IpcResult<WorkflowRun | null>
   listRunsByTask(taskId: string, status?: WorkflowRunStatus): IpcResult<WorkflowRun[]>
+  /** All runs (including task-less ones), optionally filtered by status. */
+  listRuns(status?: WorkflowRunStatus): IpcResult<WorkflowRun[]>
   createStep(input: CreateWorkflowStepInput, now?: string): IpcResult<WorkflowStep>
   getStepById(id: string): IpcResult<WorkflowStep | null>
   updateStep(id: string, patch: UpdateWorkflowStepInput): IpcResult<WorkflowStep | null>
@@ -151,7 +130,7 @@ const STEP_ENTITY = 'workflow-step'
 
 function runToDomain(row: WorkflowRunRow): IpcResult<WorkflowRun> {
   const definition = decodeJson(
-    jsonRecordSchema,
+    workflowDefinitionSchema,
     RUN_ENTITY,
     'definition_json',
     row.definition_json,
@@ -161,7 +140,7 @@ function runToDomain(row: WorkflowRunRow): IpcResult<WorkflowRun> {
   }
   return validateRow(workflowRunRecordSchema, RUN_ENTITY, {
     id: row.id,
-    taskId: row.task_id,
+    taskId: row.task_id ?? undefined,
     workflowDefinitionId: row.workflow_definition_id,
     definition: definition.data,
     status: row.status,
@@ -214,7 +193,7 @@ export function createWorkflowRunRepository(connection: Database.Database): Work
           )
           .run(
             input.id,
-            input.taskId,
+            input.taskId ?? null,
             input.workflowDefinitionId,
             encodeJson(input.definition) as string,
             input.status ?? 'created',
@@ -292,6 +271,26 @@ export function createWorkflowRunRepository(connection: Database.Database): Work
         return connection
           .prepare(
             `SELECT * FROM workflow_runs WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC`,
+          )
+          .all(...values) as WorkflowRunRow[]
+      })
+      if (!rows.ok) {
+        return rows
+      }
+      return mapRows(rows.data, runToDomain)
+    },
+
+    listRuns(status) {
+      const conditions: string[] = []
+      const values: unknown[] = []
+      if (status !== undefined) {
+        conditions.push('status = ?')
+        values.push(status)
+      }
+      const rows = execute(RUN_ENTITY, 'listRuns', () => {
+        return connection
+          .prepare(
+            `SELECT * FROM workflow_runs${conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : ''} ORDER BY created_at DESC`,
           )
           .all(...values) as WorkflowRunRow[]
       })

@@ -147,11 +147,75 @@ describe('runMigrations (TASK-006)', () => {
     }
     expect(tableExists(db, 'schema_migrations')).toBe(false)
   })
+
+  it('supports foreignKeysOff table-rebuild migrations without cascading data loss (TASK-056)', () => {
+    const db = memoryDb()
+    db.pragma('foreign_keys = ON')
+    const result = runMigrations(db, [
+      fixture(
+        1,
+        `CREATE TABLE parent (id TEXT PRIMARY KEY, keep TEXT NOT NULL);
+         CREATE TABLE child (id TEXT PRIMARY KEY, parent_id TEXT NOT NULL REFERENCES parent(id) ON DELETE CASCADE);
+         INSERT INTO parent VALUES ('p1', 'v1');
+         INSERT INTO child VALUES ('c1', 'p1');`,
+      ),
+      {
+        ...fixture(
+          2,
+          `CREATE TABLE parent_new (id TEXT PRIMARY KEY, keep TEXT);
+           INSERT INTO parent_new SELECT id, keep FROM parent;
+           DROP TABLE parent;
+           ALTER TABLE parent_new RENAME TO parent;`,
+          'rebuild_parent',
+        ),
+        foreignKeysOff: true,
+      },
+    ])
+    expect(result.ok).toBe(true)
+    // With FK on, DROP TABLE parent would implicit-DELETE 'p1' and CASCADE
+    // into child; with FK off the rebuild preserves both rows.
+    expect(db.prepare('SELECT keep FROM parent WHERE id = ?').get('p1')).toEqual({ keep: 'v1' })
+    expect(db.prepare('SELECT COUNT(*) AS n FROM child').get()).toEqual({ n: 1 })
+    // FK enforcement is restored afterwards.
+    expect(db.pragma('foreign_keys', { simple: true })).toBe(1)
+    expect(() => db.prepare("INSERT INTO child VALUES ('c2', 'ghost')").run()).toThrow(
+      /FOREIGN KEY/,
+    )
+  })
+
+  it('rolls back a foreignKeysOff migration whose rebuild violates FK (in-transaction check)', () => {
+    const db = memoryDb()
+    db.pragma('foreign_keys = ON')
+    const result = runMigrations(db, [
+      fixture(
+        1,
+        `CREATE TABLE parent (id TEXT PRIMARY KEY);
+         CREATE TABLE child (id TEXT PRIMARY KEY, parent_id TEXT NOT NULL REFERENCES parent(id) ON DELETE CASCADE);
+         INSERT INTO parent VALUES ('p1');
+         INSERT INTO child VALUES ('c1', 'p1');`,
+      ),
+      {
+        // Rebuilds parent WITHOUT copying 'p1' → orphan child row.
+        ...fixture(
+          2,
+          `CREATE TABLE parent_new (id TEXT PRIMARY KEY);
+           DROP TABLE parent;
+           ALTER TABLE parent_new RENAME TO parent;`,
+          'rebuild_parent_lossy',
+        ),
+        foreignKeysOff: true,
+      },
+    ])
+    expect(result.ok).toBe(false)
+    expect(appliedVersions(db)).toEqual([1])
+    expect(db.prepare('SELECT COUNT(*) AS n FROM parent').get()).toEqual({ n: 1 })
+    expect(db.pragma('foreign_keys', { simple: true })).toBe(1)
+  })
 })
 
 describe('MIGRATIONS registry (TASK-006)', () => {
-  it('is the ordered 001–006 chain', () => {
-    expect(MIGRATIONS.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6])
+  it('is the ordered 001–007 chain', () => {
+    expect(MIGRATIONS.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7])
     expect(MIGRATIONS.map((m) => m.name)).toEqual([
       '001_init',
       '002_runs',
@@ -159,6 +223,7 @@ describe('MIGRATIONS registry (TASK-006)', () => {
       '004_artifacts_memory',
       '005_permissions',
       '006_worktree_archive',
+      '007_workflow_run_task_optional',
     ])
   })
 
@@ -167,11 +232,56 @@ describe('MIGRATIONS registry (TASK-006)', () => {
     const result = migrateDatabase(db)
     expect(result).toEqual({
       ok: true,
-      data: { fromVersion: 0, toVersion: 6, applied: [1, 2, 3, 4, 5, 6] },
+      data: { fromVersion: 0, toVersion: 7, applied: [1, 2, 3, 4, 5, 6, 7] },
     })
-    expect(appliedVersions(db)).toEqual([1, 2, 3, 4, 5, 6])
+    expect(appliedVersions(db)).toEqual([1, 2, 3, 4, 5, 6, 7])
 
     const second = migrateDatabase(db)
-    expect(second).toEqual({ ok: true, data: { fromVersion: 6, toVersion: 6, applied: [] } })
+    expect(second).toEqual({ ok: true, data: { fromVersion: 7, toVersion: 7, applied: [] } })
+  })
+
+  it('007 upgrades a populated v6 database without losing workflow runs or steps (TASK-056)', () => {
+    const db = memoryDb()
+    db.pragma('foreign_keys = ON')
+    const first = runMigrations(db, MIGRATIONS.slice(0, 6))
+    expect(first.ok).toBe(true)
+
+    const AT = '2026-09-09T00:00:00.000Z'
+    db.prepare(
+      `INSERT INTO workspaces (id, name, runtime_kind, path, created_at, updated_at)
+       VALUES ('ws1', 'ws', 'wsl', '/repo', ?, ?)`,
+    ).run(AT, AT)
+    db.prepare(
+      `INSERT INTO tasks (id, workspace_id, title, status, created_at, updated_at)
+       VALUES ('t1', 'ws1', 'task', 'ready', ?, ?)`,
+    ).run(AT, AT)
+    db.prepare(
+      `INSERT INTO workflow_runs (id, task_id, workflow_definition_id, definition_json, status, created_at)
+       VALUES ('wr1', 't1', 'def', '{}', 'running', ?)`,
+    ).run(AT)
+    db.prepare(
+      `INSERT INTO workflow_steps (id, workflow_run_id, node_id, node_type, status, created_at)
+       VALUES ('st1', 'wr1', 'n1', 'agent', 'running', ?)`,
+    ).run(AT)
+
+    const upgraded = migrateDatabase(db)
+    expect(upgraded).toEqual({ ok: true, data: { fromVersion: 6, toVersion: 7, applied: [7] } })
+
+    // Rows survived the table rebuild (DROP TABLE would have cascaded with FK on).
+    expect(db.prepare('SELECT COUNT(*) AS n FROM workflow_runs').get()).toEqual({ n: 1 })
+    expect(db.prepare('SELECT COUNT(*) AS n FROM workflow_steps').get()).toEqual({ n: 1 })
+    expect(db.prepare('SELECT task_id FROM workflow_runs WHERE id = ?').get('wr1')).toEqual({
+      task_id: 't1',
+    })
+    // task_id is nullable now; FK enforcement is back on.
+    expect(db.pragma('foreign_keys', { simple: true })).toBe(1)
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO workflow_runs (id, task_id, workflow_definition_id, definition_json, status, created_at)
+           VALUES ('wr-ghost', 'ghost-task', 'def', '{}', 'created', ?)`,
+        )
+        .run(AT),
+    ).toThrow(/FOREIGN KEY/)
   })
 })

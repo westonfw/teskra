@@ -87,7 +87,8 @@ const SCHEMA: Record<string, TableSpec> = {
     ],
   },
   worktrees: {
-    source: '§139.1 lines 5232–5247 + idx_worktrees_run (line 5518, 循环引用处理) + 006_worktree_archive (TASK-047)',
+    source:
+      '§139.1 lines 5232–5247 + idx_worktrees_run (line 5518, 循环引用处理) + 006_worktree_archive (TASK-047)',
     columns: [
       ['id', 'TEXT', 0, null, 1],
       ['workspace_id', 'TEXT', 1, null, 0],
@@ -123,10 +124,12 @@ const SCHEMA: Record<string, TableSpec> = {
     ],
   },
   workflow_runs: {
-    source: '§139.1 lines 5249–5261',
+    source:
+      '§139.1 lines 5249–5261, task_id overridden by ADR-0006 / 007_workflow_run_task_optional (TASK-056)',
     columns: [
       ['id', 'TEXT', 0, null, 1],
-      ['task_id', 'TEXT', 1, null, 0],
+      // ADR-0006: nullable — a WorkflowRun can exist independently of any Task.
+      ['task_id', 'TEXT', 0, null, 0],
       ['workflow_definition_id', 'TEXT', 1, null, 0],
       ['definition_json', 'TEXT', 1, null, 0],
       ['status', 'TEXT', 1, null, 0],
@@ -137,7 +140,8 @@ const SCHEMA: Record<string, TableSpec> = {
       ['completed_at', 'TEXT', 0, null, 0],
     ],
     foreignKeys: [
-      { from: 'task_id', table: 'tasks', to: 'id', onDelete: 'CASCADE' },
+      // ADR-0006: SET NULL like agent_runs.task_id — 删除 Task 保留执行历史。
+      { from: 'task_id', table: 'tasks', to: 'id', onDelete: 'SET NULL' },
       {
         from: 'criteria_set_id',
         table: 'acceptance_criteria_sets',
@@ -443,9 +447,7 @@ const SCHEMA: Record<string, TableSpec> = {
       ['created_at', 'TEXT', 1, null, 0],
     ],
     foreignKeys: [{ from: 'run_id', table: 'agent_runs', to: 'id', onDelete: 'CASCADE' }],
-    indexes: [
-      { name: 'idx_handoffs_run', unique: true, partial: false, columns: ['run_id'] },
-    ],
+    indexes: [{ name: 'idx_handoffs_run', unique: true, partial: false, columns: ['run_id'] }],
   },
   memories: {
     source: '§139.1 lines 5431–5440',
@@ -540,9 +542,9 @@ describe('schema matches plan §139.1 (TASK-090)', () => {
   it('creates exactly the §139.1 tables (plus the TASK-006 schema_migrations)', () => {
     const db = migratedDb()
     const tables = (
-      db
-        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
-        .all() as { name: string }[]
+      db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as {
+        name: string
+      }[]
     )
       .map((row) => row.name)
       // sqlite_sequence only materializes after the first AUTOINCREMENT insert.

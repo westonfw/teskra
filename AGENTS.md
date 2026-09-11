@@ -25,7 +25,8 @@ docs/
    ├─ 0002-permission-system-policy-and-audit.md
    ├─ 0003-data-directory-and-paths.md
    ├─ 0004-handoff-file-contract.md
-   └─ 0005-config-layers-and-runtime-facade.md
+   ├─ 0005-config-layers-and-runtime-facade.md
+   └─ 0006-workflow-run-task-optional.md
 ```
 
 ## 文档权威性（实现任何功能前必读）

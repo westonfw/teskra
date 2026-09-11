@@ -97,7 +97,7 @@ export function seedDatabase(connection: Database.Database, now?: string): SeedG
     connection
       .prepare(
         `INSERT INTO workflow_runs (id, task_id, workflow_definition_id, definition_json, status, current_iteration, total_iterations, criteria_set_id, created_at)
-         VALUES (?, ?, 'default', '{"nodes":["implement","review"]}', 'running', 1, 1, ?, ?)`,
+         VALUES (?, ?, 'default', '{"id":"default","steps":[{"id":"implement","type":"agent","agent":"codex","runOn":"first"},{"id":"review","type":"review-panel","agents":["claude"],"dependsOn":["implement"],"runOn":"always"}]}', 'running', 1, 1, ?, ?)`,
       )
       .run(workflowRunId, taskId, criteriaSetId, at)
 

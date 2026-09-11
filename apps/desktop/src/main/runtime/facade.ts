@@ -48,6 +48,7 @@ import type {
   ListTasksRequest,
   ListTerminalsRequest,
   ListWorkflowDefinitionsRequest,
+  ListWorkflowRunsRequest,
   LoadWorkflowDefinitionRequest,
   MergePreflightResult,
   OpenWorkspaceRequest,
@@ -86,6 +87,9 @@ import type {
   WorkspaceValidationResult,
   WorkflowDefinition,
   WorkflowDefinitionFileInfo,
+  WorkflowRun,
+  WorkflowRunDetail,
+  WorkflowRunIdRequest,
   Worktree,
   WorktreeCleanupRequest,
   WorktreeCleanupResult,
@@ -224,12 +228,14 @@ export interface WorktreePort {
   cleanup(request: WorktreeCleanupRequest): Promise<IpcResult<WorktreeCleanupResult>>
 }
 
-/** TASK-055: repo-local WorkflowDefinition loading (ADR-0005 workflows dir). */
+/** TASK-055/056: repo-local definitions (ADR-0005) + WorkflowRun persistence. */
 export interface WorkflowPort {
   listDefinitions(
     request: ListWorkflowDefinitionsRequest,
   ): IpcResult<readonly WorkflowDefinitionFileInfo[]>
   loadDefinition(request: LoadWorkflowDefinitionRequest): IpcResult<WorkflowDefinition>
+  listRuns(request?: ListWorkflowRunsRequest): IpcResult<readonly WorkflowRun[]>
+  getRun(request: WorkflowRunIdRequest): IpcResult<WorkflowRunDetail | null>
 }
 
 export type FutureRuntimePort = object

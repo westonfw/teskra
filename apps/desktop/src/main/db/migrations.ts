@@ -9,6 +9,7 @@ import criteriaReviewSql from './migrations/003_criteria_review.sql?raw'
 import artifactsMemorySql from './migrations/004_artifacts_memory.sql?raw'
 import permissionsSql from './migrations/005_permissions.sql?raw'
 import worktreeArchiveSql from './migrations/006_worktree_archive.sql?raw'
+import workflowRunTaskOptionalSql from './migrations/007_workflow_run_task_optional.sql?raw'
 
 /**
  * The canonical migration chain (TASK-006). The .sql files under
@@ -26,11 +27,17 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 4, name: '004_artifacts_memory', sql: artifactsMemorySql },
   { version: 5, name: '005_permissions', sql: permissionsSql },
   { version: 6, name: '006_worktree_archive', sql: worktreeArchiveSql },
+  {
+    version: 7,
+    name: '007_workflow_run_task_optional',
+    sql: workflowRunTaskOptionalSql,
+    // Table rebuild (TASK-056 / ADR-0006): FK must be off so DROP TABLE does
+    // not implicit-DELETE the copied rows' dependents; checked in-transaction.
+    foreignKeysOff: true,
+  },
 ]
 
 /** Brings the database schema up to the latest known version. */
-export function migrateDatabase(
-  connection: Database.Database,
-): IpcResult<MigrationRunResult> {
+export function migrateDatabase(connection: Database.Database): IpcResult<MigrationRunResult> {
   return runMigrations(connection, MIGRATIONS)
 }

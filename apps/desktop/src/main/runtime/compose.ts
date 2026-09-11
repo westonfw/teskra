@@ -54,6 +54,7 @@ import { createTerminalManager } from '../terminal/terminal-manager'
 import { createCriteriaManager } from '../tasks/criteria-manager'
 import { createTaskManager } from '../tasks/task-manager'
 import { createWorkflowDefinitionLoader } from '../workflows/definition-loader'
+import { createWorkflowRunStore } from '../workflows/workflow-run-store'
 import { createWorkspaceRuntime, type WslEnvironmentInfo } from '../workspace/runtime'
 import { createWorkspaceManager } from '../workspace/workspace-manager'
 import { createWslManager } from '../workspace/wsl-manager'
@@ -183,6 +184,10 @@ export async function composeTeskraRuntime(
   })
   const promptTemplates = createPromptTemplateService({ paths })
   const workflowDefinitions = createWorkflowDefinitionLoader({ paths })
+  const workflowRunStore = createWorkflowRunStore({
+    workflowRuns: repositories.workflowRuns,
+    tasks: repositories.tasks,
+  })
   /** Maps a Facade workspaceId to its repo path for repo-local overrides. */
   const repoRootFor = (workspaceId?: string): IpcResult<string | undefined> => {
     if (workspaceId === undefined) {
@@ -453,6 +458,8 @@ export async function composeTeskraRuntime(
         if (!repoRoot.ok) return repoRoot
         return workflowDefinitions.load(repoRoot.data as string, request.definitionId)
       },
+      listRuns: (request = {}) => workflowRunStore.listRuns(request),
+      getRun: ({ runId }) => workflowRunStore.getRun(runId),
     },
     git: {
       status: ({ workspaceId }) => gitManager.status(workspaceId),

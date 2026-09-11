@@ -166,3 +166,61 @@ export const loadWorkflowDefinitionRequestSchema = z.strictObject({
   definitionId: z.string().min(1),
 })
 export type LoadWorkflowDefinitionRequest = z.infer<typeof loadWorkflowDefinitionRequestSchema>
+
+/**
+ * Public projection of §139.1 `workflow_runs` (TASK-056), safe to return over
+ * Typed IPC. `taskId` is optional — a WorkflowRun can exist independently of
+ * any Task (ADR-0006). `definition` is the launch-time definition snapshot,
+ * always a validated WorkflowDefinition so a restarted app can interpret it.
+ */
+export const workflowRunSchema = z.strictObject({
+  id: z.string().min(1),
+  taskId: z.string().min(1).optional(),
+  workflowDefinitionId: z.string().min(1),
+  definition: workflowDefinitionSchema,
+  status: workflowRunStatusSchema,
+  currentIteration: z.number().int().nonnegative(),
+  totalIterations: z.number().int().nonnegative(),
+  criteriaSetId: z.string().optional(),
+  createdAt: z.string().datetime(),
+  completedAt: z.string().datetime().optional(),
+})
+export type WorkflowRun = z.infer<typeof workflowRunSchema>
+
+/**
+ * Public projection of §139.1 `workflow_steps` (TASK-056). The same node id
+ * appears once per iteration (plan §153: 同一 node_id 多行是预期的).
+ */
+export const workflowStepSchema = z.strictObject({
+  id: z.string().min(1),
+  workflowRunId: z.string().min(1),
+  nodeId: z.string().min(1),
+  nodeType: workflowNodeTypeSchema,
+  status: workflowStepStatusSchema,
+  iteration: z.number().int().nonnegative(),
+  attempt: z.number().int().positive(),
+  dependsOn: z.array(z.string()).optional(),
+  result: z.record(z.string(), z.unknown()).optional(),
+  startedAt: z.string().datetime().optional(),
+  finishedAt: z.string().datetime().optional(),
+  createdAt: z.string().datetime(),
+})
+export type WorkflowStep = z.infer<typeof workflowStepSchema>
+
+/** Full recoverable state of one WorkflowRun: run row + all step rows. */
+export const workflowRunDetailSchema = z.strictObject({
+  run: workflowRunSchema,
+  steps: z.array(workflowStepSchema),
+})
+export type WorkflowRunDetail = z.infer<typeof workflowRunDetailSchema>
+
+export const workflowRunIdRequestSchema = z.strictObject({
+  runId: z.string().min(1),
+})
+export type WorkflowRunIdRequest = z.infer<typeof workflowRunIdRequestSchema>
+
+export const listWorkflowRunsRequestSchema = z.strictObject({
+  taskId: z.string().min(1).optional(),
+  status: workflowRunStatusSchema.optional(),
+})
+export type ListWorkflowRunsRequest = z.infer<typeof listWorkflowRunsRequestSchema>

@@ -177,7 +177,7 @@ describe('ON DELETE CASCADE (§139.1)', () => {
     }
   })
 
-  it('deleting a task cascades to workflow_runs, criteria sets, review panels, artifacts', () => {
+  it('deleting a task cascades to criteria sets, review panels, artifacts (ADR-0006: workflow_runs 不再级联)', () => {
     const db = migratedDb()
     insertWorkspace(db)
     insertTask(db)
@@ -188,14 +188,11 @@ describe('ON DELETE CASCADE (§139.1)', () => {
 
     db.prepare('DELETE FROM tasks WHERE id = ?').run('t1')
 
-    for (const table of [
-      'workflow_runs',
-      'acceptance_criteria_sets',
-      'review_panels',
-      'artifacts',
-    ]) {
+    for (const table of ['acceptance_criteria_sets', 'review_panels', 'artifacts']) {
       expect(count(db, table), table).toBe(0)
     }
+    // ADR-0006 (TASK-056): WorkflowRun 独立于 Task —— 删除 Task 后保留运行记录。
+    expect(count(db, 'workflow_runs')).toBe(1)
   })
 
   it('deleting a workflow_run cascades to workflow_steps', () => {
@@ -297,6 +294,29 @@ describe('ON DELETE CASCADE (§139.1)', () => {
 })
 
 describe('ON DELETE SET NULL (§139.1)', () => {
+  it('deleting a task sets workflow_runs.task_id to NULL but keeps the run (ADR-0006)', () => {
+    const db = migratedDb()
+    insertWorkspace(db)
+    insertTask(db)
+    insertWorkflowRun(db)
+
+    db.prepare('DELETE FROM tasks WHERE id = ?').run('t1')
+
+    const run = db.prepare('SELECT task_id FROM workflow_runs WHERE id = ?').get('wr1') as {
+      task_id: string | null
+    }
+    expect(run.task_id).toBeNull()
+  })
+
+  it('allows a workflow_run without any task (TASK-056: 独立于 Task)', () => {
+    const db = migratedDb()
+    db.prepare(
+      `INSERT INTO workflow_runs (id, task_id, workflow_definition_id, definition_json, status, created_at)
+       VALUES ('wr-solo', NULL, 'def', '{}', 'created', ?)`,
+    ).run(AT)
+    expect(count(db, 'workflow_runs')).toBe(1)
+  })
+
   it('deleting a task sets agent_runs.task_id to NULL but keeps the audit record', () => {
     const db = migratedDb()
     insertWorkspace(db)
@@ -435,9 +455,7 @@ describe('ON DELETE RESTRICT / NO ACTION (§139.1)', () => {
     insertArtifact(db)
     insertReviewPanel(db, 'p1', { targetArtifactId: 'a1' })
 
-    expect(() => db.prepare('DELETE FROM artifacts WHERE id = ?').run('a1')).toThrow(
-      /FOREIGN KEY/,
-    )
+    expect(() => db.prepare('DELETE FROM artifacts WHERE id = ?').run('a1')).toThrow(/FOREIGN KEY/)
   })
 
   it('refuses to delete a criterion referenced by a finding (criterion_id has no ON DELETE → NO ACTION)', () => {
@@ -452,9 +470,9 @@ describe('ON DELETE RESTRICT / NO ACTION (§139.1)', () => {
        VALUES ('f1', 'r1', 'medium', 'finding', 'c1', ?)`,
     ).run(AT)
 
-    expect(() =>
-      db.prepare('DELETE FROM acceptance_criteria WHERE id = ?').run('c1'),
-    ).toThrow(/FOREIGN KEY/)
+    expect(() => db.prepare('DELETE FROM acceptance_criteria WHERE id = ?').run('c1')).toThrow(
+      /FOREIGN KEY/,
+    )
   })
 })
 

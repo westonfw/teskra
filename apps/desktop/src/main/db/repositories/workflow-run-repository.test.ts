@@ -2,6 +2,8 @@ import Database from 'better-sqlite3'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
+import type { WorkflowDefinition } from '@teskra/contracts'
+
 import { migrateDatabase } from '../migrations'
 import { ISO_UTC_PATTERN } from './common'
 import { createWorkflowRunRepository, type WorkflowRunRepository } from './workflow-run-repository'
@@ -35,6 +37,20 @@ afterEach(() => {
   connection.close()
 })
 
+const DEFINITION: WorkflowDefinition = {
+  id: 'd',
+  steps: [
+    { id: 'implement', type: 'agent', agent: 'codex', runOn: 'first' },
+    {
+      id: 'review',
+      type: 'review-panel',
+      agents: ['claude'],
+      dependsOn: ['implement'],
+      runOn: 'always',
+    },
+  ],
+}
+
 describe('WorkflowRunRepository', () => {
   it('creates a run with its definition snapshot and reads it back', () => {
     setup()
@@ -42,16 +58,53 @@ describe('WorkflowRunRepository', () => {
       id: 'wf-1',
       taskId: 'task-1',
       workflowDefinitionId: 'default',
-      definition: { nodes: ['implement', 'review'] },
+      definition: DEFINITION,
       totalIterations: 2,
     })
     expect(created.ok).toBe(true)
     if (!created.ok) return
     expect(created.data.status).toBe('created')
-    expect(created.data.definition).toEqual({ nodes: ['implement', 'review'] })
+    expect(created.data.definition).toEqual(DEFINITION)
     expect(created.data.totalIterations).toBe(2)
     expect(created.data.createdAt).toMatch(ISO_UTC_PATTERN)
     expect(repo.getRunById('wf-1')).toEqual(created)
+  })
+
+  it('creates a task-less run (TASK-056: 独立于 Task / ADR-0006)', () => {
+    setup()
+    const created = repo.createRun({
+      id: 'wf-solo',
+      workflowDefinitionId: 'default',
+      definition: DEFINITION,
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    expect(created.data.taskId).toBeUndefined()
+
+    const all = repo.listRuns()
+    expect(all.ok && all.data.map((run) => run.id)).toEqual(['wf-solo'])
+    // Task-scoped listing does not surface task-less runs.
+    expect(repo.listRunsByTask('task-1')).toEqual({ ok: true, data: [] })
+  })
+
+  it('lists all runs with a status filter', () => {
+    setup()
+    repo.createRun({
+      id: 'wf-1',
+      taskId: 'task-1',
+      workflowDefinitionId: 'd',
+      definition: DEFINITION,
+    })
+    repo.createRun({
+      id: 'wf-2',
+      workflowDefinitionId: 'd',
+      definition: DEFINITION,
+      status: 'running',
+    })
+    const running = repo.listRuns('running')
+    expect(running.ok && running.data.map((run) => run.id)).toEqual(['wf-2'])
+    const all = repo.listRuns()
+    expect(all.ok && all.data.map((run) => run.id).sort()).toEqual(['wf-1', 'wf-2'])
   })
 
   it('updates run progress and completion', () => {
@@ -60,7 +113,7 @@ describe('WorkflowRunRepository', () => {
       id: 'wf-1',
       taskId: 'task-1',
       workflowDefinitionId: 'default',
-      definition: {},
+      definition: DEFINITION,
     })
     const updated = repo.updateRun('wf-1', {
       status: 'completed',
@@ -75,12 +128,17 @@ describe('WorkflowRunRepository', () => {
 
   it('lists runs by task with status filter', () => {
     setup()
-    repo.createRun({ id: 'wf-1', taskId: 'task-1', workflowDefinitionId: 'd', definition: {} })
+    repo.createRun({
+      id: 'wf-1',
+      taskId: 'task-1',
+      workflowDefinitionId: 'd',
+      definition: DEFINITION,
+    })
     repo.createRun({
       id: 'wf-2',
       taskId: 'task-1',
       workflowDefinitionId: 'd',
-      definition: {},
+      definition: DEFINITION,
       status: 'running',
     })
     const running = repo.listRunsByTask('task-1', 'running')
@@ -89,7 +147,12 @@ describe('WorkflowRunRepository', () => {
 
   it('creates and updates steps with depends_on / result roundtrip', () => {
     setup()
-    repo.createRun({ id: 'wf-1', taskId: 'task-1', workflowDefinitionId: 'd', definition: {} })
+    repo.createRun({
+      id: 'wf-1',
+      taskId: 'task-1',
+      workflowDefinitionId: 'd',
+      definition: DEFINITION,
+    })
     const step = repo.createStep({
       id: 'step-1',
       workflowRunId: 'wf-1',
@@ -120,7 +183,12 @@ describe('WorkflowRunRepository', () => {
 
   it('returns VALIDATION_FAILED for corrupted definition_json', () => {
     setup()
-    repo.createRun({ id: 'wf-1', taskId: 'task-1', workflowDefinitionId: 'd', definition: {} })
+    repo.createRun({
+      id: 'wf-1',
+      taskId: 'task-1',
+      workflowDefinitionId: 'd',
+      definition: DEFINITION,
+    })
     connection
       .prepare('UPDATE workflow_runs SET definition_json = ? WHERE id = ?')
       .run('not json', 'wf-1')
@@ -133,7 +201,12 @@ describe('WorkflowRunRepository', () => {
 
   it('rejects a stored step status outside the workflow step enum', () => {
     setup()
-    repo.createRun({ id: 'wf-1', taskId: 'task-1', workflowDefinitionId: 'd', definition: {} })
+    repo.createRun({
+      id: 'wf-1',
+      taskId: 'task-1',
+      workflowDefinitionId: 'd',
+      definition: DEFINITION,
+    })
     repo.createStep({ id: 'step-1', workflowRunId: 'wf-1', nodeId: 'n', nodeType: 'agent' })
     connection
       .prepare('UPDATE workflow_steps SET status = ? WHERE id = ?')
@@ -147,7 +220,12 @@ describe('WorkflowRunRepository', () => {
 
   it('deletes a run and cascades its steps', () => {
     setup()
-    repo.createRun({ id: 'wf-1', taskId: 'task-1', workflowDefinitionId: 'd', definition: {} })
+    repo.createRun({
+      id: 'wf-1',
+      taskId: 'task-1',
+      workflowDefinitionId: 'd',
+      definition: DEFINITION,
+    })
     repo.createStep({ id: 'step-1', workflowRunId: 'wf-1', nodeId: 'n', nodeType: 'agent' })
     expect(repo.deleteRun('wf-1')).toEqual({ ok: true, data: true })
     expect(repo.getStepById('step-1')).toEqual({ ok: true, data: null })
