@@ -45,6 +45,17 @@ test.describe('Create Terminal', () => {
 
       const output = await outputPromise
       expect(output).toContain(marker)
+
+      // Close the PTY session before cleanup: on Windows the shell keeps the
+      // repo directory as its cwd, and an open cwd handle makes rmdir EBUSY.
+      await page.evaluate(async (workspaceId) => {
+        const listed = await window.teskra.terminal.list({ workspaceId })
+        if (listed.ok) {
+          for (const session of listed.data) {
+            await window.teskra.terminal.close({ terminalId: session.id })
+          }
+        }
+      }, workspace.id)
     } finally {
       removeDir(repoDir)
     }

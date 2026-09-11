@@ -7,6 +7,23 @@ test.describe('Start Fake Agent', () => {
       const workspace = await openAndSwitchWorkspace(page, repoDir)
       await page.getByRole('menuitem', { name: 'Runs' }).click()
 
+      // ConPTY on Windows fails to resolve the bare `node` command; pin the
+      // executable to an absolute path (same fix as the compose unit tests).
+      // Harmless on Linux, where the absolute path behaves identically.
+      await page.evaluate(
+        async ({ runtime, nodePath }) => {
+          const overridden = await window.teskra.agent.setExecutableOverride({
+            agentId: 'fake',
+            runtime,
+            path: nodePath,
+          })
+          if (!overridden.ok) {
+            throw new Error(`setExecutableOverride failed: ${overridden.error.message}`)
+          }
+        },
+        { runtime: workspace.runtime, nodePath: process.execPath },
+      )
+
       // The Fake Agent is available without Codex/Claude installed; it is the
       // deterministic test double from TASK-083 and consumes no real quota.
       await expect(

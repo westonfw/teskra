@@ -63,7 +63,8 @@ export function createGitRepo(): string {
 }
 
 export function removeDir(dir: string): void {
-  rmSync(dir, { recursive: true, force: true })
+  // Windows releases file handles (SQLite, PTY cwd) asynchronously; retry.
+  rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 }
 
 /**
