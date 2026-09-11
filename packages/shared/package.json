@@ -2,6 +2,7 @@
   "name": "@teskra/shared",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "description": "Cross-process shared pure functions.",
   "type": "module",
   "types": "./src/index.ts",

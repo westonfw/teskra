@@ -2,6 +2,7 @@
   "name": "teskra",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "description": "Teskra — Multi-Agent Coding Workbench. Orchestrate your coding agents.",
   "workspaces": [
     "apps/*",
