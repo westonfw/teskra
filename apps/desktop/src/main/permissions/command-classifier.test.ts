@@ -101,6 +101,13 @@ describe('CommandClassifier conservative semantics (TASK-064)', () => {
 })
 
 describe('CommandClassifier rule table (TASK-064)', () => {
+  it('classifies sed in-place editing as a workspace write, including the long flag', () => {
+    expect(classifyCommand('sed -i s/a/b/ file.txt')).toBe('WORKSPACE_WRITE')
+    expect(classifyCommand('sed --in-place s/a/b/ file.txt')).toBe('WORKSPACE_WRITE')
+    expect(classifyCommand('sed --in-place=.bak s/a/b/ file.txt')).toBe('WORKSPACE_WRITE')
+    expect(classifyCommand('sed s/a/b/ file.txt')).toBe('READ_ONLY')
+  })
+
   it('is data-driven: every rule has an id and a non-UNKNOWN risk', () => {
     expect(COMMAND_RULES.length).toBeGreaterThan(0)
     for (const rule of COMMAND_RULES) {

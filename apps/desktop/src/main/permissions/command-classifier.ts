@@ -688,7 +688,14 @@ export const COMMAND_RULES: readonly CommandRule[] = [
   {
     id: 'sed-in-place',
     risk: 'WORKSPACE_WRITE',
-    match: (inv) => isExec(inv, 'sed') && expandedFlags(inv.args).has('-i'),
+    match: (inv) => {
+      if (!isExec(inv, 'sed')) return false
+      const flags = expandedFlags(inv.args)
+      return (
+        flags.has('-i') ||
+        [...flags].some((flag) => flag === '--in-place' || flag.startsWith('--in-place='))
+      )
+    },
   },
   {
     id: 'sed-stream',
