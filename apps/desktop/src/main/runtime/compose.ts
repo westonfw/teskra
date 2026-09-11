@@ -43,6 +43,7 @@ import { createMergeService } from '../git/merge-service'
 import { createWorktreeManager } from '../git/worktree-manager'
 import { createDoctorService } from '../doctor/doctor-service'
 import { getLogger, initializeLogging } from '../logger'
+import { createRetentionService } from '../maintenance/retention-service'
 import { createTeskraPaths, type TeskraPaths } from '../paths'
 import { createCommandRunner, type CommandRunner } from '../process/command-runner'
 import { createProcessManager } from '../process/process-manager'
@@ -291,6 +292,22 @@ export async function composeTeskraRuntime(
     events,
     preflight: mergePreflight,
     resolveRuntime: (workspace) => runtimeFor(workspace.runtime),
+  })
+  // TASK-069: the RetentionService GC reads the `retention` config group per
+  // workspace through the Config Layers (TASK-080).
+  const retentionService = createRetentionService({
+    commands,
+    workspaces: repositories.workspaces,
+    worktrees: repositories.worktrees,
+    runs: repositories.agentRuns,
+    handoffs: repositories.handoffs,
+    events,
+    paths,
+    resolveRuntime: (workspace) => runtimeFor(workspace.runtime),
+    resolvePolicy: (workspaceId) => {
+      const resolved = config.resolve(workspaceId === undefined ? undefined : { workspaceId })
+      return resolved.ok ? { ok: true, data: resolved.data.config.retention } : resolved
+    },
   })
   const agentDetector = createAgentDetector({
     registry: registeredAgents.data,
@@ -710,6 +727,11 @@ export async function composeTeskraRuntime(
       archive: (request) => worktreeManager.archive(request),
       cleanup: (request) => worktreeManager.cleanup(request),
     },
+    maintenance: {
+      planRetention: (request = {}) => retentionService.plan(request),
+      runRetention: (request = {}) => retentionService.run(request),
+      cancelRetention: () => retentionService.cancel(),
+    },
     agent: {
       listDefinitions: () => ({ ok: true, data: registeredAgents.data.list() }),
       detect: (request) => agentDetector.detect(request),
@@ -815,7 +837,8 @@ export async function composeTeskraRuntime(
       list: () => credentials.list(),
     },
     settings: {
-      resolveConfig: (request = {}) => config.resolve(request),      updateConfig: (request) => {
+      resolveConfig: (request = {}) => config.resolve(request),
+      updateConfig: (request) => {
         if (request.layer === 'global') {
           return config.updateGlobal(request.patch)
         }

@@ -21,6 +21,10 @@ function stubPaths(): TeskraPaths {
     db: () => ({ ok: true, data: '/teskra-home/db/teskra.sqlite' }),
     logs: () => ({ ok: true, data: '/teskra-home/logs' }),
     runDir: (runId) => ({ ok: true, data: `/teskra-home/runs/${runId}` }),
+    runLogFiles: (runDirectory) => ({
+      events: `${runDirectory}/events.jsonl`,
+      terminal: `${runDirectory}/terminal.log`,
+    }),
     runFiles: (runId) => ({
       ok: true,
       data: {
@@ -129,6 +133,7 @@ describe('ConfigService.resolve — layer order', () => {
       environment: { defaultDistro: null },
       agents: { executableOverrides: {} },
       review: { mediumBlockThreshold: 0 }, // default untouched
+      retention: { mergedWorktreeDays: 1, completedRunLogsDays: 30, discardedRunDays: 30 },
     })
     expect(sources).toEqual({
       'logging.level': 'global',
@@ -138,6 +143,9 @@ describe('ConfigService.resolve — layer order', () => {
       'watchdog.stalledThresholdMs': 'override',
       'environment.defaultDistro': 'default',
       'review.mediumBlockThreshold': 'default',
+      'retention.mergedWorktreeDays': 'default',
+      'retention.completedRunLogsDays': 'default',
+      'retention.discardedRunDays': 'default',
     })
   })
 

@@ -355,6 +355,18 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.worktree.cleanup(request)),
   )
   register(
+    ipcChannelDefinitions.maintenanceRetentionPlan,
+    withRuntime((runtime, request) => runtime.maintenance.planRetention(request)),
+  )
+  register(
+    ipcChannelDefinitions.maintenanceRetentionRun,
+    withRuntime((runtime, request) => runtime.maintenance.runRetention(request)),
+  )
+  register(
+    ipcChannelDefinitions.maintenanceRetentionCancel,
+    withRuntime((runtime) => runtime.maintenance.cancelRetention()),
+  )
+  register(
     ipcChannelDefinitions.terminalCreate,
     withRuntime((runtime, request) => runtime.terminal.create(request)),
   )

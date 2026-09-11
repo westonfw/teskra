@@ -291,6 +291,26 @@ function fakeRuntime(): TeskraRuntime {
         ok({ workspaceId: 'ws1', prunedRecordIds: [], removedDirectoryIds: [], skippedIds: [] }),
       ),
     },
+    maintenance: {
+      planRetention: vi.fn(async () =>
+        ok({
+          generatedAt: '2026-09-10T00:00:00.000Z',
+          policy: { mergedWorktreeDays: 1, completedRunLogsDays: 30, discardedRunDays: 30 },
+          items: [],
+        }),
+      ),
+      runRetention: vi.fn(async () =>
+        ok({
+          startedAt: '2026-09-10T00:00:00.000Z',
+          finishedAt: '2026-09-10T00:00:00.000Z',
+          dryRun: false,
+          cancelled: false,
+          policy: { mergedWorktreeDays: 1, completedRunLogsDays: 30, discardedRunDays: 30 },
+          entries: [],
+        }),
+      ),
+      cancelRetention: vi.fn(() => ok(false)),
+    },
     system: {
       info: vi.fn(() => ok({ appVersion: '0.1.0', runtimeVersion: '22.0.0' })),
       paths: vi.fn(() =>
@@ -322,13 +342,15 @@ function fakeRuntime(): TeskraRuntime {
     },
     settings: {
       resolveConfig: vi.fn(() =>
-        ok({          config: {
+        ok({
+          config: {
             logging: { level: 'info' as const },
             concurrency: { maxGlobalRuns: 4, maxRunsPerWorkspace: 3, maxRunsPerAgent: 2 },
             watchdog: { stalledThresholdMs: 600_000 },
             environment: { defaultDistro: null },
             agents: { executableOverrides: {} },
             review: { mediumBlockThreshold: 0 },
+            retention: { mergedWorktreeDays: 1, completedRunLogsDays: 30, discardedRunDays: 30 },
           },
           sources: {
             'logging.level': 'default' as const,
@@ -351,6 +373,7 @@ function fakeRuntime(): TeskraRuntime {
             environment: { defaultDistro: null },
             agents: { executableOverrides: {} },
             review: { mediumBlockThreshold: 0 },
+            retention: { mergedWorktreeDays: 1, completedRunLogsDays: 30, discardedRunDays: 30 },
           },
           sources: { 'logging.level': 'global' as const },
           warnings: [],

@@ -18,6 +18,10 @@ function stubPaths(): TeskraPaths {
     db: () => ({ ok: true, data: `${HOST_HOME}/db/teskra.sqlite` }),
     logs: () => ({ ok: true, data: `${HOST_HOME}/logs` }),
     runDir: (runId) => ({ ok: true, data: `${HOST_HOME}/runs/${runId}` }),
+    runLogFiles: (runDirectory) => ({
+      events: `${runDirectory}/events.jsonl`,
+      terminal: `${runDirectory}/terminal.log`,
+    }),
     runFiles: (runId) => ({
       ok: true,
       data: {

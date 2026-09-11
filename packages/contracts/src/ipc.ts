@@ -130,6 +130,16 @@ import {
 } from './doctor'
 import type { WorkbenchEventName, WorkbenchEvents } from './event'
 import {
+  retentionPlanRequestSchema,
+  retentionPlanSchema,
+  retentionReportSchema,
+  retentionRunRequestSchema,
+  type RetentionPlan,
+  type RetentionPlanRequest,
+  type RetentionReport,
+  type RetentionRunRequest,
+} from './maintenance'
+import {
   listPromptTemplatesRequestSchema,
   promptTemplateInfoSchema,
   renderPromptTemplateRequestSchema,
@@ -366,6 +376,9 @@ export const IPC_CHANNELS = {
   worktreeDiscard: 'teskra:worktree:discard',
   worktreeArchive: 'teskra:worktree:archive',
   worktreeCleanup: 'teskra:worktree:cleanup',
+  maintenanceRetentionPlan: 'teskra:maintenance:retention:plan',
+  maintenanceRetentionRun: 'teskra:maintenance:retention:run',
+  maintenanceRetentionCancel: 'teskra:maintenance:retention:cancel',
   terminalCreate: 'teskra:terminal:create',
   terminalWrite: 'teskra:terminal:write',
   terminalResize: 'teskra:terminal:resize',
@@ -760,6 +773,23 @@ export const worktreeCleanupChannel = channel(
   worktreeCleanupRequestSchema,
   worktreeCleanupResultSchema,
 )
+// TASK-069 RetentionService: plan() is the dry-run preview; run() executes
+// the GC; cancel() aborts the in-flight run between items.
+export const maintenanceRetentionPlanChannel = channel(
+  IPC_CHANNELS.maintenanceRetentionPlan,
+  retentionPlanRequestSchema,
+  retentionPlanSchema,
+)
+export const maintenanceRetentionRunChannel = channel(
+  IPC_CHANNELS.maintenanceRetentionRun,
+  retentionRunRequestSchema,
+  retentionReportSchema,
+)
+export const maintenanceRetentionCancelChannel = channel(
+  IPC_CHANNELS.maintenanceRetentionCancel,
+  noRequestSchema,
+  z.boolean(),
+)
 export const terminalCreateChannel = channel(
   IPC_CHANNELS.terminalCreate,
   createTerminalRequestSchema,
@@ -1008,6 +1038,9 @@ export const ipcChannelDefinitions = {
   worktreeDiscard: worktreeDiscardChannel,
   worktreeArchive: worktreeArchiveChannel,
   worktreeCleanup: worktreeCleanupChannel,
+  maintenanceRetentionPlan: maintenanceRetentionPlanChannel,
+  maintenanceRetentionRun: maintenanceRetentionRunChannel,
+  maintenanceRetentionCancel: maintenanceRetentionCancelChannel,
   terminalCreate: terminalCreateChannel,
   terminalWrite: terminalWriteChannel,
   terminalResize: terminalResizeChannel,
@@ -1154,6 +1187,11 @@ export interface TeskraBridge {
     discard(request: WorktreeDiscardRequest): Promise<IpcResult<Worktree>>
     archive(request: WorktreeIdRequest): Promise<IpcResult<Worktree>>
     cleanup(request: WorktreeCleanupRequest): Promise<IpcResult<WorktreeCleanupResult>>
+  }
+  readonly maintenance: {
+    planRetention(request?: RetentionPlanRequest): Promise<IpcResult<RetentionPlan>>
+    runRetention(request?: RetentionRunRequest): Promise<IpcResult<RetentionReport>>
+    cancelRetention(): Promise<IpcResult<boolean>>
   }
   readonly runtime: {
     info(): Promise<IpcResult<SystemInfo>>
