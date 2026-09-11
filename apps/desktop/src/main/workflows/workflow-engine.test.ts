@@ -447,4 +447,20 @@ describe('createWorkflowEngine (TASK-057)', () => {
     await engine.cancel(run.id)
     await first
   })
+
+  it('cancels every active pass on dispose (TASK-059)', async () => {
+    const { engine, run, agent, stepByNode } = setup(PARALLEL)
+
+    const pass = engine.start(run.id, CONTEXT)
+    expect(stepByNode('a').status).toBe('running')
+
+    engine.dispose()
+    const finished = await pass
+
+    expect(finished.ok).toBe(true)
+    expect(agent.cancelled).toHaveLength(2)
+    expect(stepByNode('a').status).toBe('cancelled')
+    expect(stepByNode('b').status).toBe('cancelled')
+    expect(finished.ok && finished.data.run.status).toBe('cancelled')
+  })
 })

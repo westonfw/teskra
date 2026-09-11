@@ -221,17 +221,27 @@ import {
   loadWorkflowDefinitionRequestSchema,
   workflowDefinitionFileInfoSchema,
   workflowDefinitionSchema,
+  workflowDispatchRequestSchema,
+  workflowDispatchResultSchema,
   workflowRunDetailSchema,
   workflowRunIdRequestSchema,
   workflowRunSchema,
+  workflowRunStartRequestSchema,
+  workflowStepResolveRequestSchema,
+  workflowStepSchema,
   type ListWorkflowDefinitionsRequest,
   type ListWorkflowRunsRequest,
   type LoadWorkflowDefinitionRequest,
   type WorkflowDefinition,
   type WorkflowDefinitionFileInfo,
+  type WorkflowDispatchRequest,
+  type WorkflowDispatchResult,
   type WorkflowRun,
   type WorkflowRunDetail,
   type WorkflowRunIdRequest,
+  type WorkflowRunStartRequest,
+  type WorkflowStep,
+  type WorkflowStepResolveRequest,
 } from './workflow'
 
 export const IPC_CHANNELS = {
@@ -318,6 +328,10 @@ export const IPC_CHANNELS = {
   workflowLoadDefinition: 'teskra:workflow:definition:load',
   workflowRunList: 'teskra:workflow:run:list',
   workflowRunGet: 'teskra:workflow:run:get',
+  workflowRunStart: 'teskra:workflow:run:start',
+  workflowRunCancel: 'teskra:workflow:run:cancel',
+  workflowStepResolve: 'teskra:workflow:step:resolve',
+  workflowDispatch: 'teskra:workflow:dispatch',
 } as const
 export type IpcChannelName = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
 
@@ -747,6 +761,26 @@ export const workflowRunGetChannel = channel(
   workflowRunIdRequestSchema,
   workflowRunDetailSchema.nullable(),
 )
+export const workflowRunStartChannel = channel(
+  IPC_CHANNELS.workflowRunStart,
+  workflowRunStartRequestSchema,
+  workflowRunDetailSchema,
+)
+export const workflowRunCancelChannel = channel(
+  IPC_CHANNELS.workflowRunCancel,
+  workflowRunIdRequestSchema,
+  workflowRunSchema,
+)
+export const workflowStepResolveChannel = channel(
+  IPC_CHANNELS.workflowStepResolve,
+  workflowStepResolveRequestSchema,
+  workflowStepSchema,
+)
+export const workflowDispatchChannel = channel(
+  IPC_CHANNELS.workflowDispatch,
+  workflowDispatchRequestSchema,
+  workflowDispatchResultSchema,
+)
 
 export const ipcChannelDefinitions = {
   ping: pingChannel,
@@ -832,6 +866,10 @@ export const ipcChannelDefinitions = {
   workflowLoadDefinition: workflowLoadDefinitionChannel,
   workflowRunList: workflowRunListChannel,
   workflowRunGet: workflowRunGetChannel,
+  workflowRunStart: workflowRunStartChannel,
+  workflowRunCancel: workflowRunCancelChannel,
+  workflowStepResolve: workflowStepResolveChannel,
+  workflowDispatch: workflowDispatchChannel,
 } as const
 
 export interface TeskraBridge {
@@ -957,6 +995,10 @@ export interface TeskraBridge {
     loadDefinition(request: LoadWorkflowDefinitionRequest): Promise<IpcResult<WorkflowDefinition>>
     listRuns(request?: ListWorkflowRunsRequest): Promise<IpcResult<WorkflowRun[]>>
     getRun(request: WorkflowRunIdRequest): Promise<IpcResult<WorkflowRunDetail | null>>
+    startRun(request: WorkflowRunStartRequest): Promise<IpcResult<WorkflowRunDetail>>
+    cancelRun(request: WorkflowRunIdRequest): Promise<IpcResult<WorkflowRun>>
+    resolveStep(request: WorkflowStepResolveRequest): Promise<IpcResult<WorkflowStep>>
+    dispatch(request: WorkflowDispatchRequest): Promise<IpcResult<WorkflowDispatchResult>>
   }
   readonly events: {
     subscribe<Name extends WorkbenchEventName>(

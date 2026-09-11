@@ -1,7 +1,8 @@
 import { z } from 'zod'
 
-import { agentRoleSchema } from './agent'
-import { worktreeIsolationSchema } from './git'
+import { agentRoleSchema, agentRunSchema } from './agent'
+import { worktreeIsolationSchema, worktreeSchema } from './git'
+import { handoffRecordSchema } from './handoff'
 
 /**
  * Workflow enums mirror §139.1 (002_runs.sql): `workflow_runs.status`
@@ -224,3 +225,53 @@ export const listWorkflowRunsRequestSchema = z.strictObject({
   status: workflowRunStatusSchema.optional(),
 })
 export type ListWorkflowRunsRequest = z.infer<typeof listWorkflowRunsRequestSchema>
+
+/**
+ * TASK-059 Dispatch Primitive (Task → One Agent → Handoff). `agent` is an
+ * AgentRegistry id (free-form string, never an enum). Dispatch is always
+ * orchestrated, so it always creates a worktree (ADR-0002 red line:
+ * orchestrated without a worktree must be refused); `isolation` only selects
+ * the worktree's isolation tier and defaults to 'worktree'.
+ */
+export const workflowDispatchRequestSchema = z.strictObject({
+  workspaceId: z.string().min(1),
+  taskId: z.string().min(1),
+  agent: z.string().min(1),
+  isolation: worktreeIsolationSchema.optional(),
+  model: z.string().min(1).optional(),
+  /** Explicit prompt; when omitted the 'implement' template (TASK-079) is rendered. */
+  prompt: z.string().optional(),
+})
+export type WorkflowDispatchRequest = z.infer<typeof workflowDispatchRequestSchema>
+
+/**
+ * Result of a settled dispatch: the WorkflowRun (final status), the AgentRun,
+ * the worktree it ran in, and the collected handoff (ADR-0004; `null` only
+ * when collection itself failed — a run that wrote nothing still yields a
+ * 'missing' fallback row).
+ */
+export const workflowDispatchResultSchema = z.strictObject({
+  run: workflowRunSchema,
+  agentRun: agentRunSchema,
+  worktree: worktreeSchema,
+  handoffPath: z.string().min(1),
+  handoff: handoffRecordSchema.nullable(),
+})
+export type WorkflowDispatchResult = z.infer<typeof workflowDispatchResultSchema>
+
+/** TASK-059: starts one DAG pass of an existing WorkflowRun via WorkflowEngine. */
+export const workflowRunStartRequestSchema = z.strictObject({
+  runId: z.string().min(1),
+  workspaceId: z.string().min(1),
+  /** Present → agent steps run orchestrated; absent → attended (ADR-0002). */
+  worktreeId: z.string().min(1).optional(),
+})
+export type WorkflowRunStartRequest = z.infer<typeof workflowRunStartRequestSchema>
+
+/** TASK-059: resolves a suspended step (checkpoint / criteria-gate / review-panel). */
+export const workflowStepResolveRequestSchema = z.strictObject({
+  stepId: z.string().min(1),
+  outcome: z.string().min(1).optional(),
+  result: z.record(z.string(), z.unknown()).optional(),
+})
+export type WorkflowStepResolveRequest = z.infer<typeof workflowStepResolveRequestSchema>

@@ -87,9 +87,14 @@ import type {
   WorkspaceValidationResult,
   WorkflowDefinition,
   WorkflowDefinitionFileInfo,
+  WorkflowDispatchRequest,
+  WorkflowDispatchResult,
   WorkflowRun,
   WorkflowRunDetail,
   WorkflowRunIdRequest,
+  WorkflowRunStartRequest,
+  WorkflowStep,
+  WorkflowStepResolveRequest,
   Worktree,
   WorktreeCleanupRequest,
   WorktreeCleanupResult,
@@ -228,7 +233,8 @@ export interface WorktreePort {
   cleanup(request: WorktreeCleanupRequest): Promise<IpcResult<WorktreeCleanupResult>>
 }
 
-/** TASK-055/056: repo-local definitions (ADR-0005) + WorkflowRun persistence. */
+/** TASK-055/056: repo-local definitions (ADR-0005) + WorkflowRun persistence;
+ *  TASK-059: engine control (start/cancel/resolveStep) + Dispatch Primitive. */
 export interface WorkflowPort {
   listDefinitions(
     request: ListWorkflowDefinitionsRequest,
@@ -236,6 +242,10 @@ export interface WorkflowPort {
   loadDefinition(request: LoadWorkflowDefinitionRequest): IpcResult<WorkflowDefinition>
   listRuns(request?: ListWorkflowRunsRequest): IpcResult<readonly WorkflowRun[]>
   getRun(request: WorkflowRunIdRequest): IpcResult<WorkflowRunDetail | null>
+  startRun(request: WorkflowRunStartRequest): Promise<IpcResult<WorkflowRunDetail>>
+  cancelRun(request: WorkflowRunIdRequest): Promise<IpcResult<WorkflowRun>>
+  resolveStep(request: WorkflowStepResolveRequest): IpcResult<WorkflowStep>
+  dispatch(request: WorkflowDispatchRequest): Promise<IpcResult<WorkflowDispatchResult>>
 }
 
 export type FutureRuntimePort = object

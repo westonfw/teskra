@@ -78,6 +78,18 @@ export interface WorkflowExecutionContext {
    * worktree must be refused, and AgentManager.start enforces that too).
    */
   readonly worktreeId?: string
+  /**
+   * Pre-allocated AgentRun id forwarded to AgentManager (TASK-059). Only
+   * meaningful for a single-agent pass: Dispatch pre-allocates it so the
+   * worktree branch and the prompt's handoff env paths can be bound before
+   * launch. A multi-agent DAG must NOT set this — every node would share one
+   * run id.
+   */
+  readonly agentRunId?: string
+  /** Prompt forwarded to agent steps (TASK-059 renders it before start). */
+  readonly prompt?: string
+  /** Model override forwarded to agent steps (TASK-059). */
+  readonly model?: string
   /** TASK-058: runtime + cwd that shell steps execute under. */
   readonly runtime?: WorkspaceRuntime
   readonly cwd?: string
@@ -134,6 +146,12 @@ export interface WorkflowEngine {
   resolveStep(stepId: string, resolution?: ResolveStepRequest): IpcResult<WorkflowStep>
   /** Stops queued (pending) steps and cancels running ones via their executor. */
   cancel(runId: string): Promise<IpcResult<WorkflowRun>>
+  /**
+   * Best-effort shutdown (TASK-059): cancels every active pass so executors
+   * release their event subscriptions. Disposal of the composition root calls
+   * this before the EventBus is cleared.
+   */
+  dispose(): void
 }
 
 export interface WorkflowEngineDeps {
@@ -259,10 +277,13 @@ function createAgentStepExecutor(deps: {
       const request: StartAgentRunRequest = {
         workspaceId: context.workspaceId,
         agentType: node.agent,
+        ...(context.agentRunId === undefined ? {} : { runId: context.agentRunId }),
         ...(node.role === undefined ? {} : { role: node.role }),
         ...(run.taskId === undefined ? {} : { taskId: run.taskId }),
         executionMode: context.worktreeId === undefined ? 'attended' : 'orchestrated',
         ...(context.worktreeId === undefined ? {} : { worktreeId: context.worktreeId }),
+        ...(context.prompt === undefined ? {} : { prompt: context.prompt }),
+        ...(context.model === undefined ? {} : { model: context.model }),
       }
       const started = await deps.agents.start(request)
       if (!started.ok) {
@@ -682,6 +703,12 @@ export function createWorkflowEngine(deps: WorkflowEngineDeps): WorkflowEngine {
       }
       settleWithDetail(state, deps.runs.getRun(runId))
       return updated
+    },
+
+    dispose() {
+      for (const runId of [...passes.keys()]) {
+        void engine.cancel(runId)
+      }
     },
   }
 

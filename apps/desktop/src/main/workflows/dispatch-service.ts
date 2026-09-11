@@ -1,0 +1,304 @@
+import { randomUUID } from 'node:crypto'
+
+import type {
+  IpcResult,
+  WorkflowDispatchRequest,
+  WorkflowDispatchResult,
+  WorkbenchEvents,
+  WorkflowRunStatus,
+} from '@teskra/contracts'
+
+import type { AgentManager } from '../agents/agent-manager'
+import type { AgentRegistry } from '../agents/agent-registry'
+import type { CriteriaRepository } from '../db/repositories/criteria-repository'
+import type { HandoffRepository } from '../db/repositories/handoff-repository'
+import type { TaskRepository } from '../db/repositories/task-repository'
+import type { WorkspaceRepository } from '../db/repositories/workspace-repository'
+import type { EventBus } from '../events/event-bus'
+import { type InternalAppError, toPublicError } from '../errors'
+import type { WorktreeManager } from '../git/worktree-manager'
+import { getLogger } from '../logger'
+import type { TeskraPaths } from '../paths'
+import type { PromptTemplateService } from '../prompts/prompt-template-service'
+import type { WorkflowEngine } from './workflow-engine'
+import type { WorkflowRunStore } from './workflow-run-store'
+
+/**
+ * DispatchService (TASK-059, teskra-tasks.md) — the Dispatch Primitive:
+ *
+ *   Task → One Agent → Handoff
+ *
+ * Design choice: dispatch REUSES the WorkflowEngine instead of calling
+ * AgentManager directly. A single-agent dispatch has no DAG semantics, but
+ * routing it through a one-node WorkflowRun keeps one uniform execution
+ * record (workflow_runs + workflow_steps rows, workflow.run_updated /
+ * workflow.step_updated events) for every orchestrated launch, and TASK-062's
+ * Iterate primitive builds on the same records. The cost — one extra
+ * definition snapshot row per dispatch — is accepted deliberately.
+ *
+ * Isolation semantics (ADR-0002 red line): dispatch is ALWAYS orchestrated,
+ * and an orchestrated AgentRun without a worktree must be refused — so the
+ * worktree is created up-front and is never optional. `request.isolation`
+ * only selects the worktree's isolation tier and defaults to 'worktree'
+ * (WorktreeManager's own default). There is deliberately no attended
+ * dispatch; ad-hoc attended runs stay on AgentManager.start.
+ *
+ * Flow:
+ *
+ * 1. Resolve the agent definition (AgentRegistry), task and workspace; the
+ *    task must belong to the workspace.
+ * 2. Pre-allocate the AgentRun id, then create the worktree bound to it
+ *    (branch `agent/<taskId>/<agentId>/<runId>`, ADR-0003 — WorktreeManager
+ *    owns the naming).
+ * 3. Render the prompt: `request.prompt` wins; otherwise the TASK-079
+ *    'implement' template with task / confirmed criteria / ADR-0004 handoff
+ *    env paths (derived from the pre-allocated run id so they match the paths
+ *    AgentManager injects).
+ * 4. Persist a one-node WorkflowRun ('implement' agent node) and execute one
+ *    engine pass with { worktreeId, agentRunId, prompt } in the context. The
+ *    engine's agent executor launches the run orchestrated inside the
+ *    worktree; on terminal exit AgentManager's HandoffCollector persists the
+ *    handoff BEFORE emitting the event the engine waits on, so the handoff is
+ *    already queryable when the pass settles.
+ * 5. The engine leaves the settled run `waiting`; dispatch owns the final
+ *    fate (engine convention) and marks it completed / failed / cancelled
+ *    from the step outcome.
+ *
+ * Failure hygiene: if anything between worktree creation and WorkflowRun
+ * persistence fails, the fresh worktree is discarded (best-effort) so no
+ * orphan worktree is left behind; once the run exists it stays for
+ * inspection, matching how AgentManager keeps failed runs.
+ */
+export interface DispatchService {
+  /**
+   * Settles only when the dispatched AgentRun reaches a terminal state — the
+   * returned promise can take as long as the agent itself. A failed agent run
+   * is NOT an IPC error: it returns `ok` with run.status 'failed' (and
+   * whatever handoff the collector produced).
+   */
+  dispatch(request: WorkflowDispatchRequest): Promise<IpcResult<WorkflowDispatchResult>>
+}
+
+export interface DispatchServiceDeps {
+  readonly runs: WorkflowRunStore
+  readonly engine: WorkflowEngine
+  readonly registry: Pick<AgentRegistry, 'get'>
+  readonly tasks: Pick<TaskRepository, 'getById'>
+  readonly criteria: Pick<CriteriaRepository, 'listSetsByTask' | 'listCriteria'>
+  readonly workspaces: Pick<WorkspaceRepository, 'getById'>
+  readonly worktreeManager: Pick<WorktreeManager, 'create' | 'discard'>
+  readonly agents: Pick<AgentManager, 'get'>
+  readonly handoffs: Pick<HandoffRepository, 'getByRunId'>
+  readonly promptTemplates: Pick<PromptTemplateService, 'render'>
+  readonly paths: TeskraPaths
+  readonly events: EventBus<WorkbenchEvents>
+  readonly createAgentRunId?: () => string
+}
+
+/** Fixed identity of the one-node definition snapshot every dispatch persists. */
+const DISPATCH_DEFINITION_ID = 'dispatch'
+const DISPATCH_NODE_ID = 'implement'
+
+function fail<T>(error: InternalAppError): IpcResult<T> {
+  return { ok: false, error: toPublicError(error) }
+}
+
+function invalid<T>(message: string, detail: string): IpcResult<T> {
+  return fail({ code: 'VALIDATION_FAILED', message, retryable: false, detail })
+}
+
+export function createDispatchService(deps: DispatchServiceDeps): DispatchService {
+  const logger = getLogger('runtime')
+  const createAgentRunId = deps.createAgentRunId ?? randomUUID
+
+  const emitRunStatus = (runId: string, status: WorkflowRunStatus): void => {
+    deps.events.emit('workflow.run_updated', { runId, status })
+  }
+
+  return {
+    async dispatch(request) {
+      const agent = deps.registry.get(request.agent)
+      if (agent === undefined) {
+        return invalid(
+          `Agent "${request.agent}" is not registered.`,
+          `DispatchService could not resolve agent=${JSON.stringify(request.agent)}`,
+        )
+      }
+      const task = deps.tasks.getById(request.taskId)
+      if (!task.ok) return task
+      if (task.data === null) {
+        return invalid(
+          `Task "${request.taskId}" was not found.`,
+          `DispatchService could not resolve task id=${JSON.stringify(request.taskId)}`,
+        )
+      }
+      if (task.data.workspaceId !== request.workspaceId) {
+        return invalid(
+          'The task belongs to a different workspace.',
+          `task workspace=${task.data.workspaceId} dispatch workspace=${request.workspaceId}`,
+        )
+      }
+      const workspace = deps.workspaces.getById(request.workspaceId)
+      if (!workspace.ok) return workspace
+      if (workspace.data === null) {
+        return invalid(
+          `Workspace "${request.workspaceId}" was not found.`,
+          `DispatchService could not resolve workspace id=${JSON.stringify(request.workspaceId)}`,
+        )
+      }
+
+      const agentRunId = createAgentRunId()
+      const worktree = await deps.worktreeManager.create({
+        workspaceId: request.workspaceId,
+        runId: agentRunId,
+        taskId: request.taskId,
+        agentId: agent.id,
+        ...(request.isolation === undefined ? {} : { isolation: request.isolation }),
+      })
+      if (!worktree.ok) return worktree
+
+      // Compensating action for failures before the WorkflowRun exists:
+      // never leave an orphan worktree behind (ReviewerService pattern).
+      const discardWorktree = (): void => {
+        void deps.worktreeManager
+          .discard({ worktreeId: worktree.data.id, confirm: true })
+          .then((discarded) => {
+            if (!discarded.ok) {
+              logger.error(
+                { worktreeId: worktree.data.id, error: discarded.error },
+                'Failed to discard the dispatch worktree after a startup failure.',
+              )
+            }
+          })
+          .catch((cause: unknown) => {
+            logger.error(
+              { worktreeId: worktree.data.id, cause },
+              'Dispatch worktree discard threw.',
+            )
+          })
+      }
+
+      const runFiles = deps.paths.runFiles(agentRunId)
+      if (!runFiles.ok) {
+        discardWorktree()
+        return runFiles
+      }
+
+      let prompt = request.prompt
+      if (prompt === undefined) {
+        let criteria: string[] | undefined
+        const sets = deps.criteria.listSetsByTask(request.taskId)
+        if (!sets.ok) {
+          discardWorktree()
+          return sets
+        }
+        const confirmed = sets.data
+          .filter((set) => set.status === 'confirmed')
+          .sort((a, b) => b.version - a.version)[0]
+        if (confirmed !== undefined) {
+          const rows = deps.criteria.listCriteria(confirmed.id)
+          if (!rows.ok) {
+            discardWorktree()
+            return rows
+          }
+          criteria = rows.data.map((criterion) => criterion.description)
+        }
+        const rendered = deps.promptTemplates.render(
+          {
+            name: 'implement',
+            context: {
+              task: {
+                title: task.data.title,
+                description: task.data.description ?? '',
+              },
+              ...(criteria === undefined ? {} : { criteria }),
+              role: 'implementer',
+              env: {
+                TESKRA_HANDOFF_PATH: runFiles.data.handoff,
+                TESKRA_ARTIFACT_DIR: runFiles.data.artifacts,
+              },
+            },
+          },
+          workspace.data.path,
+        )
+        if (!rendered.ok) {
+          discardWorktree()
+          return rendered
+        }
+        prompt = rendered.data.content
+      }
+
+      const created = deps.runs.createRun({
+        definition: {
+          id: DISPATCH_DEFINITION_ID,
+          description: 'TASK-059 single-agent dispatch (Task → One Agent → Handoff).',
+          steps: [
+            {
+              id: DISPATCH_NODE_ID,
+              type: 'agent',
+              agent: agent.id,
+              role: 'implementer',
+              isolation: worktree.data.isolation,
+              runOn: 'always',
+            },
+          ],
+        },
+        taskId: request.taskId,
+        totalIterations: 1,
+      })
+      if (!created.ok) {
+        discardWorktree()
+        return created
+      }
+      const run = created.data.run
+
+      const settled = await deps.engine.start(run.id, {
+        workspaceId: request.workspaceId,
+        worktreeId: worktree.data.id,
+        agentRunId,
+        prompt,
+        ...(request.model === undefined ? {} : { model: request.model }),
+      })
+      if (!settled.ok) {
+        const failedRun = deps.runs.setRunStatus(run.id, 'failed')
+        if (failedRun.ok) emitRunStatus(run.id, 'failed')
+        return settled
+      }
+
+      const step = settled.data.steps.find(
+        (entry) => entry.nodeId === DISPATCH_NODE_ID && entry.iteration === run.currentIteration,
+      )
+      const finalStatus: WorkflowRunStatus =
+        step?.status === 'completed'
+          ? 'completed'
+          : step?.status === 'cancelled'
+            ? 'cancelled'
+            : 'failed'
+      const finalized = deps.runs.setRunStatus(run.id, finalStatus)
+      if (!finalized.ok) return finalized
+      emitRunStatus(run.id, finalStatus)
+
+      const agentRun = deps.agents.get(agentRunId)
+      if (!agentRun.ok) return agentRun
+      if (agentRun.data === null) {
+        return invalid(
+          `Agent run "${agentRunId}" was not found after the dispatch settled.`,
+          `DispatchService lost agent run id=${agentRunId} for workflow run ${run.id}`,
+        )
+      }
+      const handoff = deps.handoffs.getByRunId(agentRunId)
+      if (!handoff.ok) return handoff
+
+      return {
+        ok: true,
+        data: {
+          run: finalized.data,
+          agentRun: agentRun.data,
+          worktree: worktree.data,
+          handoffPath: runFiles.data.handoff,
+          handoff: handoff.data,
+        },
+      }
+    },
+  }
+}

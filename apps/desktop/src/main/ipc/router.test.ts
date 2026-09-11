@@ -8,6 +8,10 @@ import {
   type AgentRun,
   type IpcResult,
   type Task,
+  type WorkflowDispatchResult,
+  type WorkflowRun,
+  type WorkflowRunDetail,
+  type WorkflowStep,
   type Workspace,
   type Worktree,
 } from '@teskra/contracts'
@@ -96,6 +100,41 @@ const AGENT_RUN: AgentRun = {
   runDir: '/data/runs/run-2',
   createdAt: '2026-09-10T00:00:00.000Z',
   updatedAt: '2026-09-10T00:00:00.000Z',
+}
+
+const WORKFLOW_RUN: WorkflowRun = {
+  id: 'wr-1',
+  taskId: 'task1',
+  workflowDefinitionId: 'dispatch',
+  definition: {
+    id: 'dispatch',
+    steps: [{ id: 'implement', type: 'agent', agent: 'codex', runOn: 'always' }],
+  },
+  status: 'running',
+  currentIteration: 0,
+  totalIterations: 1,
+  createdAt: '2026-09-10T00:00:00.000Z',
+}
+
+const WORKFLOW_STEP: WorkflowStep = {
+  id: 'step-1',
+  workflowRunId: 'wr-1',
+  nodeId: 'implement',
+  nodeType: 'agent',
+  status: 'running',
+  iteration: 0,
+  attempt: 1,
+  createdAt: '2026-09-10T00:00:00.000Z',
+}
+
+const WORKFLOW_RUN_DETAIL: WorkflowRunDetail = { run: WORKFLOW_RUN, steps: [WORKFLOW_STEP] }
+
+const DISPATCH_RESULT: WorkflowDispatchResult = {
+  run: { ...WORKFLOW_RUN, status: 'completed' },
+  agentRun: AGENT_RUN,
+  worktree: WORKTREE,
+  handoffPath: '/data/runs/run-2/handoff.json',
+  handoff: null,
 }
 
 function ok<T>(data: T): IpcResult<T> {
@@ -317,6 +356,10 @@ function fakeRuntime(): TeskraRuntime {
       ),
       listRuns: vi.fn(() => ok([])),
       getRun: vi.fn(() => ok(null)),
+      startRun: vi.fn(async () => ok(WORKFLOW_RUN_DETAIL)),
+      cancelRun: vi.fn(async () => ok({ ...WORKFLOW_RUN, status: 'cancelled' as const })),
+      resolveStep: vi.fn(() => ok(WORKFLOW_STEP)),
+      dispatch: vi.fn(async () => ok(DISPATCH_RESULT)),
     },
     dispose: vi.fn(() => ok(undefined)),
   }
@@ -592,6 +635,55 @@ describe('Typed IPC Router (TASK-020)', () => {
     const invalid = await ipc.invoke(IPC_CHANNELS.workflowRunGet, {})
     expect(invalid).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
     expect(runtime.workflow.getRun).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes workflow engine control and dispatch through the runtime facade (TASK-059)', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    const startRequest = { runId: 'wr-1', workspaceId: 'ws1', worktreeId: 'wt1' }
+    expect(await ipc.invoke(IPC_CHANNELS.workflowRunStart, startRequest)).toEqual({
+      ok: true,
+      data: WORKFLOW_RUN_DETAIL,
+    })
+    expect(runtime.workflow.startRun).toHaveBeenCalledWith(startRequest)
+
+    expect(await ipc.invoke(IPC_CHANNELS.workflowRunCancel, { runId: 'wr-1' })).toEqual({
+      ok: true,
+      data: { ...WORKFLOW_RUN, status: 'cancelled' },
+    })
+    expect(runtime.workflow.cancelRun).toHaveBeenCalledWith({ runId: 'wr-1' })
+
+    const resolveRequest = { stepId: 'step-1', outcome: 'pass' }
+    expect(await ipc.invoke(IPC_CHANNELS.workflowStepResolve, resolveRequest)).toEqual({
+      ok: true,
+      data: WORKFLOW_STEP,
+    })
+    expect(runtime.workflow.resolveStep).toHaveBeenCalledWith(resolveRequest)
+
+    const dispatchRequest = {
+      workspaceId: 'ws1',
+      taskId: 'task1',
+      agent: 'codex',
+      isolation: 'worktree',
+    }
+    expect(await ipc.invoke(IPC_CHANNELS.workflowDispatch, dispatchRequest)).toEqual({
+      ok: true,
+      data: DISPATCH_RESULT,
+    })
+    expect(runtime.workflow.dispatch).toHaveBeenCalledWith(dispatchRequest)
+
+    const invalidStart = await ipc.invoke(IPC_CHANNELS.workflowRunStart, { runId: 'wr-1' })
+    expect(invalidStart).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    expect(runtime.workflow.startRun).toHaveBeenCalledTimes(1)
+
+    const invalidDispatch = await ipc.invoke(IPC_CHANNELS.workflowDispatch, {
+      workspaceId: 'ws1',
+      taskId: 'task1',
+    })
+    expect(invalidDispatch).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    expect(runtime.workflow.dispatch).toHaveBeenCalledTimes(1)
   })
 
   it('removes all handlers on dispose without touching the runtime', () => {

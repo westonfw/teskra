@@ -54,6 +54,8 @@ import { createTerminalManager } from '../terminal/terminal-manager'
 import { createCriteriaManager } from '../tasks/criteria-manager'
 import { createTaskManager } from '../tasks/task-manager'
 import { createWorkflowDefinitionLoader } from '../workflows/definition-loader'
+import { createDispatchService } from '../workflows/dispatch-service'
+import { createWorkflowEngine } from '../workflows/workflow-engine'
 import { createWorkflowRunStore } from '../workflows/workflow-run-store'
 import { createWorkspaceRuntime, type WslEnvironmentInfo } from '../workspace/runtime'
 import { createWorkspaceManager } from '../workspace/workspace-manager'
@@ -347,6 +349,28 @@ export async function composeTeskraRuntime(
     worktrees: repositories.worktrees,
     events,
   })
+  // TASK-057/059: the engine drives WorkflowRun passes; Dispatch composes
+  // WorktreeManager + PromptTemplateService + the engine for Task → One Agent
+  // → Handoff.
+  const workflowEngine = createWorkflowEngine({
+    runs: workflowRunStore,
+    events,
+    agentManager,
+  })
+  const dispatchService = createDispatchService({
+    runs: workflowRunStore,
+    engine: workflowEngine,
+    registry: registeredAgents.data,
+    tasks: repositories.tasks,
+    criteria: repositories.criteria,
+    workspaces: repositories.workspaces,
+    worktreeManager,
+    agents: agentManager,
+    handoffs: repositories.handoffs,
+    promptTemplates,
+    paths,
+    events,
+  })
   const reconciled = await createReconciliationService({
     runs: repositories.agentRuns,
     agentEvents: repositories.agentEvents,
@@ -460,6 +484,18 @@ export async function composeTeskraRuntime(
       },
       listRuns: (request = {}) => workflowRunStore.listRuns(request),
       getRun: ({ runId }) => workflowRunStore.getRun(runId),
+      startRun: (request) =>
+        workflowEngine.start(request.runId, {
+          workspaceId: request.workspaceId,
+          ...(request.worktreeId === undefined ? {} : { worktreeId: request.worktreeId }),
+        }),
+      cancelRun: ({ runId }) => workflowEngine.cancel(runId),
+      resolveStep: ({ stepId, outcome, result }) =>
+        workflowEngine.resolveStep(stepId, {
+          ...(outcome === undefined ? {} : { outcome }),
+          ...(result === undefined ? {} : { result }),
+        }),
+      dispatch: (request) => dispatchService.dispatch(request),
     },
     git: {
       status: ({ workspaceId }) => gitManager.status(workspaceId),
@@ -640,6 +676,7 @@ export async function composeTeskraRuntime(
         return { ok: true, data: undefined }
       }
       disposed = true
+      workflowEngine.dispose()
       agentManager.dispose()
       reviewerService.dispose()
       terminalManager.dispose()

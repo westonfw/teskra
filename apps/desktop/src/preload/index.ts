@@ -135,6 +135,10 @@ const bridge: TeskraBridge = {
     loadDefinition: (request) => invoke(IPC_CHANNELS.workflowLoadDefinition, request),
     listRuns: (request = {}) => invoke(IPC_CHANNELS.workflowRunList, request),
     getRun: (request) => invoke(IPC_CHANNELS.workflowRunGet, request),
+    startRun: (request) => invoke(IPC_CHANNELS.workflowRunStart, request),
+    cancelRun: (request) => invoke(IPC_CHANNELS.workflowRunCancel, request),
+    resolveStep: (request) => invoke(IPC_CHANNELS.workflowStepResolve, request),
+    dispatch: (request) => invoke(IPC_CHANNELS.workflowDispatch, request),
   },
   events: eventSubscriptions,
 }
