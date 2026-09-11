@@ -57,6 +57,18 @@ import {
 import { ipcResultSchema, type IpcResult } from './error'
 import { handoffRecordSchema, type HandoffRecord } from './handoff'
 import {
+  createMemoryRequestSchema,
+  listMemoriesRequestSchema,
+  memoryIdRequestSchema,
+  memoryRecordSchema,
+  updateMemoryRequestSchema,
+  type CreateMemoryRequest,
+  type ListMemoriesRequest,
+  type Memory,
+  type MemoryIdRequest,
+  type UpdateMemoryRequest,
+} from './memory'
+import {
   createPermissionRuleRequestSchema,
   listPermissionAuditRequestSchema,
   listPermissionRulesRequestSchema,
@@ -324,6 +336,11 @@ export const IPC_CHANNELS = {
   artifactGet: 'teskra:artifact:get',
   artifactScanRun: 'teskra:artifact:scan-run',
   handoffGet: 'teskra:handoff:get',
+  memoryList: 'teskra:memory:list',
+  memoryGet: 'teskra:memory:get',
+  memoryCreate: 'teskra:memory:create',
+  memoryUpdate: 'teskra:memory:update',
+  memoryDelete: 'teskra:memory:delete',
   reviewListFindings: 'teskra:review:findings:list',
   reviewListCriterionScores: 'teskra:review:criterion-scores:list',
   reviewPanelStart: 'teskra:review:panel:start',
@@ -553,6 +570,33 @@ export const handoffGetChannel = channel(
   IPC_CHANNELS.handoffGet,
   agentRunIdRequestSchema,
   handoffRecordSchema.nullable(),
+)
+// TASK-067: repo-local memories (`file:` ids) are read-only — update/delete on
+// them fails with VALIDATION_FAILED at the MemoryManager, never silently.
+export const memoryListChannel = channel(
+  IPC_CHANNELS.memoryList,
+  listMemoriesRequestSchema,
+  z.array(memoryRecordSchema),
+)
+export const memoryGetChannel = channel(
+  IPC_CHANNELS.memoryGet,
+  memoryIdRequestSchema,
+  memoryRecordSchema.nullable(),
+)
+export const memoryCreateChannel = channel(
+  IPC_CHANNELS.memoryCreate,
+  createMemoryRequestSchema,
+  memoryRecordSchema,
+)
+export const memoryUpdateChannel = channel(
+  IPC_CHANNELS.memoryUpdate,
+  updateMemoryRequestSchema,
+  memoryRecordSchema.nullable(),
+)
+export const memoryDeleteChannel = channel(
+  IPC_CHANNELS.memoryDelete,
+  memoryIdRequestSchema,
+  z.boolean(),
 )
 export const reviewListFindingsChannel = channel(
   IPC_CHANNELS.reviewListFindings,
@@ -966,6 +1010,11 @@ export const ipcChannelDefinitions = {
   artifactGet: artifactGetChannel,
   artifactScanRun: artifactScanRunChannel,
   handoffGet: handoffGetChannel,
+  memoryList: memoryListChannel,
+  memoryGet: memoryGetChannel,
+  memoryCreate: memoryCreateChannel,
+  memoryUpdate: memoryUpdateChannel,
+  memoryDelete: memoryDeleteChannel,
   reviewListFindings: reviewListFindingsChannel,
   reviewListCriterionScores: reviewListCriterionScoresChannel,
   reviewPanelStart: reviewPanelStartChannel,
@@ -1092,6 +1141,14 @@ export interface TeskraBridge {
   }
   readonly handoff: {
     get(request: AgentRunIdRequest): Promise<IpcResult<HandoffRecord | null>>
+  }
+  /** TASK-067: Workspace Memory CRUD; repo-local `file:` memories are read-only. */
+  readonly memory: {
+    list(request: ListMemoriesRequest): Promise<IpcResult<Memory[]>>
+    get(request: MemoryIdRequest): Promise<IpcResult<Memory | null>>
+    create(request: CreateMemoryRequest): Promise<IpcResult<Memory>>
+    update(request: UpdateMemoryRequest): Promise<IpcResult<Memory | null>>
+    delete(request: MemoryIdRequest): Promise<IpcResult<boolean>>
   }
   readonly review: {
     listFindings(request: ListReviewFindingsRequest): Promise<IpcResult<ReviewFindingRecord[]>>

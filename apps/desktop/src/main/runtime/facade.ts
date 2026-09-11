@@ -23,6 +23,7 @@ import type {
   CriterionIdRequest,
   CriterionScoreRecord,
   CreatePermissionRuleRequest,
+  CreateMemoryRequest,
   CredentialStoreStatus,
   DeleteCredentialRequest,
   DiffResult,
@@ -46,6 +47,7 @@ import type {
   ListArtifactsRequest,
   ListCriteriaSetsRequest,
   ListCriterionScoresRequest,
+  ListMemoriesRequest,
   ListPermissionAuditRequest,
   ListPermissionRulesRequest,
   ListPromptTemplatesRequest,
@@ -56,6 +58,8 @@ import type {
   ListWorkflowDefinitionsRequest,
   ListWorkflowRunsRequest,
   LoadWorkflowDefinitionRequest,
+  Memory,
+  MemoryIdRequest,
   MergePreflightResult,
   OpenWorkspaceRequest,
   OpenSystemDirectoryRequest,
@@ -102,6 +106,7 @@ import type {
   TerminalWriteRequest,
   UpdateConfigRequest,
   UpdateCriterionRequest,
+  UpdateMemoryRequest,
   UpdatePermissionRuleRequest,
   UpdateTaskRequest,
   Workspace,
@@ -220,6 +225,19 @@ export interface HandoffPort {
 }
 
 /**
+ * TASK-067: Workspace Memory CRUD (plan §45/§46). Repo-local memories from
+ * `<repo>/.teskra/memory/` appear in `list` as read-only `file:` records;
+ * mutating them returns VALIDATION_FAILED.
+ */
+export interface MemoryPort {
+  list(request: ListMemoriesRequest): IpcResult<readonly Memory[]>
+  get(request: MemoryIdRequest): IpcResult<Memory | null>
+  create(request: CreateMemoryRequest): IpcResult<Memory>
+  update(request: UpdateMemoryRequest): IpcResult<Memory | null>
+  delete(request: MemoryIdRequest): IpcResult<boolean>
+}
+
+/**
  * TASK-065 (ADR-0002): rule CRUD, layered profile resolution (with `ask`
  * downgrade notices), approval decisions, and the post-hoc audit trail.
  */
@@ -332,6 +350,7 @@ export interface TeskraRuntime {
   readonly criteria: CriteriaPort
   readonly artifact: ArtifactPort
   readonly handoff: HandoffPort
+  readonly memory: MemoryPort
   readonly permission: PermissionPort
   readonly review: ReviewPort
   readonly agent: AgentCatalogPort

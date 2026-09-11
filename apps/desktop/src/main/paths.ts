@@ -66,6 +66,12 @@ export interface TeskraPaths {
    */
   repoPromptsDir(repoRoot: string): string
   /**
+   * <repoRoot>/.teskra/memory/ (TASK-067 repo-local Workspace Memory,
+   * plan §45) — resolution only, no I/O. Same host-path caveat as
+   * repoConfig().
+   */
+  repoMemoryDir(repoRoot: string): string
+  /**
    * <repoRoot>/.teskra/workflows/ (ADR-0005 repo-local Workflow definitions,
    * TASK-055) — resolution only, no I/O. Same host-path caveat as
    * repoConfig().
@@ -164,6 +170,9 @@ export function createTeskraPaths(env: NodeJS.ProcessEnv = process.env): TeskraP
     },
     repoPromptsDir(repoRoot: string) {
       return join(repoRoot, TESKRA_DATA_DIR, 'prompts')
+    },
+    repoMemoryDir(repoRoot: string) {
+      return join(repoRoot, TESKRA_DATA_DIR, 'memory')
     },
     repoWorkflowsDir(repoRoot: string) {
       return join(repoRoot, TESKRA_DATA_DIR, 'workflows')

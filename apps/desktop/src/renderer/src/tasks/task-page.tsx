@@ -34,6 +34,7 @@ import { useTaskStore } from '../stores/task-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
 import { RunWorktreePanel } from './run-worktree-panel'
 import { CriteriaPanel } from './criteria-panel'
+import { MemoryPanel } from './memory-panel'
 import { ArtifactPanel } from './artifact-panel'
 import { FindingsPanel } from './findings-panel'
 import { ReviewPanelsPanel } from './review-panels-panel'
@@ -158,6 +159,8 @@ export function TaskPage() {
       {agentError !== undefined && (
         <AppErrorAlert className="page-alert" error={agentError} onClose={clearAgentError} />
       )}
+
+      <MemoryPanel workspaceId={workspace.id} />
 
       <div className="task-workbench">
         <Card className="task-list-card" title={`${workspace.name} Tasks`}>

@@ -1,27 +1,20 @@
 import type Database from 'better-sqlite3'
-import { z } from 'zod'
 
-import type { IpcResult, MemoryType } from '@teskra/contracts'
-import { memoryTypeSchema } from '@teskra/contracts'
+import type { IpcResult, Memory, MemoryType } from '@teskra/contracts'
+import { memoryRecordSchema } from '@teskra/contracts'
 
-import { execute, isoTimestampSchema, mapRows, nowIso, requireFound, validateRow } from './common'
+import { execute, mapRows, nowIso, requireFound, validateRow } from './common'
 
 /**
  * MemoryRepository (TASK-007) — the `memories` table (plan §139.1,
  * 004_artifacts_memory.sql lines 5431–5440). `source` is
  * 'manual' | 'file:<path>' | 'run:<runId>' — free-form by design.
+ * The record schema lives in contracts (TASK-067) because Memory rows
+ * cross the IPC boundary.
  */
 
-export const memoryRecordSchema = z.strictObject({
-  id: z.string(),
-  workspaceId: z.string(),
-  type: memoryTypeSchema,
-  content: z.string(),
-  source: z.string().optional(),
-  createdAt: isoTimestampSchema,
-  updatedAt: isoTimestampSchema,
-})
-export type Memory = z.infer<typeof memoryRecordSchema>
+export { memoryRecordSchema }
+export type { Memory } from '@teskra/contracts'
 
 interface MemoryRow {
   id: string
