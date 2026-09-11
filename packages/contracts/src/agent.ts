@@ -277,6 +277,12 @@ export const startReviewRunRequestSchema = z.strictObject({
   workspaceId: z.string().min(1),
   agentType: z.string().min(1),
   taskId: z.string().min(1).optional(),
+  /**
+   * Pre-allocated AgentRun id (TASK-060): the Review Panel allocates one id
+   * per reviewer up-front so the prompt's handoff env paths (ADR-0004) match
+   * the paths AgentManager injects before the Run exists.
+   */
+  runId: z.string().min(1).optional(),
   /** Explicit implement run whose worktree the review targets. */
   targetRunId: z.string().min(1).optional(),
   /** Explicit worktree the review targets. */

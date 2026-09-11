@@ -45,6 +45,7 @@ import type {
   ListCriterionScoresRequest,
   ListPromptTemplatesRequest,
   ListReviewFindingsRequest,
+  ListReviewPanelsRequest,
   ListTasksRequest,
   ListTerminalsRequest,
   ListWorkflowDefinitionsRequest,
@@ -60,6 +61,9 @@ import type {
   ResolveConfigRequest,
   ResumeAgentRunRequest,
   ReviewFindingRecord,
+  ReviewPanel,
+  ReviewPanelIdRequest,
+  ReviewPanelResult,
   ReviewRunStartResult,
   RunDoctorRequest,
   ResolvedConfig,
@@ -67,6 +71,7 @@ import type {
   SelectWorkspaceDirectoryRequest,
   SendAgentRunInputRequest,
   SetAgentExecutableOverrideRequest,
+  StartReviewPanelRequest,
   SystemHealth,
   SystemInfo,
   SystemPaths,
@@ -184,12 +189,16 @@ export interface HandoffPort {
   get(request: AgentRunIdRequest): IpcResult<HandoffRecord | null>
 }
 
-/** TASK-053/054: read access to persisted review findings and criterion scores. */
+/** TASK-053/054: read access to persisted review findings and criterion scores;
+ *  TASK-060: Review Panel orchestration (start + panel queries). */
 export interface ReviewPort {
   listFindings(request: ListReviewFindingsRequest): IpcResult<readonly ReviewFindingRecord[]>
   listCriterionScores(
     request: ListCriterionScoresRequest,
   ): IpcResult<readonly CriterionScoreRecord[]>
+  startPanel(request: StartReviewPanelRequest): Promise<IpcResult<ReviewPanelResult>>
+  getPanel(request: ReviewPanelIdRequest): IpcResult<ReviewPanelResult | null>
+  listPanels(request: ListReviewPanelsRequest): IpcResult<readonly ReviewPanel[]>
 }
 
 export interface GitPort {

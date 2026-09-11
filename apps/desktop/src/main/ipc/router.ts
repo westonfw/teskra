@@ -195,6 +195,18 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.review.listCriterionScores(request)),
   )
   register(
+    ipcChannelDefinitions.reviewPanelStart,
+    withRuntime((runtime, request) => runtime.review.startPanel(request)),
+  )
+  register(
+    ipcChannelDefinitions.reviewPanelGet,
+    withRuntime((runtime, request) => runtime.review.getPanel(request)),
+  )
+  register(
+    ipcChannelDefinitions.reviewPanelList,
+    withRuntime((runtime, request) => runtime.review.listPanels(request)),
+  )
+  register(
     ipcChannelDefinitions.agentListDefinitions,
     withRuntime((runtime) => runtime.agent.listDefinitions()),
   )

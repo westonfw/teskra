@@ -1,5 +1,6 @@
 import type { DiffResult } from './git'
 import type { PublicAppError } from './error'
+import type { ReviewPanelStatus } from './review'
 import type { WorkflowRunStatus, WorkflowStepStatus } from './workflow'
 
 /**
@@ -140,6 +141,13 @@ export interface WorkbenchEvents {
     nodeId: string
     status: WorkflowStepStatus
   }
+
+  /** TASK-060: a Review Panel was created or converged (running / completed / failed). */
+  'review.panel_updated': {
+    panelId: string
+    taskId: string
+    status: ReviewPanelStatus
+  }
 }
 
 export type WorkbenchEventName = keyof WorkbenchEvents
@@ -173,6 +181,7 @@ export const WORKBENCH_EVENT_NAMES = [
   'permission.resolved',
   'workflow.run_updated',
   'workflow.step_updated',
+  'review.panel_updated',
 ] as const satisfies readonly WorkbenchEventName[]
 
 export const RENDERER_EVENT_CHANNEL = 'teskra:event' as const

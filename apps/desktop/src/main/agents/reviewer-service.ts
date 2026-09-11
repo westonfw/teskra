@@ -213,6 +213,7 @@ export function createReviewerService(deps: ReviewerServiceDeps): ReviewerServic
           agentType: definition.id,
           role: 'reviewer',
           approvalMode: 'read-only',
+          ...(request.runId === undefined ? {} : { runId: request.runId }),
           ...(request.taskId === undefined ? {} : { taskId: request.taskId }),
           ...(worktree === null ? {} : { worktreeId: worktree.id }),
           ...(request.model === undefined ? {} : { model: request.model }),
@@ -227,7 +228,7 @@ export function createReviewerService(deps: ReviewerServiceDeps): ReviewerServic
       // The CLI cannot enforce read-only: the snapshot worktree is the only
       // write boundary, so no approvalMode is forced — the Agent's own default
       // applies, and anything it does is thrown away with the snapshot.
-      const runId = createRunId()
+      const runId = request.runId ?? createRunId()
       const snapshot = await deps.worktreeManager.create({
         workspaceId: request.workspaceId,
         runId,

@@ -187,6 +187,11 @@ function fakeRuntime(): TeskraRuntime {
     review: {
       listFindings: vi.fn(() => ok([])),
       listCriterionScores: vi.fn(() => ok([])),
+      startPanel: vi.fn(() => {
+        throw new Error('not used')
+      }),
+      getPanel: vi.fn(() => ok(null)),
+      listPanels: vi.fn(() => ok([])),
     },
     terminal: {
       create: vi.fn(() =>

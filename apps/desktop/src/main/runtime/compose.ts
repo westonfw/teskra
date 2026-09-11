@@ -49,12 +49,14 @@ import { createPromptTemplateService } from '../prompts/prompt-template-service'
 import { createReconciliationService } from '../recovery/reconciliation-service'
 import { createResumeService } from '../recovery/resume-service'
 import { createReviewCollector } from '../agents/review-collector'
+import { createReviewPanelService } from '../agents/review-panel-service'
 import { createReviewerService } from '../agents/reviewer-service'
 import { createTerminalManager } from '../terminal/terminal-manager'
 import { createCriteriaManager } from '../tasks/criteria-manager'
 import { createTaskManager } from '../tasks/task-manager'
 import { createWorkflowDefinitionLoader } from '../workflows/definition-loader'
 import { createDispatchService } from '../workflows/dispatch-service'
+import { createReviewPanelStepExecutor } from '../workflows/review-panel-step-executor'
 import { createWorkflowEngine } from '../workflows/workflow-engine'
 import { createWorkflowRunStore } from '../workflows/workflow-run-store'
 import { createWorkspaceRuntime, type WslEnvironmentInfo } from '../workspace/runtime'
@@ -349,6 +351,24 @@ export async function composeTeskraRuntime(
     worktrees: repositories.worktrees,
     events,
   })
+  // TASK-060: the Review Panel composes ReviewerService (one independent
+  // reviewer Run per panel member) + the review persistence; the engine's
+  // review-panel nodes execute through it instead of suspending.
+  const reviewPanelService = createReviewPanelService({
+    registry: registeredAgents.data,
+    reviewer: reviewerService,
+    agents: agentManager,
+    runs: repositories.agentRuns,
+    worktrees: repositories.worktrees,
+    reviews: repositories.reviews,
+    tasks: repositories.tasks,
+    workspaces: repositories.workspaces,
+    criteria: repositories.criteria,
+    handoffs: repositories.handoffs,
+    promptTemplates,
+    paths,
+    events,
+  })
   // TASK-057/059: the engine drives WorkflowRun passes; Dispatch composes
   // WorktreeManager + PromptTemplateService + the engine for Task → One Agent
   // → Handoff.
@@ -356,6 +376,7 @@ export async function composeTeskraRuntime(
     runs: workflowRunStore,
     events,
     agentManager,
+    executors: { 'review-panel': createReviewPanelStepExecutor({ panel: reviewPanelService }) },
   })
   const dispatchService = createDispatchService({
     runs: workflowRunStore,
@@ -457,6 +478,9 @@ export async function composeTeskraRuntime(
           },
         }
       },
+      startPanel: (request) => reviewPanelService.startPanel(request),
+      getPanel: ({ panelId }) => reviewPanelService.getPanel(panelId),
+      listPanels: ({ taskId }) => reviewPanelService.listPanels(taskId),
     },
     prompts: {
       list: (request = {}) => {
@@ -679,6 +703,7 @@ export async function composeTeskraRuntime(
       workflowEngine.dispose()
       agentManager.dispose()
       reviewerService.dispose()
+      reviewPanelService.dispose()
       terminalManager.dispose()
       autoCommit.dispose()
       events.clear()

@@ -52,11 +52,21 @@ import {
   criterionScoreRecordSchema,
   listCriterionScoresRequestSchema,
   listReviewFindingsRequestSchema,
+  listReviewPanelsRequestSchema,
   reviewFindingRecordSchema,
+  reviewPanelIdRequestSchema,
+  reviewPanelResultSchema,
+  reviewPanelSchema,
+  startReviewPanelRequestSchema,
   type CriterionScoreRecord,
   type ListCriterionScoresRequest,
   type ListReviewFindingsRequest,
+  type ListReviewPanelsRequest,
   type ReviewFindingRecord,
+  type ReviewPanel,
+  type ReviewPanelIdRequest,
+  type ReviewPanelResult,
+  type StartReviewPanelRequest,
 } from './review'
 import {
   acceptanceCriteriaSetDetailSchema,
@@ -274,6 +284,9 @@ export const IPC_CHANNELS = {
   handoffGet: 'teskra:handoff:get',
   reviewListFindings: 'teskra:review:findings:list',
   reviewListCriterionScores: 'teskra:review:criterion-scores:list',
+  reviewPanelStart: 'teskra:review:panel:start',
+  reviewPanelGet: 'teskra:review:panel:get',
+  reviewPanelList: 'teskra:review:panel:list',
   agentListDefinitions: 'teskra:agent:list-definitions',
   agentDetect: 'teskra:agent:detect',
   agentListDetections: 'teskra:agent:list-detections',
@@ -494,6 +507,21 @@ export const reviewListCriterionScoresChannel = channel(
   IPC_CHANNELS.reviewListCriterionScores,
   listCriterionScoresRequestSchema,
   z.array(criterionScoreRecordSchema),
+)
+export const reviewPanelStartChannel = channel(
+  IPC_CHANNELS.reviewPanelStart,
+  startReviewPanelRequestSchema,
+  reviewPanelResultSchema,
+)
+export const reviewPanelGetChannel = channel(
+  IPC_CHANNELS.reviewPanelGet,
+  reviewPanelIdRequestSchema,
+  reviewPanelResultSchema.nullable(),
+)
+export const reviewPanelListChannel = channel(
+  IPC_CHANNELS.reviewPanelList,
+  listReviewPanelsRequestSchema,
+  z.array(reviewPanelSchema),
 )
 export const agentListDefinitionsChannel = channel(
   IPC_CHANNELS.agentListDefinitions,
@@ -812,6 +840,9 @@ export const ipcChannelDefinitions = {
   handoffGet: handoffGetChannel,
   reviewListFindings: reviewListFindingsChannel,
   reviewListCriterionScores: reviewListCriterionScoresChannel,
+  reviewPanelStart: reviewPanelStartChannel,
+  reviewPanelGet: reviewPanelGetChannel,
+  reviewPanelList: reviewPanelListChannel,
   agentListDefinitions: agentListDefinitionsChannel,
   agentDetect: agentDetectChannel,
   agentListDetections: agentListDetectionsChannel,
@@ -925,6 +956,9 @@ export interface TeskraBridge {
     listCriterionScores(
       request: ListCriterionScoresRequest,
     ): Promise<IpcResult<CriterionScoreRecord[]>>
+    startPanel(request: StartReviewPanelRequest): Promise<IpcResult<ReviewPanelResult>>
+    getPanel(request: ReviewPanelIdRequest): Promise<IpcResult<ReviewPanelResult | null>>
+    listPanels(request: ListReviewPanelsRequest): Promise<IpcResult<ReviewPanel[]>>
   }
   readonly agent: {
     listDefinitions(): Promise<IpcResult<AgentDefinition[]>>

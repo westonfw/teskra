@@ -65,6 +65,9 @@ const bridge: TeskraBridge = {
   review: {
     listFindings: (request) => invoke(IPC_CHANNELS.reviewListFindings, request),
     listCriterionScores: (request) => invoke(IPC_CHANNELS.reviewListCriterionScores, request),
+    startPanel: (request) => invoke(IPC_CHANNELS.reviewPanelStart, request),
+    getPanel: (request) => invoke(IPC_CHANNELS.reviewPanelGet, request),
+    listPanels: (request) => invoke(IPC_CHANNELS.reviewPanelList, request),
   },
   terminal: {
     create: (request) => invoke(IPC_CHANNELS.terminalCreate, request),

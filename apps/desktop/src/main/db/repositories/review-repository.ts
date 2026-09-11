@@ -5,10 +5,19 @@ import type {
   CriterionResult,
   CriterionScoreRecord,
   IpcResult,
+  ReviewConsensus,
   ReviewFindingRecord,
+  ReviewPanelStatus,
   ReviewSeverity,
+  ReviewVerdict,
 } from '@teskra/contracts'
-import { criterionScoreRecordSchema, reviewFindingRecordSchema } from '@teskra/contracts'
+import {
+  criterionScoreRecordSchema,
+  reviewConsensusSchema,
+  reviewFindingRecordSchema,
+  reviewPanelStatusSchema,
+  reviewVerdictSchema,
+} from '@teskra/contracts'
 
 import {
   decodeJson,
@@ -27,24 +36,20 @@ import {
  * ReviewRepository (TASK-007) — the review-side tables of plan §139.1
  * (003_criteria_review.sql): `review_panels`, `review_panel_members`,
  * `review_findings` (lines 5355–5390) and `criterion_scores`
- * (lines 5392–5400). Enum values are pinned by the §139.1 column comments;
- * `severity` reuses the contracts `reviewSeveritySchema`.
+ * (lines 5392–5400). The enum values live in contracts (TASK-060 made them
+ * public projections) and are re-exported here; `severity` reuses the
+ * contracts `reviewSeveritySchema`.
  */
 
-/** §139.1 `review_panels.status` (line 5361). */
-export const REVIEW_PANEL_STATUSES = ['running', 'completed', 'failed'] as const
-export const reviewPanelStatusSchema = z.enum(REVIEW_PANEL_STATUSES)
-export type ReviewPanelStatus = z.infer<typeof reviewPanelStatusSchema>
-
-/** §139.1 `review_panels.consensus` (line 5362). */
-export const REVIEW_CONSENSUSES = ['approve', 'changes_requested', 'mixed'] as const
-export const reviewConsensusSchema = z.enum(REVIEW_CONSENSUSES)
-export type ReviewConsensus = z.infer<typeof reviewConsensusSchema>
-
-/** §139.1 `review_panel_members.verdict` (line 5373). */
-export const REVIEW_VERDICTS = ['approve', 'changes_requested', 'unable_to_review'] as const
-export const reviewVerdictSchema = z.enum(REVIEW_VERDICTS)
-export type ReviewVerdict = z.infer<typeof reviewVerdictSchema>
+export {
+  REVIEW_CONSENSUSES,
+  REVIEW_PANEL_STATUSES,
+  REVIEW_VERDICTS,
+  reviewConsensusSchema,
+  reviewPanelStatusSchema,
+  reviewVerdictSchema,
+} from '@teskra/contracts'
+export type { ReviewConsensus, ReviewPanelStatus, ReviewVerdict } from '@teskra/contracts'
 
 /**
  * §139.1 `criterion_scores.result` (line 5396) is pinned in contracts
@@ -201,6 +206,13 @@ export interface ReviewRepository {
   listFindingsByTask(taskId: string): IpcResult<ReviewFindingRecord[]>
   /** Removes a run's findings; returns true when at least one row existed. */
   deleteFindingsByRun(runId: string): IpcResult<boolean>
+  /**
+   * TASK-060: links a reviewer run's already-persisted findings to its panel
+   * (the ReviewCollector writes findings before the panel exists on disk, so
+   * the panel backfills `panel_id` at convergence). Findings already bound to
+   * a panel are never re-bound; returns the number of rows linked.
+   */
+  assignFindingsToPanel(panelId: string, runId: string): IpcResult<number>
   /** (run_id, criterion_id) is unique — re-scoring overwrites in place. */
   recordScore(input: RecordScoreInput, now?: string): IpcResult<CriterionScoreRecord>
   listScoresByRun(runId: string): IpcResult<CriterionScoreRecord[]>
@@ -506,6 +518,14 @@ export function createReviewRepository(connection: Database.Database): ReviewRep
       return execute(FINDING, 'deleteFindingsByRun', () => {
         return connection.prepare('DELETE FROM review_findings WHERE run_id = ?').run(runId)
           .changes > 0
+      })
+    },
+
+    assignFindingsToPanel(panelId, runId) {
+      return execute(FINDING, 'assignFindingsToPanel', () => {
+        return connection
+          .prepare('UPDATE review_findings SET panel_id = ? WHERE run_id = ? AND panel_id IS NULL')
+          .run(panelId, runId).changes
       })
     },
 
