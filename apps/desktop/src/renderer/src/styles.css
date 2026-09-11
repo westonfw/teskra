@@ -882,3 +882,21 @@ body {
     grid-column: auto;
   }
 }
+
+.workflow-run-detail {
+  width: 100%;
+  margin-top: 14px;
+}
+
+.workflow-diff-patch {
+  max-height: 320px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 6px;
+}

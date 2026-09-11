@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 
 import type {
@@ -55,12 +56,19 @@ import { createTerminalManager } from '../terminal/terminal-manager'
 import { createCriteriaManager } from '../tasks/criteria-manager'
 import { createTaskManager } from '../tasks/task-manager'
 import { createWorkflowDefinitionLoader } from '../workflows/definition-loader'
+import { createCriteriaGateStepExecutor } from '../workflows/criteria-gate-step-executor'
 import { createDispatchService } from '../workflows/dispatch-service'
+import { createFullWorkflowService } from '../workflows/full-workflow-service'
 import { createIterationController } from '../workflows/iteration-controller'
 import { createReviewPanelStepExecutor } from '../workflows/review-panel-step-executor'
+import { createShellStepExecutor } from '../workflows/shell-step-executor'
 import { createWorkflowEngine } from '../workflows/workflow-engine'
 import { createWorkflowRunStore } from '../workflows/workflow-run-store'
-import { createWorkspaceRuntime, type WslEnvironmentInfo } from '../workspace/runtime'
+import {
+  createWorkspaceRuntime,
+  type WorkspaceRuntime,
+  type WslEnvironmentInfo,
+} from '../workspace/runtime'
 import { createWorkspaceManager } from '../workspace/workspace-manager'
 import { createWslManager } from '../workspace/wsl-manager'
 import type { TeskraRuntime } from './facade'
@@ -419,6 +427,98 @@ export async function composeTeskraRuntime(
     handoffs: repositories.handoffs,
     paths,
   })
+  // TASK-063: the default full workflow runs on a DEDICATED engine — the
+  // generic engine keeps criteria-gate nodes suspended for external
+  // resolveStep, while the full workflow needs them auto-evaluated, plus the
+  // TASK-058 shell executor for its Build/Test steps.
+  const fullWorkflowEngine = createWorkflowEngine({
+    runs: workflowRunStore,
+    events,
+    agentManager,
+    executors: {
+      shell: createShellStepExecutor({ commands, artifacts: artifactStore }),
+      'review-panel': createReviewPanelStepExecutor({ panel: reviewPanelService }),
+      'criteria-gate': createCriteriaGateStepExecutor({
+        reviews: repositories.reviews,
+        criteria: repositories.criteria,
+      }),
+    },
+  })
+  /** Shell steps execute in the run's worktree under the workspace runtime. */
+  const resolveWorkflowStepContext = (input: {
+    workspaceId: string
+    worktreeId?: string
+  }): IpcResult<{ runtime: WorkspaceRuntime; cwd: string } | undefined> => {
+    if (input.worktreeId === undefined) return { ok: true, data: undefined }
+    const workspace = repositories.workspaces.getById(input.workspaceId)
+    if (!workspace.ok) return workspace
+    if (workspace.data === null) {
+      return {
+        ok: false,
+        error: {
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The selected workspace no longer exists.',
+          retryable: false,
+        },
+      }
+    }
+    const runtime = runtimeFor(workspace.data.runtime)
+    if (!runtime.ok) return runtime
+    const validated = runtime.data.validate()
+    if (!validated.ok) return validated
+    const worktree = repositories.worktrees.getById(input.worktreeId)
+    if (!worktree.ok) return worktree
+    if (worktree.data === null) {
+      return {
+        ok: false,
+        error: {
+          code: 'VALIDATION_FAILED',
+          message: 'The workflow worktree no longer exists.',
+          retryable: false,
+        },
+      }
+    }
+    return {
+      ok: true,
+      data: { runtime: runtime.data, cwd: runtime.data.resolveCwd(worktree.data.path) },
+    }
+  }
+  const fullWorkflow = createFullWorkflowService({
+    runs: workflowRunStore,
+    tasks: repositories.tasks,
+    workspaces: repositories.workspaces,
+    criteria: repositories.criteria,
+    reviews: repositories.reviews,
+    worktrees: repositories.worktrees,
+    registry: registeredAgents.data,
+    worktreeManager,
+    definitions: workflowDefinitions,
+    git: gitManager,
+    createController: (firstAgentRunId) => {
+      let firstConsumed = false
+      return createIterationController({
+        runs: workflowRunStore,
+        engine: fullWorkflowEngine,
+        registry: registeredAgents.data,
+        tasks: repositories.tasks,
+        taskManager,
+        criteria: repositories.criteria,
+        workspaces: repositories.workspaces,
+        events,
+        promptTemplates,
+        handoffs: repositories.handoffs,
+        paths,
+        createAgentRunId: () => {
+          if (!firstConsumed) {
+            firstConsumed = true
+            return firstAgentRunId
+          }
+          return randomUUID()
+        },
+        resolveStepContext: resolveWorkflowStepContext,
+      })
+    },
+  })
   const reconciled = await createReconciliationService({
     runs: repositories.agentRuns,
     agentEvents: repositories.agentEvents,
@@ -548,6 +648,8 @@ export async function composeTeskraRuntime(
         }),
       dispatch: (request) => dispatchService.dispatch(request),
       iterate: (request) => iterationController.iterate(request),
+      startFullWorkflow: (request) => fullWorkflow.start(request),
+      runSummary: (request) => fullWorkflow.summary(request),
     },
     git: {
       status: ({ workspaceId }) => gitManager.status(workspaceId),
@@ -729,6 +831,7 @@ export async function composeTeskraRuntime(
       }
       disposed = true
       workflowEngine.dispose()
+      fullWorkflowEngine.dispose()
       agentManager.dispose()
       reviewerService.dispose()
       reviewPanelService.dispose()

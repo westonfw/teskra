@@ -372,6 +372,20 @@ function fakeRuntime(): TeskraRuntime {
       iterate: vi.fn(async () =>
         ok({ run: WORKFLOW_RUN, rounds: 1, stopReason: 'passed' as const }),
       ),
+      startFullWorkflow: vi.fn(async () =>
+        ok({ run: WORKFLOW_RUN, worktree: WORKTREE, rounds: 1, stopReason: 'passed' as const }),
+      ),
+      runSummary: vi.fn(async () =>
+        ok({
+          run: WORKFLOW_RUN,
+          steps: [WORKFLOW_STEP],
+          worktree: WORKTREE,
+          diff: null,
+          criteria: [],
+          criterionScores: [],
+          criteriaOutcome: null,
+        }),
+      ),
     },
     dispose: vi.fn(() => ok(undefined)),
   }
@@ -696,6 +710,37 @@ describe('Typed IPC Router (TASK-020)', () => {
     })
     expect(invalidDispatch).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
     expect(runtime.workflow.dispatch).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes the default full workflow launch and summary through the runtime facade (TASK-063)', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    const startRequest = { workspaceId: 'ws1', taskId: 'task1' }
+    expect(await ipc.invoke(IPC_CHANNELS.workflowStartFull, startRequest)).toEqual({
+      ok: true,
+      data: { run: WORKFLOW_RUN, worktree: WORKTREE, rounds: 1, stopReason: 'passed' },
+    })
+    expect(runtime.workflow.startFullWorkflow).toHaveBeenCalledWith(startRequest)
+
+    expect(await ipc.invoke(IPC_CHANNELS.workflowRunSummary, { runId: 'wr-1' })).toEqual({
+      ok: true,
+      data: {
+        run: WORKFLOW_RUN,
+        steps: [WORKFLOW_STEP],
+        worktree: WORKTREE,
+        diff: null,
+        criteria: [],
+        criterionScores: [],
+        criteriaOutcome: null,
+      },
+    })
+    expect(runtime.workflow.runSummary).toHaveBeenCalledWith({ runId: 'wr-1' })
+
+    const invalidStart = await ipc.invoke(IPC_CHANNELS.workflowStartFull, { workspaceId: 'ws1' })
+    expect(invalidStart).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    expect(runtime.workflow.startFullWorkflow).toHaveBeenCalledTimes(1)
   })
 
   it('removes all handlers on dispose without touching the runtime', () => {

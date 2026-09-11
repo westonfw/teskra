@@ -1,8 +1,10 @@
 import { z } from 'zod'
 
 import { agentRoleSchema, agentRunSchema } from './agent'
-import { worktreeIsolationSchema, worktreeSchema } from './git'
+import { acceptanceCriterionSchema } from './criteria'
+import { diffResultSchema, worktreeIsolationSchema, worktreeSchema } from './git'
 import { handoffRecordSchema } from './handoff'
+import { criteriaReviewOutcomeSchema, criterionScoreRecordSchema } from './review'
 
 /**
  * Workflow enums mirror §139.1 (002_runs.sql): `workflow_runs.status`
@@ -335,9 +337,14 @@ export const workflowIterateRequestSchema = z
     /** Round ≥2 prompt override; the 'fix' template is rendered otherwise. */
     fixPrompt: z.string().optional(),
   })
-  .refine((request) => request.runId !== undefined || (request.agent !== undefined && request.reviewers !== undefined), {
-    message: 'agent and reviewers are required when starting a new iterate run.',
-  })
+  .refine(
+    (request) =>
+      request.runId !== undefined ||
+      (request.agent !== undefined && request.reviewers !== undefined),
+    {
+      message: 'agent and reviewers are required when starting a new iterate run.',
+    },
+  )
 export type WorkflowIterateRequest = z.infer<typeof workflowIterateRequestSchema>
 
 export const workflowIterateResultSchema = z.strictObject({
@@ -347,3 +354,61 @@ export const workflowIterateResultSchema = z.strictObject({
   stopReason: workflowIterateStopReasonSchema,
 })
 export type WorkflowIterateResult = z.infer<typeof workflowIterateResultSchema>
+
+/**
+ * TASK-063 Default Full Workflow (teskra-tasks.md): the one-click launch from
+ * the Task page — Acceptance Criteria → Create Worktree → Implement →
+ * Build/Test → Review → Criteria Gate, with the FAIL loop driven by the
+ * TASK-062 IterationController safety caps.
+ *
+ * `implementer` / `reviewers` / `testCommand` are explicit overrides; when
+ * omitted they resolve from a repo-local `<repo>/.teskra/workflows/full.*`
+ * definition (ADR-0005) and finally from the AgentRegistry's declared default
+ * roles (never hardcoded agent ids).
+ */
+export const startFullWorkflowRequestSchema = z.strictObject({
+  workspaceId: z.string().min(1),
+  taskId: z.string().min(1),
+  /** AgentRegistry id of the implementer/fixer agent (free-form string). */
+  implementer: z.string().min(1).optional(),
+  /** AgentRegistry ids of the review-panel reviewers. */
+  reviewers: z.array(z.string().min(1)).min(1).optional(),
+  /** Shell step command for the Build/Test step (default 'npm test'). */
+  testCommand: z.string().min(1).optional(),
+  /** Worktree isolation tier (defaults to 'worktree'; always orchestrated, ADR-0002). */
+  isolation: worktreeIsolationSchema.optional(),
+  model: z.string().min(1).optional(),
+  /** Iteration safety-cap overrides (plan §124). */
+  policy: iterationPolicySchema.partial().optional(),
+})
+export type StartFullWorkflowRequest = z.infer<typeof startFullWorkflowRequestSchema>
+
+/**
+ * A settled full-workflow launch: the WorkflowRun (final status — 'completed'
+ * on pass, 'needs_user_review' on a triggered cap), the worktree it ran in,
+ * and the IterationController outcome.
+ */
+export const fullWorkflowStartResultSchema = workflowIterateResultSchema.extend({
+  worktree: worktreeSchema,
+})
+export type FullWorkflowStartResult = z.infer<typeof fullWorkflowStartResultSchema>
+
+/**
+ * TASK-063 completion view for one full-workflow run: the run + every step,
+ * the worktree it ran in (null when none is linked), the worktree-branch diff
+ * against its base branch (null when unavailable), and the anchored criteria
+ * set's scores with the derived TASK-054 outcome. Computed on demand.
+ */
+export const fullWorkflowRunSummarySchema = z.strictObject({
+  run: workflowRunSchema,
+  steps: z.array(workflowStepSchema),
+  worktree: worktreeSchema.nullable(),
+  diff: diffResultSchema.nullable(),
+  /** Criteria rows of the run's anchored criteria set (empty when unanchored). */
+  criteria: z.array(acceptanceCriterionSchema),
+  /** Latest criterion scores recorded for the run's Task. */
+  criterionScores: z.array(criterionScoreRecordSchema),
+  /** computeCriteriaReviewOutcome over the anchored set; null without criteria. */
+  criteriaOutcome: criteriaReviewOutcomeSchema.nullable(),
+})
+export type FullWorkflowRunSummary = z.infer<typeof fullWorkflowRunSummarySchema>

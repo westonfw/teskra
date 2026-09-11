@@ -35,6 +35,7 @@ import { CriteriaPanel } from './criteria-panel'
 import { ArtifactPanel } from './artifact-panel'
 import { FindingsPanel } from './findings-panel'
 import { ReviewPanelsPanel } from './review-panels-panel'
+import { WorkflowRunPanel } from './workflow-run-panel'
 
 const ACTIVE_RUN_STATUSES = new Set<AgentRunStatus>([
   'created',
@@ -256,6 +257,8 @@ export function TaskPage() {
 
             <CriteriaPanel taskId={selected.id} />
 
+            <WorkflowRunPanel workspaceId={workspace.id} taskId={selected.id} />
+
             <ReviewPanelsPanel taskId={selected.id} />
 
             <Card className="task-detail-card" title="Start an Agent Run">
@@ -327,10 +330,7 @@ export function TaskPage() {
               <Card className="task-detail-card" title="Changes">
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No Git snapshot yet" />
               </Card>
-              <ArtifactPanel
-                taskId={selected.id}
-                runIds={taskRuns.map((run) => run.id)}
-              />
+              <ArtifactPanel taskId={selected.id} runIds={taskRuns.map((run) => run.id)} />
             </div>
 
             <Card className="task-detail-card" title="Activity">

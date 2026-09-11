@@ -25,6 +25,7 @@ import { getLogger } from '../logger'
 import type { TeskraPaths } from '../paths'
 import type { PromptTemplateService } from '../prompts/prompt-template-service'
 import type { TaskManager } from '../tasks/task-manager'
+import type { WorkspaceRuntime } from '../workspace/runtime'
 import type { WorkflowEngine } from './workflow-engine'
 import type { WorkflowRunStore } from './workflow-run-store'
 
@@ -49,6 +50,13 @@ import type { WorkflowRunStore } from './workflow-run-store'
  * review node depending on both agent nodes would be skipped in round 1. With
  * this shape exactly one agent node and exactly one review node execute per
  * round — every round is its own AgentRun with its own Handoff/Artifacts.
+ *
+ * TASK-063: the default full workflow persists an EXTENDED snapshot (shell
+ * test + criteria-gate nodes between agent and review, same node ids for
+ * agent/review). The controller supports it unchanged: `resolveStepContext`
+ * supplies the shell steps' runtime/cwd, and the round verdict additionally
+ * requires a completed criteria-gate step with outcome 'pass' whenever the
+ * snapshot declares gate nodes.
  *
  * Safety Cap (plan §124) — both limits are enforced, counters are read from
  * the DB on every decision (never held in memory), so a fresh controller
@@ -100,6 +108,16 @@ export interface IterationControllerDeps {
   readonly handoffs?: Pick<HandoffRepository, 'getByRunId'>
   readonly paths?: TeskraPaths
   readonly createAgentRunId?: () => string
+  /**
+   * TASK-063: resolves the runtime + cwd shell steps execute under (TASK-058
+   * requires both in the WorkflowExecutionContext). For an orchestrated run
+   * this is the worktree directory in the workspace's runtime; absent → agent
+   * steps only, and any shell node fails with the executor's own error.
+   */
+  readonly resolveStepContext?: (input: {
+    workspaceId: string
+    worktreeId?: string
+  }) => IpcResult<{ runtime: WorkspaceRuntime; cwd: string } | undefined>
 }
 
 /** Fixed identity of the iterate definition snapshot every run persists. */
@@ -108,11 +126,7 @@ const IMPLEMENT_NODE_ID = 'implement'
 const FIX_NODE_ID = 'fix'
 const REVIEW_NODE_IDS = ['review-implement', 'review-fix'] as const
 
-const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set([
-  'completed',
-  'failed',
-  'cancelled',
-])
+const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'cancelled'])
 
 function fail<T>(error: InternalAppError): IpcResult<T> {
   return { ok: false, error: toPublicError(error) }
@@ -125,7 +139,8 @@ function invalid<T>(message: string, detail: string): IpcResult<T> {
 function buildIterateDefinition(agent: string, reviewers: readonly string[]): WorkflowDefinition {
   return {
     id: ITERATE_DEFINITION_ID,
-    description: 'TASK-062 Iterate primitive: Implement → Review → Fix → Review (loop driven by IterationController, plan §124/§153).',
+    description:
+      'TASK-062 Iterate primitive: Implement → Review → Fix → Review (loop driven by IterationController, plan §124/§153).',
     steps: [
       { id: IMPLEMENT_NODE_ID, type: 'agent', agent, role: 'implementer', runOn: 'first' },
       { id: FIX_NODE_ID, type: 'agent', agent, role: 'fixer', runOn: 'subsequent' },
@@ -169,23 +184,35 @@ export function createIterationController(deps: IterationControllerDeps): Iterat
    * that COMPLETED in the run's current iteration (exactly one per round; its
    * sibling is runOn-skipped). Anything but outcome 'approve' — including a
    * failed or skipped review step — fails the round.
+   *
+   * TASK-063: when the definition snapshot carries criteria-gate nodes, the
+   * gate's verdict joins the round verdict — a review-approved round still
+   * fails when the gate of the same iteration did not complete with outcome
+   * 'pass'. Definitions without gate nodes (plain iterate) are unaffected.
    */
   const reviewVerdict = (detail: WorkflowRunDetail): 'approve' | 'reject' => {
+    const iteration = detail.run.currentIteration
     const step = detail.steps.find(
       (entry) =>
-        entry.iteration === detail.run.currentIteration &&
+        entry.iteration === iteration &&
         entry.nodeType === 'review-panel' &&
         entry.status === 'completed' &&
         (REVIEW_NODE_IDS as readonly string[]).includes(entry.nodeId),
     )
-    return step?.result?.['outcome'] === 'approve' ? 'approve' : 'reject'
+    if (step?.result?.['outcome'] !== 'approve') return 'reject'
+    const hasGateNode = detail.run.definition.steps.some((node) => node.type === 'criteria-gate')
+    if (!hasGateNode) return 'approve'
+    const gate = detail.steps.find(
+      (entry) =>
+        entry.iteration === iteration &&
+        entry.nodeType === 'criteria-gate' &&
+        entry.status === 'completed',
+    )
+    return gate?.result?.['outcome'] === 'pass' ? 'approve' : 'reject'
   }
 
   /** The agent step that executed in the given iteration (implement or fix). */
-  const agentStepOf = (
-    detail: WorkflowRunDetail,
-    iteration: number,
-  ): WorkflowStep | undefined =>
+  const agentStepOf = (detail: WorkflowRunDetail, iteration: number): WorkflowStep | undefined =>
     detail.steps.find(
       (entry) =>
         entry.iteration === iteration &&
@@ -286,6 +313,21 @@ export function createIterationController(deps: IterationControllerDeps): Iterat
         run = found.data.run
       }
 
+      // TASK-063: shell steps (Build/Test) need the workspace runtime and the
+      // worktree cwd in the execution context; resolve them once per
+      // iterate() call (the worktree binding does not change between rounds).
+      let stepRuntime: WorkspaceRuntime | undefined
+      let stepCwd: string | undefined
+      if (deps.resolveStepContext !== undefined) {
+        const stepContext = deps.resolveStepContext({
+          workspaceId: request.workspaceId,
+          ...(request.worktreeId === undefined ? {} : { worktreeId: request.worktreeId }),
+        })
+        if (!stepContext.ok) return stepContext
+        stepRuntime = stepContext.data?.runtime
+        stepCwd = stepContext.data?.cwd
+      }
+
       for (;;) {
         if (TERMINAL_RUN_STATUSES.has(run.status)) {
           return invalid(
@@ -336,7 +378,11 @@ export function createIterationController(deps: IterationControllerDeps): Iterat
         const agentRunId = createAgentRunId()
         const isFirstRound = run.currentIteration === 0
         let prompt = isFirstRound ? request.prompt : (request.fixPrompt ?? request.prompt)
-        if (prompt === undefined && deps.promptTemplates !== undefined && deps.paths !== undefined) {
+        if (
+          prompt === undefined &&
+          deps.promptTemplates !== undefined &&
+          deps.paths !== undefined
+        ) {
           const workspace = deps.workspaces.getById(request.workspaceId)
           if (!workspace.ok) return workspace
           if (workspace.data === null) {
@@ -392,6 +438,8 @@ export function createIterationController(deps: IterationControllerDeps): Iterat
           agentRunId,
           ...(prompt === undefined ? {} : { prompt }),
           ...(request.model === undefined ? {} : { model: request.model }),
+          ...(stepRuntime === undefined ? {} : { runtime: stepRuntime }),
+          ...(stepCwd === undefined ? {} : { cwd: stepCwd }),
         })
         if (!settled.ok) {
           const failedRun = deps.runs.setRunStatus(run.id, 'failed')
@@ -401,7 +449,10 @@ export function createIterationController(deps: IterationControllerDeps): Iterat
         run = settled.data.run
 
         if (run.status === 'cancelled') {
-          return { ok: true, data: { run, rounds: run.currentIteration + 1, stopReason: 'cancelled' } }
+          return {
+            ok: true,
+            data: { run, rounds: run.currentIteration + 1, stopReason: 'cancelled' },
+          }
         }
 
         const rounds = run.currentIteration + 1

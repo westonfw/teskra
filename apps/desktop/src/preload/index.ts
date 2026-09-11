@@ -143,6 +143,8 @@ const bridge: TeskraBridge = {
     resolveStep: (request) => invoke(IPC_CHANNELS.workflowStepResolve, request),
     dispatch: (request) => invoke(IPC_CHANNELS.workflowDispatch, request),
     iterate: (request) => invoke(IPC_CHANNELS.workflowIterate, request),
+    startFullWorkflow: (request) => invoke(IPC_CHANNELS.workflowStartFull, request),
+    runSummary: (request) => invoke(IPC_CHANNELS.workflowRunSummary, request),
   },
   events: eventSubscriptions,
 }

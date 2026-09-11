@@ -71,7 +71,10 @@ import type {
   SelectWorkspaceDirectoryRequest,
   SendAgentRunInputRequest,
   SetAgentExecutableOverrideRequest,
+  StartFullWorkflowRequest,
   StartReviewPanelRequest,
+  FullWorkflowRunSummary,
+  FullWorkflowStartResult,
   SystemHealth,
   SystemInfo,
   SystemPaths,
@@ -259,6 +262,13 @@ export interface WorkflowPort {
   dispatch(request: WorkflowDispatchRequest): Promise<IpcResult<WorkflowDispatchResult>>
   /** TASK-062 Iterate Primitive: Implement → Review → Fix → Review with safety caps. */
   iterate(request: WorkflowIterateRequest): Promise<IpcResult<WorkflowIterateResult>>
+  /**
+   * TASK-063 Default Full Workflow: one-click Task launch (criteria → worktree
+   * → implement → test → review → gate, FAIL loop under the iteration caps).
+   * `runSummary` is the completion view: steps + worktree diff + criteria result.
+   */
+  startFullWorkflow(request: StartFullWorkflowRequest): Promise<IpcResult<FullWorkflowStartResult>>
+  runSummary(request: WorkflowRunIdRequest): Promise<IpcResult<FullWorkflowRunSummary>>
 }
 
 export type FutureRuntimePort = object

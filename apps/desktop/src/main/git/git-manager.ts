@@ -22,10 +22,25 @@ import type { WorkspaceRuntime } from '../workspace/runtime'
 const READ_TIMEOUT_MS = 15_000
 const COMMIT_TIMEOUT_MS = 60_000
 
+/**
+ * TASK-063: branch-vs-branch diff (default full workflow summary). Refs are
+ * validated against a strict charset and passed as one `base...head`
+ * rev-range argument, so neither ref can be read as a command option.
+ */
+export interface GitDiffRefsRequest {
+  readonly workspaceId: string
+  readonly baseRef: string
+  readonly headRef: string
+}
+
+const VALID_REF = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/u
+
 export interface GitManager {
   status(workspaceId: string): Promise<IpcResult<GitStatus>>
   branch(workspaceId: string): Promise<IpcResult<GitBranch>>
   diff(request: GitDiffRequest): Promise<IpcResult<GitRawDiff>>
+  /** Main-internal (TASK-063): `git diff <baseRef>...<headRef>` raw patch. */
+  diffRefs(request: GitDiffRefsRequest): Promise<IpcResult<GitRawDiff>>
   log(request: GitLogRequest): Promise<IpcResult<GitCommit[]>>
   commit(request: GitCommitRequest): Promise<IpcResult<GitCommitResult>>
   openFile(request: GitOpenFileRequest): Promise<IpcResult<void>>
@@ -242,6 +257,26 @@ export function createGitManager(deps: GitManagerDeps): GitManager {
       if (request.staged === true) args.push('--staged')
       if (request.path !== undefined) args.push('--', request.path)
       const result = await run(request.workspaceId, 'diff', args)
+      return result.ok ? { ok: true, data: { patch: result.data.stdout } } : result
+    },
+
+    async diffRefs(request) {
+      for (const ref of [request.baseRef, request.headRef]) {
+        if (!VALID_REF.test(ref) || ref.includes('..')) {
+          return fail({
+            code: 'VALIDATION_FAILED',
+            message: 'Git diff refs must be plain branch or revision names.',
+            retryable: false,
+            detail: `rejected ref=${JSON.stringify(ref)}`,
+          })
+        }
+      }
+      const result = await run(request.workspaceId, 'diff', [
+        'diff',
+        '--no-ext-diff',
+        '--no-color',
+        `${request.baseRef}...${request.headRef}`,
+      ])
       return result.ok ? { ok: true, data: { patch: result.data.stdout } } : result
     },
 

@@ -226,9 +226,12 @@ import {
   type WslEnvironment,
 } from './wsl'
 import {
+  fullWorkflowRunSummarySchema,
+  fullWorkflowStartResultSchema,
   listWorkflowDefinitionsRequestSchema,
   listWorkflowRunsRequestSchema,
   loadWorkflowDefinitionRequestSchema,
+  startFullWorkflowRequestSchema,
   workflowDefinitionFileInfoSchema,
   workflowDefinitionSchema,
   workflowDispatchRequestSchema,
@@ -241,9 +244,12 @@ import {
   workflowRunStartRequestSchema,
   workflowStepResolveRequestSchema,
   workflowStepSchema,
+  type FullWorkflowRunSummary,
+  type FullWorkflowStartResult,
   type ListWorkflowDefinitionsRequest,
   type ListWorkflowRunsRequest,
   type LoadWorkflowDefinitionRequest,
+  type StartFullWorkflowRequest,
   type WorkflowDefinition,
   type WorkflowDefinitionFileInfo,
   type WorkflowDispatchRequest,
@@ -350,6 +356,8 @@ export const IPC_CHANNELS = {
   workflowStepResolve: 'teskra:workflow:step:resolve',
   workflowDispatch: 'teskra:workflow:dispatch',
   workflowIterate: 'teskra:workflow:iterate',
+  workflowStartFull: 'teskra:workflow:start-full',
+  workflowRunSummary: 'teskra:workflow:run:summary',
 } as const
 export type IpcChannelName = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
 
@@ -819,6 +827,16 @@ export const workflowIterateChannel = channel(
   workflowIterateRequestSchema,
   workflowIterateResultSchema,
 )
+export const workflowStartFullChannel = channel(
+  IPC_CHANNELS.workflowStartFull,
+  startFullWorkflowRequestSchema,
+  fullWorkflowStartResultSchema,
+)
+export const workflowRunSummaryChannel = channel(
+  IPC_CHANNELS.workflowRunSummary,
+  workflowRunIdRequestSchema,
+  fullWorkflowRunSummarySchema,
+)
 
 export const ipcChannelDefinitions = {
   ping: pingChannel,
@@ -912,6 +930,8 @@ export const ipcChannelDefinitions = {
   workflowStepResolve: workflowStepResolveChannel,
   workflowDispatch: workflowDispatchChannel,
   workflowIterate: workflowIterateChannel,
+  workflowStartFull: workflowStartFullChannel,
+  workflowRunSummary: workflowRunSummaryChannel,
 } as const
 
 export interface TeskraBridge {
@@ -1045,6 +1065,10 @@ export interface TeskraBridge {
     resolveStep(request: WorkflowStepResolveRequest): Promise<IpcResult<WorkflowStep>>
     dispatch(request: WorkflowDispatchRequest): Promise<IpcResult<WorkflowDispatchResult>>
     iterate(request: WorkflowIterateRequest): Promise<IpcResult<WorkflowIterateResult>>
+    startFullWorkflow(
+      request: StartFullWorkflowRequest,
+    ): Promise<IpcResult<FullWorkflowStartResult>>
+    runSummary(request: WorkflowRunIdRequest): Promise<IpcResult<FullWorkflowRunSummary>>
   }
   readonly events: {
     subscribe<Name extends WorkbenchEventName>(
