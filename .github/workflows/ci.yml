@@ -81,3 +81,13 @@ jobs:
 
       - name: Security baseline assertions (TASK-002)
         run: node scripts/assert-security-baseline.mjs
+
+      - name: Packaged artifact smoke (TASK-072)
+        # electron-builder --dir on the runner OS: exercises the full
+        # packaging pipeline (incl. npmRebuild against the Electron ABI) and
+        # asserts node-pty/better-sqlite3 are asar-unpacked. The NSIS
+        # installer itself is verified manually on Windows ([Windows 验证]).
+        shell: bash
+        run: |
+          npm run pack --workspace @teskra/desktop
+          node scripts/smoke-packaged-artifact.mjs

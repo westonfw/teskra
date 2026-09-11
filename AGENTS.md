@@ -92,6 +92,8 @@ npm run lint          # ESLint
 npm run test:unit     # Vitest 单元测试
 npm run test:security # 构建 + Electron 安全基线断言（TASK-002，scripts/assert-security-baseline.mjs）
 npm run build         # 构建
+npm run dist          # 构建 + electron-builder 打包（TASK-072；apps/desktop/electron-builder.yml）
+                      # Windows 产出 NSIS installer + portable exe；--dir 快速验证见 apps/desktop 的 pack 脚本
 ```
 
 CI（GitHub Actions，`.github/workflows/ci.yml`，TASK-091）：matrix 为
