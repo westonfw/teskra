@@ -135,8 +135,18 @@ export function createReviewerService(deps: ReviewerServiceDeps): ReviewerServic
     if (request.taskId !== undefined) {
       const taskRuns = deps.runs.listByTask(request.taskId)
       if (!taskRuns.ok) return taskRuns
+      // Reviewer runs are excluded: a snapshot reviewer's worktree is
+      // discarded when the review ends, and a worktree-readonly reviewer's
+      // worktree is the implement worktree itself — targeting either would
+      // review a deleted scratch copy instead of the implement output
+      // (ReviewPanelService.resolveImplementRunId applies the same rule).
       const latest = taskRuns.data
-        .filter((run) => run.workspaceId === request.workspaceId && run.worktreeId !== undefined)
+        .filter(
+          (run) =>
+            run.workspaceId === request.workspaceId &&
+            run.worktreeId !== undefined &&
+            run.role !== 'reviewer',
+        )
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
       if (latest?.worktreeId === undefined) {
         return { ok: true, data: { worktree: null } }

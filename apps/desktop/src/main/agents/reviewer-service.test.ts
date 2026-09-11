@@ -341,6 +341,41 @@ describe('ReviewerService (TASK-052)', () => {
     expect(result.run.worktreeId).not.toBe(older.worktree.id)
   })
 
+  it('never targets a previous reviewer run’s discarded snapshot (taskId association)', async () => {
+    const fixture = await setup()
+    requireOk(
+      fixture.tasks.create({ id: 'task-1', workspaceId: 'workspace-1', title: 'Reviewed task' }),
+    )
+    const implement = await implementRun(fixture, 'impl-1', { taskId: 'task-1' })
+
+    // A fake-agent review runs in a disposable snapshot that is discarded as
+    // soon as the review ends — it must never become the next review target.
+    const first = requireOk(
+      await fixture.service.startReview({
+        workspaceId: 'workspace-1',
+        agentType: 'fake',
+        taskId: 'task-1',
+      }),
+    )
+    const snapshotId = first.run.worktreeId ?? ''
+    finishRun(fixture, first.run.id, 'fake')
+    await vi.waitFor(() => {
+      expect(requireRecord(fixture.worktrees.getById(snapshotId)).state).toBe('discarded')
+    })
+
+    const second = requireOk(
+      await fixture.service.startReview({
+        workspaceId: 'workspace-1',
+        agentType: 'codex',
+        taskId: 'task-1',
+      }),
+    )
+
+    expect(second.isolation).toBe('worktree-readonly')
+    expect(second.run.worktreeId).toBe(implement.worktree.id)
+    expect(second.run.worktreeId).not.toBe(snapshotId)
+  })
+
   it('sandboxes a reviewer without read-only support in a discarded disposable snapshot', async () => {
     const fixture = await setup()
     const implement = await implementRun(fixture, 'impl-1')
