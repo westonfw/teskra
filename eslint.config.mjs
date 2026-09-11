@@ -51,7 +51,14 @@ const nodeBuiltins = [
 
 export default tseslint.config(
   {
-    ignores: ['**/node_modules/**', '**/dist/**', '**/out/**', 'docs/**'],
+    ignores: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/out/**',
+      'docs/**',
+      'apps/desktop/e2e/test-results/**',
+      'apps/desktop/e2e/playwright-report/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

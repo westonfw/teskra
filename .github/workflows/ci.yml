@@ -81,3 +81,44 @@ jobs:
 
       - name: Security baseline assertions (TASK-002)
         run: node scripts/assert-security-baseline.mjs
+
+  # TASK-076 — Electron E2E (Playwright _electron API). Kept as a separate,
+  # non-gating job until the suite is verified on a real Windows runner; the
+  # existing build job above remains the untouched merge gate.
+  e2e:
+    name: e2e-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve Node version from package.json engines
+        id: node
+        shell: bash
+        run: echo "version=$(node -p "require('./package.json').engines.node.match(/\d+/)[0]")" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node ${{ steps.node.outputs.version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.node.outputs.version }}
+          cache: npm
+
+      - name: Install dependencies (lockfile-only)
+        run: npm ci
+
+      - name: E2E tests (Windows)
+        if: matrix.os == 'windows-latest'
+        run: npm run test:e2e
+
+      - name: E2E tests (Ubuntu, xvfb)
+        if: matrix.os == 'ubuntu-latest'
+        # Headless runner: xvfb provides the display; the Chromium setuid
+        # sandbox is unavailable in the container.
+        run: xvfb-run -a npm run test:e2e
+        env:
+          TESKRA_E2E_NO_SANDBOX: '1'

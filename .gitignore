@@ -3,3 +3,5 @@ dist/
 out/
 *.log
 .DS_Store
+apps/desktop/e2e/test-results/
+apps/desktop/e2e/playwright-report/

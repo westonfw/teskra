@@ -90,6 +90,7 @@ npm run dev           # 启动 Electron 开发模式
 npm run typecheck     # TypeScript 检查
 npm run lint          # ESLint
 npm run test:unit     # Vitest 单元测试
+npm run test:e2e      # 构建 + Playwright Electron E2E（TASK-076，apps/desktop/e2e/）
 npm run test:security # 构建 + Electron 安全基线断言（TASK-002，scripts/assert-security-baseline.mjs）
 npm run build         # 构建
 ```
@@ -97,6 +98,8 @@ npm run build         # 构建
 CI（GitHub Actions，`.github/workflows/ci.yml`，TASK-091）：matrix 为
 `windows-latest`（必过门禁，失败阻塞合并）+ `ubuntu-latest`（快速反馈，允许失败），
 执行 `npm ci` + typecheck + lint + test:unit + build + 安全基线断言，Node 版本从 `engines` 读取。
+另有独立的 `e2e` job（TASK-076，windows-latest + ubuntu-latest/xvfb，`continue-on-error`，
+待 Windows 实机验证后才提升为合并门禁）。
 
 ## 代码组织（Monorepo 结构，TASK-001 已建立骨架）
 
