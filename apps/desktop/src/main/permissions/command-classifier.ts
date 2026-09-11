@@ -710,7 +710,12 @@ export const COMMAND_RULES: readonly CommandRule[] = [
   {
     id: 'find-read',
     risk: 'READ_ONLY',
-    match: (inv) => isExec(inv, 'find'),
+    // `-exec` / `-execdir` / `-ok` / `-okdir` run an arbitrary command per
+    // match — those stay UNKNOWN (rules cannot return UNKNOWN, so they fall
+    // through the table) instead of being labelled READ_ONLY.
+    match: (inv) =>
+      isExec(inv, 'find') &&
+      !inv.args.some((arg) => ['-exec', '-execdir', '-ok', '-okdir'].includes(arg)),
   },
   // --- common read-only / workspace-write executables
   {

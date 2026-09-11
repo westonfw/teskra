@@ -108,6 +108,13 @@ describe('CommandClassifier rule table (TASK-064)', () => {
     expect(classifyCommand('sed s/a/b/ file.txt')).toBe('READ_ONLY')
   })
 
+  it('does not call find -exec read-only: it executes an arbitrary command', () => {
+    expect(classifyCommand('find . -name foo')).toBe('READ_ONLY')
+    expect(classifyCommand('find . -exec rm -rf {} +')).toBe('UNKNOWN')
+    expect(classifyCommand('find . -execdir rm {} ;')).toBe('UNKNOWN')
+    expect(classifyCommand('find . -ok rm {} ;')).toBe('UNKNOWN')
+  })
+
   it('is data-driven: every rule has an id and a non-UNKNOWN risk', () => {
     expect(COMMAND_RULES.length).toBeGreaterThan(0)
     for (const rule of COMMAND_RULES) {
