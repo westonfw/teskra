@@ -247,6 +247,34 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.agent.resume(request)),
   )
   register(
+    ipcChannelDefinitions.permissionListRules,
+    withRuntime((runtime, request) => runtime.permission.listRules(request)),
+  )
+  register(
+    ipcChannelDefinitions.permissionCreateRule,
+    withRuntime((runtime, request) => runtime.permission.createRule(request)),
+  )
+  register(
+    ipcChannelDefinitions.permissionUpdateRule,
+    withRuntime((runtime, request) => runtime.permission.updateRule(request)),
+  )
+  register(
+    ipcChannelDefinitions.permissionDeleteRule,
+    withRuntime((runtime, request) => runtime.permission.deleteRule(request)),
+  )
+  register(
+    ipcChannelDefinitions.permissionListAudit,
+    withRuntime((runtime, request) => runtime.permission.listAudit(request)),
+  )
+  register(
+    ipcChannelDefinitions.permissionResolveProfile,
+    withRuntime((runtime, request) => runtime.permission.resolveProfile(request)),
+  )
+  register(
+    ipcChannelDefinitions.permissionResolveDecision,
+    withRuntime((runtime, request) => runtime.permission.resolveDecision(request)),
+  )
+  register(
     ipcChannelDefinitions.agentRunSend,
     withRuntime((runtime, request) => runtime.agent.send(request)),
   )

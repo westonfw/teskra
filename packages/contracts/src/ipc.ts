@@ -49,6 +49,30 @@ import {
 import { ipcResultSchema, type IpcResult } from './error'
 import { handoffRecordSchema, type HandoffRecord } from './handoff'
 import {
+  createPermissionRuleRequestSchema,
+  listPermissionAuditRequestSchema,
+  listPermissionRulesRequestSchema,
+  permissionAuditEntrySchema,
+  permissionDecisionResultSchema,
+  permissionRuleIdRequestSchema,
+  permissionRuleSchema,
+  resolvePermissionDecisionRequestSchema,
+  resolvePermissionProfileRequestSchema,
+  resolvedPermissionProfileSchema,
+  updatePermissionRuleRequestSchema,
+  type CreatePermissionRuleRequest,
+  type ListPermissionAuditRequest,
+  type ListPermissionRulesRequest,
+  type PermissionAuditEntry,
+  type PermissionDecisionResult,
+  type PermissionRule,
+  type PermissionRuleIdRequest,
+  type ResolvePermissionDecisionRequest,
+  type ResolvePermissionProfileRequest,
+  type ResolvedPermissionProfile,
+  type UpdatePermissionRuleRequest,
+} from './permission'
+import {
   criterionScoreRecordSchema,
   listCriterionScoresRequestSchema,
   listReviewFindingsRequestSchema,
@@ -312,6 +336,13 @@ export const IPC_CHANNELS = {
   agentRunList: 'teskra:agent-run:list',
   agentRunOutput: 'teskra:agent-run:output',
   agentRunResume: 'teskra:agent-run:resume',
+  permissionListRules: 'teskra:permission:rule:list',
+  permissionCreateRule: 'teskra:permission:rule:create',
+  permissionUpdateRule: 'teskra:permission:rule:update',
+  permissionDeleteRule: 'teskra:permission:rule:delete',
+  permissionListAudit: 'teskra:permission:audit:list',
+  permissionResolveProfile: 'teskra:permission:profile:resolve',
+  permissionResolveDecision: 'teskra:permission:decision:resolve',
   gitStatus: 'teskra:git:status',
   gitBranch: 'teskra:git:branch',
   gitDiff: 'teskra:git:diff',
@@ -611,6 +642,41 @@ export const agentRunResumeChannel = channel(
   resumeAgentRunRequestSchema,
   agentRunSchema,
 )
+export const permissionListRulesChannel = channel(
+  IPC_CHANNELS.permissionListRules,
+  listPermissionRulesRequestSchema,
+  z.array(permissionRuleSchema),
+)
+export const permissionCreateRuleChannel = channel(
+  IPC_CHANNELS.permissionCreateRule,
+  createPermissionRuleRequestSchema,
+  permissionRuleSchema,
+)
+export const permissionUpdateRuleChannel = channel(
+  IPC_CHANNELS.permissionUpdateRule,
+  updatePermissionRuleRequestSchema,
+  permissionRuleSchema.nullable(),
+)
+export const permissionDeleteRuleChannel = channel(
+  IPC_CHANNELS.permissionDeleteRule,
+  permissionRuleIdRequestSchema,
+  z.boolean(),
+)
+export const permissionListAuditChannel = channel(
+  IPC_CHANNELS.permissionListAudit,
+  listPermissionAuditRequestSchema,
+  z.array(permissionAuditEntrySchema),
+)
+export const permissionResolveProfileChannel = channel(
+  IPC_CHANNELS.permissionResolveProfile,
+  resolvePermissionProfileRequestSchema,
+  resolvedPermissionProfileSchema,
+)
+export const permissionResolveDecisionChannel = channel(
+  IPC_CHANNELS.permissionResolveDecision,
+  resolvePermissionDecisionRequestSchema,
+  permissionDecisionResultSchema,
+)
 export const gitStatusChannel = channel(
   IPC_CHANNELS.gitStatus,
   gitWorkspaceRequestSchema,
@@ -886,6 +952,13 @@ export const ipcChannelDefinitions = {
   agentRunList: agentRunListChannel,
   agentRunOutput: agentRunOutputChannel,
   agentRunResume: agentRunResumeChannel,
+  permissionListRules: permissionListRulesChannel,
+  permissionCreateRule: permissionCreateRuleChannel,
+  permissionUpdateRule: permissionUpdateRuleChannel,
+  permissionDeleteRule: permissionDeleteRuleChannel,
+  permissionListAudit: permissionListAuditChannel,
+  permissionResolveProfile: permissionResolveProfileChannel,
+  permissionResolveDecision: permissionResolveDecisionChannel,
   gitStatus: gitStatusChannel,
   gitBranch: gitBranchChannel,
   gitDiff: gitDiffChannel,
@@ -1011,6 +1084,19 @@ export interface TeskraBridge {
     list(request?: ListAgentRunsRequest): Promise<IpcResult<AgentRun[]>>
     getOutput(request: AgentRunIdRequest): Promise<IpcResult<string>>
     resume(request: ResumeAgentRunRequest): Promise<IpcResult<AgentRun>>
+  }
+  readonly permission: {
+    listRules(request?: ListPermissionRulesRequest): Promise<IpcResult<PermissionRule[]>>
+    createRule(request: CreatePermissionRuleRequest): Promise<IpcResult<PermissionRule>>
+    updateRule(request: UpdatePermissionRuleRequest): Promise<IpcResult<PermissionRule | null>>
+    deleteRule(request: PermissionRuleIdRequest): Promise<IpcResult<boolean>>
+    listAudit(request?: ListPermissionAuditRequest): Promise<IpcResult<PermissionAuditEntry[]>>
+    resolveProfile(
+      request: ResolvePermissionProfileRequest,
+    ): Promise<IpcResult<ResolvedPermissionProfile>>
+    resolveDecision(
+      request: ResolvePermissionDecisionRequest,
+    ): Promise<IpcResult<PermissionDecisionResult>>
   }
   readonly git: {
     status(request: GitWorkspaceRequest): Promise<IpcResult<GitStatus>>

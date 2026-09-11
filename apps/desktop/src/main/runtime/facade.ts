@@ -22,6 +22,7 @@ import type {
   CriteriaSetIdRequest,
   CriterionIdRequest,
   CriterionScoreRecord,
+  CreatePermissionRuleRequest,
   DiffResult,
   DoctorReport,
   FutureRuntimePortName,
@@ -43,6 +44,8 @@ import type {
   ListArtifactsRequest,
   ListCriteriaSetsRequest,
   ListCriterionScoresRequest,
+  ListPermissionAuditRequest,
+  ListPermissionRulesRequest,
   ListPromptTemplatesRequest,
   ListReviewFindingsRequest,
   ListReviewPanelsRequest,
@@ -54,11 +57,19 @@ import type {
   MergePreflightResult,
   OpenWorkspaceRequest,
   OpenSystemDirectoryRequest,
+  PermissionAuditEntry,
+  PermissionDecisionResult,
+  PermissionRule,
+  PermissionRuleIdRequest,
   PromptTemplateInfo,
   RecordArtifactRequest,
   RenderedPrompt,
   RenderPromptTemplateRequest,
   ResolveConfigRequest,
+  ResolvePermissionDecisionRequest,
+  ResolvePermissionProfileRequest,
+  ResolvedConfig,
+  ResolvedPermissionProfile,
   ResumeAgentRunRequest,
   ReviewFindingRecord,
   ReviewPanel,
@@ -66,7 +77,6 @@ import type {
   ReviewPanelResult,
   ReviewRunStartResult,
   RunDoctorRequest,
-  ResolvedConfig,
   ScanRunArtifactsRequest,
   SelectWorkspaceDirectoryRequest,
   SendAgentRunInputRequest,
@@ -89,6 +99,7 @@ import type {
   TerminalWriteRequest,
   UpdateConfigRequest,
   UpdateCriterionRequest,
+  UpdatePermissionRuleRequest,
   UpdateTaskRequest,
   Workspace,
   WorkspaceIdRequest,
@@ -194,6 +205,20 @@ export interface HandoffPort {
   get(request: AgentRunIdRequest): IpcResult<HandoffRecord | null>
 }
 
+/**
+ * TASK-065 (ADR-0002): rule CRUD, layered profile resolution (with `ask`
+ * downgrade notices), approval decisions, and the post-hoc audit trail.
+ */
+export interface PermissionPort {
+  listRules(request?: ListPermissionRulesRequest): IpcResult<readonly PermissionRule[]>
+  createRule(request: CreatePermissionRuleRequest): IpcResult<PermissionRule>
+  updateRule(request: UpdatePermissionRuleRequest): IpcResult<PermissionRule | null>
+  deleteRule(request: PermissionRuleIdRequest): IpcResult<boolean>
+  listAudit(request?: ListPermissionAuditRequest): IpcResult<readonly PermissionAuditEntry[]>
+  resolveProfile(request: ResolvePermissionProfileRequest): IpcResult<ResolvedPermissionProfile>
+  resolveDecision(request: ResolvePermissionDecisionRequest): IpcResult<PermissionDecisionResult>
+}
+
 /** TASK-053/054: read access to persisted review findings and criterion scores;
  *  TASK-060: Review Panel orchestration (start + panel queries). */
 export interface ReviewPort {
@@ -292,6 +317,7 @@ export interface TeskraRuntime {
   readonly criteria: CriteriaPort
   readonly artifact: ArtifactPort
   readonly handoff: HandoffPort
+  readonly permission: PermissionPort
   readonly review: ReviewPort
   readonly agent: AgentCatalogPort
   readonly git: GitPort

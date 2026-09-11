@@ -94,6 +94,15 @@ const bridge: TeskraBridge = {
     list: (request = {}) => invoke(IPC_CHANNELS.agentRunList, request),
     getOutput: (request) => invoke(IPC_CHANNELS.agentRunOutput, request),
   },
+  permission: {
+    listRules: (request = {}) => invoke(IPC_CHANNELS.permissionListRules, request),
+    createRule: (request) => invoke(IPC_CHANNELS.permissionCreateRule, request),
+    updateRule: (request) => invoke(IPC_CHANNELS.permissionUpdateRule, request),
+    deleteRule: (request) => invoke(IPC_CHANNELS.permissionDeleteRule, request),
+    listAudit: (request = {}) => invoke(IPC_CHANNELS.permissionListAudit, request),
+    resolveProfile: (request) => invoke(IPC_CHANNELS.permissionResolveProfile, request),
+    resolveDecision: (request) => invoke(IPC_CHANNELS.permissionResolveDecision, request),
+  },
   git: {
     status: (request) => invoke(IPC_CHANNELS.gitStatus, request),
     branch: (request) => invoke(IPC_CHANNELS.gitBranch, request),

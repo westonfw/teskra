@@ -4,6 +4,7 @@ import {
   approvalModeSchema,
   DEFAULT_CONFIG,
   providerSessionRefSchema,
+  type AgentDefinition,
   type AgentStartRequest,
   type AgentRun,
   type ConcurrencyConfig,
@@ -32,6 +33,7 @@ import { buildHandoffContext } from '@teskra/shared'
 import type { AgentRegistry } from './agent-registry'
 import { createAgentOutputBatcher } from './agent-output-batcher'
 import { createHandoffCollector, type HandoffCollector } from './handoff-collector'
+import type { AgentPermissionPreparer } from '../permissions/permission-manager'
 import {
   prepareAgentPermission,
   permissionProfileForApprovalMode,
@@ -69,6 +71,12 @@ export interface AgentManagerDeps {
   readonly createRunId?: () => string
   readonly now?: () => string
   readonly resolveConcurrency?: (workspaceId: string) => IpcResult<ConcurrencyConfig>
+  /**
+   * TASK-065: when injected, the PermissionManager resolves the layered rules
+   * into the Run's profile before projection. Without it, the profile is the
+   * bare approval-mode default (TASK-077 behavior).
+   */
+  readonly permissions?: AgentPermissionPreparer
 }
 
 function fail<T>(error: InternalAppError): IpcResult<T> {
@@ -423,6 +431,24 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     appendEvent(runId, 'agent.command', { command })
   })
 
+  /** TASK-065/077: resolve + project the Run's permission profile (policy only, ADR-0002). */
+  const preparePermission = (options: {
+    definition: AgentDefinition
+    workspaceId: string
+    role?: AgentRun['role']
+    approvalMode: NonNullable<AgentRun['approvalMode']>
+    runDir: string
+  }) => {
+    if (deps.permissions !== undefined) {
+      return deps.permissions.prepareRunPermission(options)
+    }
+    return prepareAgentPermission({
+      definition: options.definition,
+      profile: permissionProfileForApprovalMode(options.definition.id, options.approvalMode),
+      runDir: options.runDir,
+    })
+  }
+
   const stopExited = deps.events.subscribe('process.exited', ({ agentRunId, exitCode, signal }) => {
     if (agentRunId === undefined || !activeAdapters.has(agentRunId)) return
     outputBatcher.flush(agentRunId)
@@ -581,6 +607,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       const runId = request.runId ?? createRunId()
       const runDirectory = deps.paths.runDir(runId)
       if (!runDirectory.ok) return runDirectory
+      const role = request.role ?? definition.defaults.role
       const timestamp = now()
       const created = deps.runs.create(
         {
@@ -590,7 +617,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           executionMode,
           runDir: runDirectory.data,
           status: shouldQueue ? 'queued' : 'preparing',
-          role: request.role ?? definition.defaults.role,
+          ...(role === undefined ? {} : { role }),
           approvalMode,
           ...(request.taskId === undefined ? {} : { taskId: request.taskId }),
           ...(request.worktreeId === undefined ? {} : { worktreeId: request.worktreeId }),
@@ -613,9 +640,13 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       // TASK-077 (ADR-0002): project the resolved permission profile onto the
       // Agent CLI's own mechanism before launch. `none`-enforcement agents get
       // no projection — nothing is generated that claims to constrain them.
-      const permission = prepareAgentPermission({
+      // TASK-065: the profile comes from the PermissionManager's layered rules
+      // when it is composed in; otherwise it's the bare approval-mode default.
+      const permission = preparePermission({
         definition,
-        profile: permissionProfileForApprovalMode(definition.id, approvalMode),
+        workspaceId: workspace.data.id,
+        ...(role === undefined ? {} : { role }),
+        approvalMode,
         runDir: runDirectory.data,
       })
       if (!permission.ok) {
@@ -759,12 +790,13 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       // TASK-077: re-project the persisted approval mode on resume so the
       // relaunched process gets the same CLI-side policy as the original run.
       const resumeDefaultApproval = approvalModeSchema.safeParse(definition.defaults.permissionProfile)
-      const resumePermission = prepareAgentPermission({
+      const resumeApprovalMode =
+        run.approvalMode ?? (resumeDefaultApproval.success ? resumeDefaultApproval.data : 'manual')
+      const resumePermission = preparePermission({
         definition,
-        profile: permissionProfileForApprovalMode(
-          definition.id,
-          run.approvalMode ?? (resumeDefaultApproval.success ? resumeDefaultApproval.data : 'manual'),
-        ),
+        workspaceId: run.workspaceId,
+        ...(run.role === undefined ? {} : { role: run.role }),
+        approvalMode: resumeApprovalMode,
         runDir: runFiles.data.directory,
       })
       if (!resumePermission.ok) return resumePermission

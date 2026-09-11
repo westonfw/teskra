@@ -106,6 +106,15 @@ export interface RecordAuditInput {
   readonly detectedAt?: string
 }
 
+/** TASK-065: audit filters for the Manager/UI (`workspaceId` joins agent_runs). */
+export interface ListPermissionAuditFilter {
+  readonly runId?: string
+  readonly workspaceId?: string
+  readonly riskLevel?: string
+  /** Defaults to 500. */
+  readonly limit?: number
+}
+
 export interface PermissionRepository {
   createRule(input: CreatePermissionRuleInput, now?: string): IpcResult<PermissionRule>
   getRuleById(id: string): IpcResult<PermissionRule | null>
@@ -118,6 +127,8 @@ export interface PermissionRepository {
   deleteRule(id: string): IpcResult<boolean>
   recordAudit(input: RecordAuditInput, now?: string): IpcResult<PermissionAuditEntry>
   listAuditByRun(runId: string): IpcResult<PermissionAuditEntry[]>
+  /** Filtered audit listing, newest first. `workspaceId` resolves via agent_runs. */
+  listAudit(filter?: ListPermissionAuditFilter): IpcResult<PermissionAuditEntry[]>
 }
 
 const RULE = 'permission-rule'
@@ -289,6 +300,38 @@ export function createPermissionRepository(connection: Database.Database): Permi
         return connection
           .prepare('SELECT * FROM permission_audit WHERE run_id = ? ORDER BY id ASC')
           .all(runId) as AuditRow[]
+      })
+      if (!rows.ok) {
+        return rows
+      }
+      return mapRows(rows.data, auditToDomain)
+    },
+
+    listAudit(filter = {}) {
+      const conditions: string[] = []
+      const values: unknown[] = []
+      if (filter.runId !== undefined) {
+        conditions.push('a.run_id = ?')
+        values.push(filter.runId)
+      }
+      if (filter.workspaceId !== undefined) {
+        conditions.push('r.workspace_id = ?')
+        values.push(filter.workspaceId)
+      }
+      if (filter.riskLevel !== undefined) {
+        conditions.push('a.risk_level = ?')
+        values.push(filter.riskLevel)
+      }
+      const where = conditions.length === 0 ? '' : `WHERE ${conditions.join(' AND ')}`
+      values.push(filter.limit ?? 500)
+      const rows = execute(AUDIT, 'listAudit', () => {
+        return connection
+          .prepare(
+            `SELECT a.* FROM permission_audit a
+             JOIN agent_runs r ON r.id = a.run_id
+             ${where} ORDER BY a.id DESC LIMIT ?`,
+          )
+          .all(...values) as AuditRow[]
       })
       if (!rows.ok) {
         return rows

@@ -128,6 +128,11 @@ export interface WorkbenchEvents {
     runId: string
     command: string
   }
+  /** TASK-065: a command was recognized in the output stream and audited (post-hoc). */
+  'permission.audit_recorded': {
+    runId: string
+    riskLevel: string
+  }
 
   /** TASK-057: a WorkflowRun changed status (running / waiting / cancelled …). */
   'workflow.run_updated': {
@@ -179,6 +184,7 @@ export const WORKBENCH_EVENT_NAMES = [
   'worktree.merged',
   'permission.requested',
   'permission.resolved',
+  'permission.audit_recorded',
   'workflow.run_updated',
   'workflow.step_updated',
   'review.panel_updated',

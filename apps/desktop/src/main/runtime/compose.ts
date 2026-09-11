@@ -46,6 +46,7 @@ import { getLogger, initializeLogging } from '../logger'
 import { createTeskraPaths, type TeskraPaths } from '../paths'
 import { createCommandRunner, type CommandRunner } from '../process/command-runner'
 import { createProcessManager } from '../process/process-manager'
+import { createPermissionManager } from '../permissions/permission-manager'
 import { createPromptTemplateService } from '../prompts/prompt-template-service'
 import { createReconciliationService } from '../recovery/reconciliation-service'
 import { createResumeService } from '../recovery/resume-service'
@@ -299,6 +300,12 @@ export async function composeTeskraRuntime(
     resolveRuntime: runtimeFor,
   }
   const runLogs = createRunLogStore({ paths })
+  const permissionManager = createPermissionManager({
+    permissions: repositories.permissions,
+    runs: repositories.agentRuns,
+    registry: registeredAgents.data,
+    events,
+  })
   const reviewCollector = createReviewCollector({
     reviews: repositories.reviews,
     runs: repositories.agentRuns,
@@ -329,6 +336,7 @@ export async function composeTeskraRuntime(
     events,
     paths,
     runLogs,
+    permissions: permissionManager,
     resolveConcurrency: (workspaceId) => {
       const resolved = config.resolve({ workspaceId })
       return resolved.ok ? { ok: true, data: resolved.data.config.concurrency } : resolved
@@ -571,6 +579,15 @@ export async function composeTeskraRuntime(
     },
     handoff: {
       get: ({ runId }) => repositories.handoffs.getByRunId(runId),
+    },
+    permission: {
+      listRules: (request) => permissionManager.listRules(request),
+      createRule: (request) => permissionManager.createRule(request),
+      updateRule: (request) => permissionManager.updateRule(request),
+      deleteRule: (request) => permissionManager.deleteRule(request),
+      listAudit: (request) => permissionManager.listAudit(request),
+      resolveProfile: (request) => permissionManager.resolveProfile(request),
+      resolveDecision: (request) => permissionManager.recordDecision(request),
     },
     review: {
       listFindings: (request) => {
@@ -830,6 +847,7 @@ export async function composeTeskraRuntime(
         return { ok: true, data: undefined }
       }
       disposed = true
+      permissionManager.dispose()
       workflowEngine.dispose()
       fullWorkflowEngine.dispose()
       agentManager.dispose()
