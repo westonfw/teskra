@@ -3,6 +3,9 @@ import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type {
+  AgentRun,
+  IpcResult,
+  StartAgentRunRequest,
   WorkflowDefinition,
   WorkflowRun,
   WorkflowStep,
@@ -462,5 +465,87 @@ describe('createWorkflowEngine (TASK-057)', () => {
     expect(stepByNode('a').status).toBe('cancelled')
     expect(stepByNode('b').status).toBe('cancelled')
     expect(finished.ok && finished.data.run.status).toBe('cancelled')
+  })
+})
+
+describe('agent step executor cancellation', () => {
+  function fakeAgentRun(id: string): AgentRun {
+    return {
+      id,
+      workspaceId: 'ws-1',
+      agentType: 'fake',
+      status: 'running',
+      executionMode: 'attended',
+      runDir: `runs/${id}`,
+      createdAt: '2026-09-11T00:00:00.000Z',
+      updatedAt: '2026-09-11T00:00:00.000Z',
+    }
+  }
+
+  /**
+   * Regression: a cancel arriving while AgentManager.start is still in
+   * flight (e.g. agent detection) used to be dropped — the agent run
+   * launched anyway and ran to completion after the workflow reported
+   * cancelled.
+   */
+  it('routes a cancel that arrives mid-launch to the run once it materializes', async () => {
+    const connection = new Database(':memory:')
+    openConnections.push(connection)
+    connection.pragma('foreign_keys = ON')
+    const migrated = migrateDatabase(connection)
+    if (!migrated.ok) throw new Error(migrated.error.message)
+    const store = createWorkflowRunStore({
+      workflowRuns: createWorkflowRunRepository(connection),
+    })
+    const events = createEventBus()
+
+    let resolveStart!: (result: IpcResult<AgentRun>) => void
+    const startRequests: StartAgentRunRequest[] = []
+    const cancelledRunIds: string[] = []
+    const agents = {
+      start(request: StartAgentRunRequest): Promise<IpcResult<AgentRun>> {
+        startRequests.push(request)
+        return new Promise<IpcResult<AgentRun>>((resolve) => {
+          resolveStart = resolve
+        })
+      },
+      cancel(runId: string): Promise<IpcResult<AgentRun>> {
+        cancelledRunIds.push(runId)
+        // AgentManager emits agent.cancelled before resolving.
+        events.emit('agent.cancelled', { runId })
+        return Promise.resolve({ ok: true, data: { ...fakeAgentRun(runId), status: 'cancelled' } })
+      },
+    }
+    const engine = createWorkflowEngine({ runs: store, events, agentManager: agents })
+
+    const created = store.createRun({
+      definition: define([{ id: 'impl', type: 'agent', agent: 'fake', runOn: 'always' }]),
+    })
+    if (!created.ok) throw new Error(created.error.message)
+    const run = created.data.run
+
+    const pass = engine.start(run.id, CONTEXT)
+    await flush()
+    expect(startRequests).toHaveLength(1)
+
+    // Cancel while the launch is still in flight: the cancel must not
+    // complete until the launch settled AND the run received it.
+    let cancelSettled = false
+    const cancelling = engine.cancel(run.id).then((result) => {
+      cancelSettled = true
+      return result
+    })
+    await flush()
+    expect(cancelSettled).toBe(false)
+    expect(cancelledRunIds).toEqual([])
+
+    resolveStart({ ok: true, data: fakeAgentRun('agent-run-1') })
+    const cancelled = await cancelling
+    expect(cancelled.ok).toBe(true)
+    expect(cancelledRunIds).toEqual(['agent-run-1'])
+
+    const finished = await pass
+    expect(finished.ok).toBe(true)
+    if (finished.ok) expect(finished.data.run.status).toBe('cancelled')
   })
 })

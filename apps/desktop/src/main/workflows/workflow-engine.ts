@@ -268,11 +268,18 @@ function createAgentStepExecutor(deps: {
 }): WorkflowStepExecutor {
   /** stepId → agentRunId, for cancel routing. */
   const agentRuns = new Map<string, string>()
+  /** stepIds the engine cancelled while AgentManager.start was still in flight. */
+  const cancelRequested = new Set<string>()
+  /** stepId → in-flight execute(), so cancel can wait out a launch it interrupted. */
+  const inFlight = new Map<string, Promise<StepCompletion>>()
 
   return {
-    async execute({ run, step, node, context }) {
+    execute({ run, step, node, context }) {
       if (node.type !== 'agent') {
-        return { outcome: 'failure', result: { error: 'agent executor received a non-agent node' } }
+        return Promise.resolve({
+          outcome: 'failure',
+          result: { error: 'agent executor received a non-agent node' },
+        })
       }
       const request: StartAgentRunRequest = {
         workspaceId: context.workspaceId,
@@ -285,48 +292,74 @@ function createAgentStepExecutor(deps: {
         ...(context.prompt === undefined ? {} : { prompt: context.prompt }),
         ...(context.model === undefined ? {} : { model: context.model }),
       }
-      const started = await deps.agents.start(request)
-      if (!started.ok) {
-        return { outcome: 'failure', result: { error: started.error.message } }
+      const executed = (async (): Promise<StepCompletion> => {
+        const started = await deps.agents.start(request)
+        if (!started.ok) {
+          return { outcome: 'failure', result: { error: started.error.message } }
+        }
+        const agentRunId = started.data.id
+        agentRuns.set(step.id, agentRunId)
+        return new Promise<StepCompletion>((resolve) => {
+          const unsubscribeAll = (): void => {
+            for (const unsubscribe of unsubscribes) unsubscribe()
+          }
+          const done = (completion: StepCompletion): void => {
+            unsubscribeAll()
+            resolve(completion)
+          }
+          const unsubscribes = [
+            deps.events.subscribe('agent.completed', (payload) => {
+              if (payload.runId !== agentRunId) return
+              done({
+                outcome: payload.exitCode === 0 ? 'success' : 'failure',
+                result: { agentRunId, exitCode: payload.exitCode },
+              })
+            }),
+            deps.events.subscribe('agent.failed', (payload) => {
+              if (payload.runId !== agentRunId) return
+              done({ outcome: 'failure', result: { agentRunId, error: payload.error.message } })
+            }),
+            deps.events.subscribe('agent.cancelled', (payload) => {
+              if (payload.runId !== agentRunId) return
+              done({ outcome: 'failure', result: { agentRunId, cancelled: true } })
+            }),
+            deps.events.subscribe('agent.interrupted', (payload) => {
+              if (payload.runId !== agentRunId) return
+              done({ outcome: 'failure', result: { agentRunId, interrupted: payload.reason } })
+            }),
+          ]
+          // The engine cancelled this step while the launch was in flight:
+          // route the cancellation to the run that just materialized. The
+          // subscriptions above are already in place, so the terminal event
+          // the cancel provokes still settles this step.
+          if (cancelRequested.delete(step.id)) {
+            void deps.agents.cancel(agentRunId).then(() => undefined, () => undefined)
+          }
+        })
+      })()
+      inFlight.set(step.id, executed)
+      const cleanup = (): void => {
+        inFlight.delete(step.id)
+        agentRuns.delete(step.id)
+        cancelRequested.delete(step.id)
       }
-      const agentRunId = started.data.id
-      agentRuns.set(step.id, agentRunId)
-      return new Promise<StepCompletion>((resolve) => {
-        const unsubscribeAll = (): void => {
-          for (const unsubscribe of unsubscribes) unsubscribe()
-        }
-        const done = (completion: StepCompletion): void => {
-          unsubscribeAll()
-          resolve(completion)
-        }
-        const unsubscribes = [
-          deps.events.subscribe('agent.completed', (payload) => {
-            if (payload.runId !== agentRunId) return
-            done({
-              outcome: payload.exitCode === 0 ? 'success' : 'failure',
-              result: { agentRunId, exitCode: payload.exitCode },
-            })
-          }),
-          deps.events.subscribe('agent.failed', (payload) => {
-            if (payload.runId !== agentRunId) return
-            done({ outcome: 'failure', result: { agentRunId, error: payload.error.message } })
-          }),
-          deps.events.subscribe('agent.cancelled', (payload) => {
-            if (payload.runId !== agentRunId) return
-            done({ outcome: 'failure', result: { agentRunId, cancelled: true } })
-          }),
-          deps.events.subscribe('agent.interrupted', (payload) => {
-            if (payload.runId !== agentRunId) return
-            done({ outcome: 'failure', result: { agentRunId, interrupted: payload.reason } })
-          }),
-        ]
-      })
+      void executed.then(cleanup, cleanup)
+      return executed
     },
 
-    cancel(stepId) {
-      const agentRunId = agentRuns.get(stepId)
-      if (agentRunId === undefined) return
-      return deps.agents.cancel(agentRunId).then(() => undefined)
+    async cancel(stepId) {
+      cancelRequested.add(stepId)
+      try {
+        const agentRunId = agentRuns.get(stepId)
+        if (agentRunId !== undefined) {
+          await deps.agents.cancel(agentRunId).then(() => undefined, () => undefined)
+        }
+        // A launch interrupted mid-flight must finish settling — with the
+        // cancellation routed — before the engine tears the pass down.
+        await inFlight.get(stepId)?.then(() => undefined, () => undefined)
+      } finally {
+        cancelRequested.delete(stepId)
+      }
     },
   }
 }
