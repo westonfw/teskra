@@ -54,7 +54,9 @@ export function matchCommandPattern(pattern: string, command: string): boolean {
   const trimmed = pattern.trim()
   if (trimmed.length === 0) return false
   if (trimmed === '*') return true
-  if (trimmed.endsWith('*')) return command.startsWith(trimmed.slice(0, -1).trimEnd())
+  // Trailing star = glob over the literal prefix, word boundary included:
+  // `rm *` matches `rm -rf build` but not `rmdir build`.
+  if (trimmed.endsWith('*')) return command.startsWith(trimmed.slice(0, -1))
   return command === trimmed || command.startsWith(`${trimmed} `)
 }
 

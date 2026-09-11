@@ -98,6 +98,14 @@ describe('matchCommandPattern', () => {
     expect(matchCommandPattern('rm', 'rm -rf build')).toBe(true)
     expect(matchCommandPattern('', 'ls')).toBe(false)
   })
+
+  it('keeps the word boundary before a trailing star', () => {
+    // `rm *` must not match commands that merely start with the letters "rm".
+    expect(matchCommandPattern('rm *', 'rm -rf build')).toBe(true)
+    expect(matchCommandPattern('rm *', 'rmdir build')).toBe(false)
+    expect(matchCommandPattern('sudo *', 'sudoedit /etc/hosts')).toBe(false)
+    expect(matchCommandPattern('docker *', 'docker-compose up')).toBe(false)
+  })
 })
 
 describe('PermissionManager rule CRUD (TASK-065)', () => {
