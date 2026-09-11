@@ -75,9 +75,10 @@ function setup(startPanel: (request: StartReviewPanelRequest) => Promise<IpcResu
   const panel = {
     startPanel: vi.fn(startPanel),
     cancelPanel: vi.fn(),
-    getPanel: vi.fn(
-      (_panelId: string): IpcResult<ReviewPanelResult | null> => ({ ok: true, data: null }),
-    ),
+    getPanel: vi.fn<(panelId: string) => IpcResult<ReviewPanelResult | null>>(() => ({
+      ok: true,
+      data: null,
+    })),
   }
   const engine = createWorkflowEngine({
     runs: store,

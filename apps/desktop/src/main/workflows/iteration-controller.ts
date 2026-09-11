@@ -4,6 +4,7 @@ import {
   DEFAULT_ITERATION_POLICY,
   type IpcResult,
   type IterationPolicy,
+  type Task,
   type WorkflowDefinition,
   type WorkflowIterateRequest,
   type WorkflowIterateResult,
@@ -164,6 +165,8 @@ function buildIterateDefinition(agent: string, reviewers: readonly string[]): Wo
 
 export function createIterationController(deps: IterationControllerDeps): IterationController {
   const createAgentRunId = deps.createAgentRunId ?? randomUUID
+  /** Run ids this controller is currently driving (concurrent-iterate guard). */
+  const activeLoops = new Set<string>()
 
   const emitRunStatus = (runId: string, status: WorkflowRun['status']): void => {
     deps.events.emit('workflow.run_updated', { runId, status })
@@ -313,168 +316,193 @@ export function createIterationController(deps: IterationControllerDeps): Iterat
         run = found.data.run
       }
 
-      // TASK-063: shell steps (Build/Test) need the workspace runtime and the
-      // worktree cwd in the execution context; resolve them once per
-      // iterate() call (the worktree binding does not change between rounds).
-      let stepRuntime: WorkspaceRuntime | undefined
-      let stepCwd: string | undefined
-      if (deps.resolveStepContext !== undefined) {
-        const stepContext = deps.resolveStepContext({
-          workspaceId: request.workspaceId,
-          ...(request.worktreeId === undefined ? {} : { worktreeId: request.worktreeId }),
-        })
-        if (!stepContext.ok) return stepContext
-        stepRuntime = stepContext.data?.runtime
-        stepCwd = stepContext.data?.cwd
-      }
-
-      for (;;) {
-        if (TERMINAL_RUN_STATUSES.has(run.status)) {
-          return invalid(
-            `Workflow run "${run.id}" is ${run.status}; it cannot be iterated.`,
-            `iterate on terminal run ${run.id}`,
-          )
-        }
-
-        // Re-anchor to the currently confirmed criteria set: a changed anchor
-        // means "the user edited the Criteria" and resets the per-version
-        // counter; the total (currentIteration) never resets (plan §124).
-        const anchor = resolveCriteriaAnchor(request.taskId)
-        if (!anchor.ok) return anchor
-        if ((run.criteriaSetId ?? null) !== anchor.data) {
-          const anchored = deps.runs.anchorCriteriaSet(run.id, anchor.data)
-          if (!anchored.ok) return anchored
-          run = anchored.data
-        }
-
-        // Pre-round cap check (resume path): a run that already hit a cap and
-        // whose criteria did NOT change re-triggers immediately instead of
-        // burning another round.
-        const detail = deps.runs.getRun(run.id)
-        if (!detail.ok) return detail
-        if (detail.data === null) {
-          return invalid(
-            `Workflow run "${run.id}" was not found.`,
-            `run ${run.id} vanished during iteration`,
-          )
-        }
-        const settledRounds = detail.data.steps.some(
-          (step) => step.iteration === run.currentIteration,
+      // A second iterate() for a run this controller is already driving must
+      // not reach engine.start: the engine's duplicate-pass rejection would
+      // be answered with setRunStatus('failed') below, corrupting the run the
+      // active loop still owns.
+      if (activeLoops.has(run.id)) {
+        return invalid(
+          `Workflow run "${run.id}" already has an active iterate loop.`,
+          `concurrent iterate for run ${run.id}`,
         )
-          ? run.currentIteration + 1
-          : run.currentIteration
-        if (settledRounds > 0) {
-          if (run.criteriaIteration >= policy.maxRoundsPerCriteriaVersion) {
-            return triggerCap(run, 'max_rounds_per_criteria_version', settledRounds, false)
-          }
-          if (settledRounds >= policy.maxTotalRounds) {
-            return triggerCap(run, 'max_total_rounds', settledRounds, false)
-          }
-        }
-
-        // Exactly one agent node executes per pass, so a per-round
-        // pre-allocated AgentRun id is safe here (it makes the prompt's
-        // ADR-0004 env paths match the run AgentManager will start).
-        const agentRunId = createAgentRunId()
-        const isFirstRound = run.currentIteration === 0
-        let prompt = isFirstRound ? request.prompt : (request.fixPrompt ?? request.prompt)
-        if (
-          prompt === undefined &&
-          deps.promptTemplates !== undefined &&
-          deps.paths !== undefined
-        ) {
-          const workspace = deps.workspaces.getById(request.workspaceId)
-          if (!workspace.ok) return workspace
-          if (workspace.data === null) {
-            return invalid(
-              `Workspace "${request.workspaceId}" was not found.`,
-              `IterationController could not resolve workspace id=${JSON.stringify(request.workspaceId)}`,
-            )
-          }
-          const anchorSetId = run.criteriaSetId
-          let criteria: string[] | undefined
-          if (anchorSetId !== undefined) {
-            const rows = deps.criteria.listCriteria(anchorSetId)
-            if (!rows.ok) return rows
-            criteria = rows.data.map((criterion) => criterion.description)
-          }
-          let previousHandoff: string | undefined
-          if (!isFirstRound && deps.handoffs !== undefined) {
-            const previousRunId = agentStepOf(detail.data, run.currentIteration - 1)?.result?.[
-              'agentRunId'
-            ]
-            if (typeof previousRunId === 'string') {
-              const handoff = deps.handoffs.getByRunId(previousRunId)
-              if (!handoff.ok) return handoff
-              const summary = handoff.data?.payload?.['summary']
-              previousHandoff = typeof summary === 'string' ? summary : undefined
-            }
-          }
-          const runFiles = deps.paths.runFiles(agentRunId)
-          if (!runFiles.ok) return runFiles
-          const rendered = deps.promptTemplates.render(
-            {
-              name: isFirstRound ? 'implement' : 'fix',
-              context: {
-                task: { title: task.data.title, description: task.data.description ?? '' },
-                ...(criteria === undefined ? {} : { criteria }),
-                role: isFirstRound ? 'implementer' : 'fixer',
-                ...(previousHandoff === undefined ? {} : { previousHandoff }),
-                env: {
-                  TESKRA_HANDOFF_PATH: runFiles.data.handoff,
-                  TESKRA_ARTIFACT_DIR: runFiles.data.artifacts,
-                },
-              },
-            },
-            workspace.data.path,
-          )
-          if (!rendered.ok) return rendered
-          prompt = rendered.data.content
-        }
-
-        const settled = await deps.engine.start(run.id, {
-          workspaceId: request.workspaceId,
-          ...(request.worktreeId === undefined ? {} : { worktreeId: request.worktreeId }),
-          agentRunId,
-          ...(prompt === undefined ? {} : { prompt }),
-          ...(request.model === undefined ? {} : { model: request.model }),
-          ...(stepRuntime === undefined ? {} : { runtime: stepRuntime }),
-          ...(stepCwd === undefined ? {} : { cwd: stepCwd }),
-        })
-        if (!settled.ok) {
-          const failedRun = deps.runs.setRunStatus(run.id, 'failed')
-          if (failedRun.ok) emitRunStatus(run.id, 'failed')
-          return settled
-        }
-        run = settled.data.run
-
-        if (run.status === 'cancelled') {
-          return {
-            ok: true,
-            data: { run, rounds: run.currentIteration + 1, stopReason: 'cancelled' },
-          }
-        }
-
-        const rounds = run.currentIteration + 1
-        if (reviewVerdict(settled.data) === 'approve') {
-          const completed = deps.runs.setRunStatus(run.id, 'completed')
-          if (!completed.ok) return completed
-          emitRunStatus(run.id, 'completed')
-          return { ok: true, data: { run: completed.data, rounds, stopReason: 'passed' } }
-        }
-
-        const versionRounds = run.criteriaIteration + 1
-        if (versionRounds >= policy.maxRoundsPerCriteriaVersion) {
-          return triggerCap(run, 'max_rounds_per_criteria_version', rounds, true)
-        }
-        if (rounds >= policy.maxTotalRounds) {
-          return triggerCap(run, 'max_total_rounds', rounds, true)
-        }
-
-        const advanced = deps.runs.advanceIteration(run.id)
-        if (!advanced.ok) return advanced
-        run = advanced.data
+      }
+      activeLoops.add(run.id)
+      try {
+        return await iterateLoop(request, run, task.data)
+      } finally {
+        activeLoops.delete(run.id)
       }
     },
+  }
+
+  /**
+   * The multi-round loop body, run under the active-loops guard. Extracted
+   * from `iterate` so the guard's try/finally brackets every return path.
+   */
+  async function iterateLoop(
+    request: WorkflowIterateRequest,
+    initialRun: WorkflowRun,
+    taskRow: Task,
+  ): Promise<IpcResult<WorkflowIterateResult>> {
+    const policy: IterationPolicy = { ...DEFAULT_ITERATION_POLICY, ...request.policy }
+    let run = initialRun
+    // TASK-063: shell steps (Build/Test) need the workspace runtime and the
+    // worktree cwd in the execution context; resolve them once per
+    // iterate() call (the worktree binding does not change between rounds).
+    let stepRuntime: WorkspaceRuntime | undefined
+    let stepCwd: string | undefined
+    if (deps.resolveStepContext !== undefined) {
+      const stepContext = deps.resolveStepContext({
+        workspaceId: request.workspaceId,
+        ...(request.worktreeId === undefined ? {} : { worktreeId: request.worktreeId }),
+      })
+      if (!stepContext.ok) return stepContext
+      stepRuntime = stepContext.data?.runtime
+      stepCwd = stepContext.data?.cwd
+    }
+
+    for (;;) {
+      if (TERMINAL_RUN_STATUSES.has(run.status)) {
+        return invalid(
+          `Workflow run "${run.id}" is ${run.status}; it cannot be iterated.`,
+          `iterate on terminal run ${run.id}`,
+        )
+      }
+
+      // Re-anchor to the currently confirmed criteria set: a changed anchor
+      // means "the user edited the Criteria" and resets the per-version
+      // counter; the total (currentIteration) never resets (plan §124).
+      const anchor = resolveCriteriaAnchor(request.taskId)
+      if (!anchor.ok) return anchor
+      if ((run.criteriaSetId ?? null) !== anchor.data) {
+        const anchored = deps.runs.anchorCriteriaSet(run.id, anchor.data)
+        if (!anchored.ok) return anchored
+        run = anchored.data
+      }
+
+      // Pre-round cap check (resume path): a run that already hit a cap and
+      // whose criteria did NOT change re-triggers immediately instead of
+      // burning another round.
+      const detail = deps.runs.getRun(run.id)
+      if (!detail.ok) return detail
+      if (detail.data === null) {
+        return invalid(
+          `Workflow run "${run.id}" was not found.`,
+          `run ${run.id} vanished during iteration`,
+        )
+      }
+      const settledRounds = detail.data.steps.some(
+        (step) => step.iteration === run.currentIteration,
+      )
+        ? run.currentIteration + 1
+        : run.currentIteration
+      if (settledRounds > 0) {
+        if (run.criteriaIteration >= policy.maxRoundsPerCriteriaVersion) {
+          return triggerCap(run, 'max_rounds_per_criteria_version', settledRounds, false)
+        }
+        if (settledRounds >= policy.maxTotalRounds) {
+          return triggerCap(run, 'max_total_rounds', settledRounds, false)
+        }
+      }
+
+      // Exactly one agent node executes per pass, so a per-round
+      // pre-allocated AgentRun id is safe here (it makes the prompt's
+      // ADR-0004 env paths match the run AgentManager will start).
+      const agentRunId = createAgentRunId()
+      const isFirstRound = run.currentIteration === 0
+      let prompt = isFirstRound ? request.prompt : (request.fixPrompt ?? request.prompt)
+      if (prompt === undefined && deps.promptTemplates !== undefined && deps.paths !== undefined) {
+        const workspace = deps.workspaces.getById(request.workspaceId)
+        if (!workspace.ok) return workspace
+        if (workspace.data === null) {
+          return invalid(
+            `Workspace "${request.workspaceId}" was not found.`,
+            `IterationController could not resolve workspace id=${JSON.stringify(request.workspaceId)}`,
+          )
+        }
+        const anchorSetId = run.criteriaSetId
+        let criteria: string[] | undefined
+        if (anchorSetId !== undefined) {
+          const rows = deps.criteria.listCriteria(anchorSetId)
+          if (!rows.ok) return rows
+          criteria = rows.data.map((criterion) => criterion.description)
+        }
+        let previousHandoff: string | undefined
+        if (!isFirstRound && deps.handoffs !== undefined) {
+          const previousRunId = agentStepOf(detail.data, run.currentIteration - 1)?.result?.[
+            'agentRunId'
+          ]
+          if (typeof previousRunId === 'string') {
+            const handoff = deps.handoffs.getByRunId(previousRunId)
+            if (!handoff.ok) return handoff
+            const summary = handoff.data?.payload?.['summary']
+            previousHandoff = typeof summary === 'string' ? summary : undefined
+          }
+        }
+        const runFiles = deps.paths.runFiles(agentRunId)
+        if (!runFiles.ok) return runFiles
+        const rendered = deps.promptTemplates.render(
+          {
+            name: isFirstRound ? 'implement' : 'fix',
+            context: {
+              task: { title: taskRow.title, description: taskRow.description ?? '' },
+              ...(criteria === undefined ? {} : { criteria }),
+              role: isFirstRound ? 'implementer' : 'fixer',
+              ...(previousHandoff === undefined ? {} : { previousHandoff }),
+              env: {
+                TESKRA_HANDOFF_PATH: runFiles.data.handoff,
+                TESKRA_ARTIFACT_DIR: runFiles.data.artifacts,
+              },
+            },
+          },
+          workspace.data.path,
+        )
+        if (!rendered.ok) return rendered
+        prompt = rendered.data.content
+      }
+
+      const settled = await deps.engine.start(run.id, {
+        workspaceId: request.workspaceId,
+        ...(request.worktreeId === undefined ? {} : { worktreeId: request.worktreeId }),
+        agentRunId,
+        ...(prompt === undefined ? {} : { prompt }),
+        ...(request.model === undefined ? {} : { model: request.model }),
+        ...(stepRuntime === undefined ? {} : { runtime: stepRuntime }),
+        ...(stepCwd === undefined ? {} : { cwd: stepCwd }),
+      })
+      if (!settled.ok) {
+        const failedRun = deps.runs.setRunStatus(run.id, 'failed')
+        if (failedRun.ok) emitRunStatus(run.id, 'failed')
+        return settled
+      }
+      run = settled.data.run
+
+      if (run.status === 'cancelled') {
+        return {
+          ok: true,
+          data: { run, rounds: run.currentIteration + 1, stopReason: 'cancelled' },
+        }
+      }
+
+      const rounds = run.currentIteration + 1
+      if (reviewVerdict(settled.data) === 'approve') {
+        const completed = deps.runs.setRunStatus(run.id, 'completed')
+        if (!completed.ok) return completed
+        emitRunStatus(run.id, 'completed')
+        return { ok: true, data: { run: completed.data, rounds, stopReason: 'passed' } }
+      }
+
+      const versionRounds = run.criteriaIteration + 1
+      if (versionRounds >= policy.maxRoundsPerCriteriaVersion) {
+        return triggerCap(run, 'max_rounds_per_criteria_version', rounds, true)
+      }
+      if (rounds >= policy.maxTotalRounds) {
+        return triggerCap(run, 'max_total_rounds', rounds, true)
+      }
+
+      const advanced = deps.runs.advanceIteration(run.id)
+      if (!advanced.ok) return advanced
+      run = advanced.data
+    }
   }
 }

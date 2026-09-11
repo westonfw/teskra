@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { StepCompletion, WorkflowStepExecution } from './workflow-engine'
 import type {
@@ -80,7 +80,12 @@ function setup(options?: { review?: (round: number) => StepCompletion }): Fixtur
   const events = createEventBus()
 
   const workspace = workspaces.create(
-    { id: 'workspace-1', name: 'Iterate fixture', runtime: { kind: 'wsl', distro: 'Ubuntu' }, path: '/repo' },
+    {
+      id: 'workspace-1',
+      name: 'Iterate fixture',
+      runtime: { kind: 'wsl', distro: 'Ubuntu' },
+      path: '/repo',
+    },
     AT,
   )
   if (!workspace.ok) throw new Error(workspace.error.message)
@@ -89,7 +94,10 @@ function setup(options?: { review?: (round: number) => StepCompletion }): Fixtur
     AT,
   )
   if (!task.ok) throw new Error(task.error.message)
-  const set = criteria.createSet({ id: 'set-1', taskId: 'task-1', version: 1, status: 'confirmed' }, AT)
+  const set = criteria.createSet(
+    { id: 'set-1', taskId: 'task-1', version: 1, status: 'confirmed' },
+    AT,
+  )
   if (!set.ok) throw new Error(set.error.message)
 
   const store = createWorkflowRunStore({ workflowRuns, tasks })
@@ -98,7 +106,9 @@ function setup(options?: { review?: (round: number) => StepCompletion }): Fixtur
   const agentCalls: AgentCall[] = []
   const reviewRounds: number[] = []
   const reviewBehavior = {
-    decide: options?.review ?? ((): StepCompletion => ({ outcome: 'changes_requested', result: { panelId: 'panel' } })),
+    decide:
+      options?.review ??
+      ((): StepCompletion => ({ outcome: 'changes_requested', result: { panelId: 'panel' } })),
   }
 
   const agentExecutor = {
@@ -278,7 +288,10 @@ describe('IterationController (TASK-062)', () => {
     // 用户改了 Criteria：确认一个 v2 集合（v1 被 supersede）。
     const superseded = fixture.criteria.supersedeSet('set-1')
     if (!superseded.ok) throw new Error(superseded.error.message)
-    const v2 = fixture.criteria.createSet({ id: 'set-2', taskId: 'task-1', version: 2, status: 'confirmed' }, AT)
+    const v2 = fixture.criteria.createSet(
+      { id: 'set-2', taskId: 'task-1', version: 2, status: 'confirmed' },
+      AT,
+    )
     if (!v2.ok) throw new Error(v2.error.message)
 
     // 模拟 App 重启：同一 DB 上的全新 controller + engine 实例。
@@ -367,5 +380,103 @@ describe('IterationController (TASK-062)', () => {
       runId: started.run.id,
     })
     expect(foreign.ok).toBe(false)
+  })
+
+  /**
+   * Regression: a second iterate() for a run whose loop is still in flight
+   * hit the engine's duplicate-pass rejection and the controller responded
+   * by marking the run 'failed' — while the first loop was still driving it.
+   */
+  it('rejects a concurrent iterate on the same run without failing the active loop', async () => {
+    const database = new Database(':memory:')
+    database.pragma('foreign_keys = ON')
+    const migrated = migrateDatabase(database)
+    if (!migrated.ok) throw new Error(migrated.error.message)
+    databases.push(database)
+
+    const workspaces = createWorkspaceRepository(database)
+    const tasks = createTaskRepository(database)
+    const criteria = createCriteriaRepository(database)
+    const workflowRuns = createWorkflowRunRepository(database)
+    const events = createEventBus()
+    const workspace = workspaces.create(
+      {
+        id: 'workspace-1',
+        name: 'Concurrent fixture',
+        runtime: { kind: 'wsl', distro: 'Ubuntu' },
+        path: '/repo',
+      },
+      AT,
+    )
+    if (!workspace.ok) throw new Error(workspace.error.message)
+    const task = tasks.create(
+      { id: 'task-1', workspaceId: 'workspace-1', title: 'Concurrent iterate', status: 'ready' },
+      AT,
+    )
+    if (!task.ok) throw new Error(task.error.message)
+
+    const store = createWorkflowRunStore({ workflowRuns, tasks })
+    const taskManager = createTaskManager({ tasks, workspaces, events })
+    // The review executor parks until the test releases it, keeping round 1
+    // (and thus the iterate loop) in flight.
+    let releaseReview!: () => void
+    const reviewExecutor = {
+      execute(): Promise<StepCompletion> {
+        return new Promise<StepCompletion>((resolve) => {
+          releaseReview = () => resolve({ outcome: 'approve', result: { panelId: 'panel' } })
+        })
+      },
+    }
+    const agentExecutor = {
+      execute(): Promise<StepCompletion> {
+        return Promise.resolve({ outcome: 'success', result: { agentRunId: 'agent-run-1' } })
+      },
+    }
+    const registry = {
+      get: (id: string): AgentDefinition | undefined =>
+        ['codex', 'claude'].includes(id) ? { ...FAKE_AGENT, id } : undefined,
+    }
+    const engine = createWorkflowEngine({
+      runs: store,
+      events,
+      executors: { agent: agentExecutor, 'review-panel': reviewExecutor },
+    })
+    const controller = createIterationController({
+      runs: store,
+      engine,
+      registry,
+      tasks,
+      taskManager,
+      criteria,
+      workspaces,
+      events,
+    })
+
+    const first = controller.iterate({
+      workspaceId: 'workspace-1',
+      taskId: 'task-1',
+      agent: 'codex',
+      reviewers: ['claude'],
+    })
+    let runId: string | undefined
+    await vi.waitFor(() => {
+      const listed = store.listRuns({ status: 'running' })
+      expect(listed.ok && listed.data.length).toBe(1)
+      runId = listed.ok ? listed.data[0]?.id : undefined
+    })
+    if (runId === undefined) throw new Error('expected a running workflow run')
+
+    const second = await controller.iterate({
+      workspaceId: 'workspace-1',
+      taskId: 'task-1',
+      runId,
+    })
+    expect(second.ok).toBe(false)
+    // The active loop's run must be untouched.
+    expect(getRun(store, runId).run.status).toBe('running')
+
+    releaseReview()
+    const result = expectOk(await first)
+    expect(result.stopReason).toBe('passed')
   })
 })
