@@ -43,6 +43,7 @@ import type {
   GitWorkspaceRequest,
   HandoffRecord,
   IpcResult,
+  ListRecoveryIssuesRequest,
   ListRecentWorkspacesRequest,
   ListAgentDetectionsRequest,
   ListAgentRunsRequest,
@@ -71,6 +72,7 @@ import type {
   PermissionRuleIdRequest,
   PromptTemplateInfo,
   RecordArtifactRequest,
+  RecoveryReport,
   RenderedPrompt,
   RenderPromptTemplateRequest,
   ResolveConfigRequest,
@@ -172,6 +174,11 @@ export interface SystemPort {
   getDefaultWslDistribution(): Promise<IpcResult<string | null>>
   setDefaultWslDistribution(name: string | null): Promise<IpcResult<string | null>>
   doctor(request?: RunDoctorRequest): Promise<IpcResult<DoctorReport>>
+}
+
+/** TASK-070: read-only aggregation of the five recoverable problem categories. */
+export interface RecoveryPort {
+  list(request?: ListRecoveryIssuesRequest): Promise<IpcResult<RecoveryReport>>
 }
 
 export interface SettingsPort {
@@ -385,6 +392,7 @@ export interface TeskraRuntime {
   readonly worktree: WorktreePort
   readonly maintenance: MaintenancePort
   readonly workflow: WorkflowPort
+  readonly recovery: RecoveryPort
   dispose(): IpcResult<void>
 }
 

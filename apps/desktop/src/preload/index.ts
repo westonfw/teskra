@@ -148,6 +148,9 @@ const bridge: TeskraBridge = {
     requireCapability: (request) => invoke(IPC_CHANNELS.runtimeRequireCapability, request),
     doctor: (request = {}) => invoke(IPC_CHANNELS.doctorRun, request),
   },
+  recovery: {
+    list: (request = {}) => invoke(IPC_CHANNELS.recoveryList, request),
+  },
   settings: {
     resolveConfig: (request = {}) => invoke(IPC_CHANNELS.settingsResolveConfig, request),
     updateConfig: (request) => invoke(IPC_CHANNELS.settingsUpdateConfig, request),

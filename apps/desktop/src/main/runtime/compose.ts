@@ -50,6 +50,7 @@ import { createProcessManager } from '../process/process-manager'
 import { createPermissionManager } from '../permissions/permission-manager'
 import { createPromptTemplateService } from '../prompts/prompt-template-service'
 import { createReconciliationService } from '../recovery/reconciliation-service'
+import { createRecoveryCenterService } from '../recovery/recovery-center-service'
 import { createResumeService } from '../recovery/resume-service'
 import { createReviewCollector } from '../agents/review-collector'
 import { createReviewPanelService } from '../agents/review-panel-service'
@@ -414,6 +415,20 @@ export async function composeTeskraRuntime(
     agentManager,
     resolveRuntime: (workspace) => runtimeFor(workspace.runtime),
   })
+  const recoveryCenter = createRecoveryCenterService({
+    workspaces: repositories.workspaces,
+    worktrees: repositories.worktrees,
+    runs: repositories.agentRuns,
+    processes: processManager,
+    git: gitManager,
+    resolveRuntime: (workspace) => runtimeFor(workspace.runtime),
+    resolveStalledThresholdMs: (workspaceId) => {
+      const resolved = config.resolve({ workspaceId })
+      return resolved.ok
+        ? { ok: true, data: resolved.data.config.watchdog.stalledThresholdMs }
+        : resolved
+    },
+  })
   const reviewerService = createReviewerService({
     registry: registeredAgents.data,
     agents: agentManager,
@@ -732,6 +747,9 @@ export async function composeTeskraRuntime(
       iterate: (request) => iterationController.iterate(request),
       startFullWorkflow: (request) => fullWorkflow.start(request),
       runSummary: (request) => fullWorkflow.summary(request),
+    },
+    recovery: {
+      list: (request) => recoveryCenter.list(request),
     },
     git: {
       status: ({ workspaceId }) => gitManager.status(workspaceId),

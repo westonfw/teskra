@@ -355,6 +355,11 @@ function fakeRuntime(): TeskraRuntime {
         }),
       ),
     },
+    recovery: {
+      list: vi.fn(async () =>
+        ok({ generatedAt: '2026-09-10T00:00:00.000Z', workspaceId: 'ws1', issues: [] }),
+      ),
+    },
     credential: {
       status: vi.fn(() => ok({ available: true })),
       set: vi.fn(() => ok(undefined)),
