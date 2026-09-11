@@ -6,6 +6,7 @@ import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { IpcResult, StartReviewRunRequest, WorkbenchEvents } from '@teskra/contracts'
+import type { ReviewAggregationPolicy } from '@teskra/shared'
 
 import { migrateDatabase } from '../db/migrations'
 import {
@@ -60,7 +61,7 @@ interface Fixture {
   readonly failAgents: Set<string>
 }
 
-function setup(): Fixture {
+function setup(options: { policy?: ReviewAggregationPolicy } = {}): Fixture {
   const directory = mkdtempSync(join(tmpdir(), 'teskra-review-panel-'))
   directories.push(directory)
   const database = new Database(':memory:')
@@ -153,6 +154,9 @@ function setup(): Fixture {
     createMemberId: () => `member-${String(++memberTick)}`,
     createRunId: () => `review-run-${String(++runTick)}`,
     now: () => `2026-09-10T00:10:${String(clockTick++).padStart(2, '0')}.000Z`,
+    ...(options.policy === undefined
+      ? {}
+      : { resolvePolicy: () => ({ ok: true as const, data: options.policy as ReviewAggregationPolicy }) }),
   })
 
   return { service, events, runs, reviews, handoffs, worktrees, reviewerCalls, cancel, failAgents }
@@ -559,5 +563,103 @@ describe('ReviewPanelService', () => {
     expect(result.error.code).toBe('VALIDATION_FAILED')
     expect(fixture.reviewerCalls).toHaveLength(0)
     expect(requireOk(fixture.service.listPanels('task-1'))).toHaveLength(0)
+  })
+})
+
+describe('ReviewPanelService aggregation (TASK-061)', () => {
+  async function runPanel(
+    fixture: Fixture,
+    findings: { agent: string; severity: 'critical' | 'high' | 'medium' | 'low'; title: string }[],
+    reviewers = ['claude', 'codex', 'gemini'],
+  ) {
+    implementRun(fixture)
+    const pending = fixture.service.startPanel({
+      workspaceId: 'ws-1',
+      taskId: 'task-1',
+      reviewers,
+      targetRunId: 'impl-run',
+    })
+    await vi.waitFor(() => expect(fixture.reviewerCalls).toHaveLength(reviewers.length))
+    findings.forEach((finding, index) => {
+      requireOk(
+        fixture.reviews.addFinding({
+          id: `policy-finding-${String(index)}`,
+          runId: callFor(fixture, finding.agent).runId as string,
+          severity: finding.severity,
+          title: finding.title,
+        }),
+      )
+    })
+    for (const reviewer of reviewers) {
+      completeReviewer(fixture, callFor(fixture, reviewer).runId as string)
+    }
+    return requireOk(await pending)
+  }
+
+  it('blocks on one critical finding even when the majority approves (no majority voting)', async () => {
+    const fixture = setup()
+    // 3 reviewers: 2 find nothing (approve), 1 reports a single critical.
+    const result = await runPanel(fixture, [
+      { agent: 'gemini', severity: 'critical', title: 'SQL injection' },
+    ])
+    expect(result.panel.consensus).toBe('mixed')
+    expect(result.panel.aggregate?.verdict).toBe('block')
+    expect(result.panel.aggregate?.reasons?.join(' ')).toContain('critical')
+    // The verdict split stays visible as a preserved disagreement.
+    expect(result.panel.aggregate?.disagreements).toContainEqual(
+      expect.objectContaining({ kind: 'verdict' }),
+    )
+  })
+
+  it('blocks on high findings and passes with only low/none', async () => {
+    const high = await runPanel(setup(), [{ agent: 'claude', severity: 'high', title: 'XSS' }])
+    expect(high.panel.aggregate?.verdict).toBe('block')
+
+    const low = await runPanel(setup(), [{ agent: 'codex', severity: 'low', title: 'naming' }])
+    expect(low.panel.aggregate?.verdict).toBe('pass')
+
+    const none = await runPanel(setup(), [])
+    expect(none.panel.aggregate?.verdict).toBe('pass')
+  })
+
+  it('applies the configured medium threshold from the resolved policy', async () => {
+    const below = await runPanel(
+      setup({ policy: { mediumBlockThreshold: 2 } }),
+      [{ agent: 'claude', severity: 'medium', title: 'dup' }],
+    )
+    expect(below.panel.aggregate?.verdict).toBe('pass')
+
+    const at = await runPanel(setup({ policy: { mediumBlockThreshold: 2 } }), [
+      { agent: 'claude', severity: 'medium', title: 'dup' },
+      { agent: 'codex', severity: 'medium', title: 'dead code' },
+    ])
+    expect(at.panel.aggregate?.verdict).toBe('block')
+    expect(at.panel.aggregate?.reasons?.join(' ')).toContain('threshold')
+
+    // Default policy (threshold 0): mediums never block.
+    const defaults = await runPanel(setup(), [
+      { agent: 'claude', severity: 'medium', title: 'a' },
+      { agent: 'codex', severity: 'medium', title: 'b' },
+      { agent: 'gemini', severity: 'medium', title: 'c' },
+    ])
+    expect(defaults.panel.aggregate?.verdict).toBe('pass')
+  })
+
+  it('notes partial coverage when a reviewer cannot complete, without flipping the verdict', async () => {
+    const fixture = setup()
+    implementRun(fixture)
+    const pending = fixture.service.startPanel({
+      workspaceId: 'ws-1',
+      taskId: 'task-1',
+      reviewers: ['claude', 'codex'],
+      targetRunId: 'impl-run',
+    })
+    await vi.waitFor(() => expect(fixture.reviewerCalls).toHaveLength(2))
+    completeReviewer(fixture, callFor(fixture, 'claude').runId as string)
+    failReviewer(fixture, callFor(fixture, 'codex').runId as string)
+    const result = requireOk(await pending)
+
+    expect(result.panel.aggregate?.verdict).toBe('pass')
+    expect(result.panel.aggregate?.reasons?.join(' ')).toContain('could not complete')
   })
 })

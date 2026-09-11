@@ -307,6 +307,7 @@ function fakeRuntime(): TeskraRuntime {
             watchdog: { stalledThresholdMs: 600_000 },
             environment: { defaultDistro: null },
             agents: { executableOverrides: {} },
+            review: { mediumBlockThreshold: 0 },
           },
           sources: {
             'logging.level': 'default' as const,
@@ -315,6 +316,7 @@ function fakeRuntime(): TeskraRuntime {
             'concurrency.maxRunsPerAgent': 'default' as const,
             'watchdog.stalledThresholdMs': 'default' as const,
             'environment.defaultDistro': 'default' as const,
+            'review.mediumBlockThreshold': 'default' as const,
           },
           warnings: [],
         }),
@@ -327,6 +329,7 @@ function fakeRuntime(): TeskraRuntime {
             watchdog: { stalledThresholdMs: 600_000 },
             environment: { defaultDistro: null },
             agents: { executableOverrides: {} },
+            review: { mediumBlockThreshold: 0 },
           },
           sources: { 'logging.level': 'global' as const },
           warnings: [],

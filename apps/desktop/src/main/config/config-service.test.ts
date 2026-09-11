@@ -127,6 +127,7 @@ describe('ConfigService.resolve — layer order', () => {
       watchdog: { stalledThresholdMs: 60_000 }, // run override beats all
       environment: { defaultDistro: null },
       agents: { executableOverrides: {} },
+      review: { mediumBlockThreshold: 0 }, // default untouched
     })
     expect(sources).toEqual({
       'logging.level': 'global',
@@ -135,6 +136,7 @@ describe('ConfigService.resolve — layer order', () => {
       'concurrency.maxRunsPerAgent': 'default',
       'watchdog.stalledThresholdMs': 'override',
       'environment.defaultDistro': 'default',
+      'review.mediumBlockThreshold': 'default',
     })
   })
 

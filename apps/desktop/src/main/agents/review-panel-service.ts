@@ -17,7 +17,12 @@ import type {
   WorkbenchEvents,
 } from '@teskra/contracts'
 import { reviewAggregateSchema } from '@teskra/contracts'
-import { buildHandoffContext } from '@teskra/shared'
+import {
+  buildHandoffContext,
+  computeReviewVerdict,
+  DEFAULT_REVIEW_AGGREGATION_POLICY,
+  type ReviewAggregationPolicy,
+} from '@teskra/shared'
 
 import type { AgentManager } from './agent-manager'
 import type { AgentRegistry } from './agent-registry'
@@ -103,6 +108,13 @@ export interface ReviewPanelServiceDeps {
   readonly promptTemplates: Pick<PromptTemplateService, 'render'>
   readonly paths: TeskraPaths
   readonly events: EventBus<WorkbenchEvents>
+  /**
+   * TASK-061: resolves the severity policy for the Review Aggregator from the
+   * config layers (TASK-080); defaults to the built-in policy when absent. A
+   * resolution failure degrades to "no verdict" (logged), never blocks panel
+   * convergence.
+   */
+  readonly resolvePolicy?: (workspaceId: string) => IpcResult<ReviewAggregationPolicy>
   readonly createPanelId?: () => string
   readonly createMemberId?: () => string
   readonly createRunId?: () => string
@@ -583,12 +595,35 @@ export function createReviewPanelService(deps: ReviewPanelServiceDeps): ReviewPa
         isolation: member.isolation,
         findings: countSeverities(member.findings),
       }))
+      const findings = sortFindings(convergence.flatMap((member) => member.findings))
+      // TASK-061: the Review Aggregator evaluates the converged panel against
+      // the configured severity policy (never majority voting); disagreements
+      // stay untouched in the same aggregate record. A policy-resolution
+      // failure degrades to "no verdict" — it never blocks convergence.
+      let policy: ReviewAggregationPolicy | undefined = DEFAULT_REVIEW_AGGREGATION_POLICY
+      if (deps.resolvePolicy !== undefined) {
+        const resolved = deps.resolvePolicy(request.workspaceId)
+        if (resolved.ok) {
+          policy = resolved.data
+        } else {
+          policy = undefined
+          logger.warn(
+            { panelId, error: resolved.error },
+            'Review aggregation policy unavailable; recording no verdict.',
+          )
+        }
+      }
+      const computation =
+        policy === undefined ? undefined : computeReviewVerdict({ findings, reviewers }, policy)
       const aggregate = {
         panelId,
         consensus,
         reviewers,
-        findings: sortFindings(convergence.flatMap((member) => member.findings)),
+        findings,
         disagreements: computeDisagreements(convergence),
+        ...(computation === undefined
+          ? {}
+          : { verdict: computation.verdict, reasons: computation.reasons }),
       }
       const completed = deps.reviews.updatePanel(panelId, {
         status: 'completed',

@@ -34,6 +34,7 @@ import { RunWorktreePanel } from './run-worktree-panel'
 import { CriteriaPanel } from './criteria-panel'
 import { ArtifactPanel } from './artifact-panel'
 import { FindingsPanel } from './findings-panel'
+import { ReviewPanelsPanel } from './review-panels-panel'
 
 const ACTIVE_RUN_STATUSES = new Set<AgentRunStatus>([
   'created',
@@ -254,6 +255,8 @@ export function TaskPage() {
             </Card>
 
             <CriteriaPanel taskId={selected.id} />
+
+            <ReviewPanelsPanel taskId={selected.id} />
 
             <Card className="task-detail-card" title="Start an Agent Run">
               <Alert

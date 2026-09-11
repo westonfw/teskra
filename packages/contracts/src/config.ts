@@ -65,12 +65,23 @@ export const agentsConfigSchema = z.strictObject({
 })
 export type AgentsConfig = z.infer<typeof agentsConfigSchema>
 
+/**
+ * TASK-061 / plan §142: severity policy for the Review Aggregator.
+ * `critical` and `high` findings always block; `medium` blocks only at the
+ * configured count (0 = mediums never block); `low` never blocks.
+ */
+export const reviewConfigSchema = z.strictObject({
+  mediumBlockThreshold: z.number().int().min(0),
+})
+export type ReviewConfig = z.infer<typeof reviewConfigSchema>
+
 export const teskraConfigSchema = z.strictObject({
   logging: loggingConfigSchema,
   concurrency: concurrencyConfigSchema,
   watchdog: watchdogConfigSchema,
   environment: environmentConfigSchema,
   agents: agentsConfigSchema,
+  review: reviewConfigSchema,
 })
 export type TeskraConfig = z.infer<typeof teskraConfigSchema>
 
@@ -85,6 +96,7 @@ export const teskraConfigLayerSchema = z.strictObject({
   watchdog: watchdogConfigSchema.partial().optional(),
   environment: environmentConfigSchema.partial().optional(),
   agents: agentsConfigSchema.partial().optional(),
+  review: reviewConfigSchema.partial().optional(),
 })
 export type TeskraConfigLayer = z.infer<typeof teskraConfigLayerSchema>
 
@@ -95,6 +107,7 @@ export const DEFAULT_CONFIG: TeskraConfig = {
   watchdog: { stalledThresholdMs: 10 * 60 * 1000 },
   environment: { defaultDistro: null },
   agents: { executableOverrides: {} },
+  review: { mediumBlockThreshold: 0 },
 }
 
 /**

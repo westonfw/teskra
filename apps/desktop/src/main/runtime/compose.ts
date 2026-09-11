@@ -368,6 +368,17 @@ export async function composeTeskraRuntime(
     promptTemplates,
     paths,
     events,
+    // TASK-061: the Review Aggregator's severity policy comes from the
+    // resolved config layers (TASK-080).
+    resolvePolicy: (workspaceId) => {
+      const resolved = config.resolve({ workspaceId })
+      return resolved.ok
+        ? {
+            ok: true,
+            data: { mediumBlockThreshold: resolved.data.config.review.mediumBlockThreshold },
+          }
+        : resolved
+    },
   })
   // TASK-057/059: the engine drives WorkflowRun passes; Dispatch composes
   // WorktreeManager + PromptTemplateService + the engine for Task → One Agent

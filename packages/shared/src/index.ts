@@ -10,6 +10,7 @@ export function isNonEmptyString(value: unknown): value is string {
 }
 
 export * from './workflow'
+export * from './review-aggregate'
 
 const WATCHDOG_ACTIVE_STATUSES = new Set([
   'running',

@@ -54,9 +54,10 @@ export function createReviewPanelStepExecutor(deps: {
         }
       }
       const consensus = panel.consensus ?? 'mixed'
+      const verdict = panel.aggregate?.verdict
       return {
         outcome: consensus === 'approve' ? 'approve' : 'changes_requested',
-        result: { panelId: panel.id, consensus },
+        result: { panelId: panel.id, consensus, ...(verdict === undefined ? {} : { verdict }) },
       }
     },
 
