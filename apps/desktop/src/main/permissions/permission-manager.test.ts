@@ -239,8 +239,8 @@ describe('PermissionManager decisions (TASK-065)', () => {
     expect(allowed.ok && allowed.data.rule?.action).toBe('allow')
   })
 
-  it('session decisions merge until dispose; once decisions are consumed exactly once', () => {
-    const { manager } = setup()
+  it('session decisions merge until dispose; once decisions are consumed by the next Run projection', () => {
+    const { manager, home } = setup()
     manager.recordDecision({
       agentType: 'codex',
       commandPattern: 'npm test',
@@ -254,10 +254,22 @@ describe('PermissionManager decisions (TASK-065)', () => {
       workspaceId: 'ws-1',
     })
 
-    const first = unwrap(manager.resolveProfile({ agentType: 'codex', workspaceId: 'ws-1' }))
-    expect(first.profile.allow).toEqual(['npm test', 'npm run build'])
-    const second = unwrap(manager.resolveProfile({ agentType: 'codex', workspaceId: 'ws-1' }))
-    expect(second.profile.allow).toEqual(['npm test'])
+    // A read-only resolveProfile (Settings preview over IPC) sees the once
+    // grant but must NOT consume it — consumption happens at Run projection.
+    const preview = unwrap(manager.resolveProfile({ agentType: 'codex', workspaceId: 'ws-1' }))
+    expect(preview.profile.allow).toEqual(['npm test', 'npm run build'])
+    const previewAgain = unwrap(manager.resolveProfile({ agentType: 'codex', workspaceId: 'ws-1' }))
+    expect(previewAgain.profile.allow).toEqual(['npm test', 'npm run build'])
+
+    const prepared = manager.prepareRunPermission({
+      definition: CODEX_AGENT,
+      workspaceId: 'ws-1',
+      approvalMode: 'manual',
+      runDir: join(home, 'run-once'),
+    })
+    expect(prepared.ok).toBe(true)
+    const after = unwrap(manager.resolveProfile({ agentType: 'codex', workspaceId: 'ws-1' }))
+    expect(after.profile.allow).toEqual(['npm test'])
     // Session decisions are not persisted as rules.
     expect(unwrap(manager.listRules())).toEqual([])
   })

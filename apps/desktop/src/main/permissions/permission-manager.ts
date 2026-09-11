@@ -137,15 +137,17 @@ export function createPermissionManager(deps: PermissionManagerDeps): Permission
     key: string,
     allow: readonly string[],
     deny: readonly string[],
+    consumeOnce: boolean,
   ): { allow: string[]; deny: string[] } => {
     const decisions = sessionDecisions.get(key)
     if (decisions === undefined) return { allow: [...allow], deny: [...deny] }
-    // One-shot grants are consumed by exactly one profile resolution.
+    // One-shot grants are consumed by exactly one Run projection; a read-only
+    // resolveProfile (e.g. the Settings preview over IPC) must not eat them.
     const merged = {
       allow: [...allow, ...decisions.allow, ...decisions.once],
       deny: [...deny, ...decisions.deny],
     }
-    if (decisions.once.length > 0) {
+    if (consumeOnce && decisions.once.length > 0) {
       sessionDecisions.set(key, { ...decisions, once: [] })
     }
     return merged
@@ -197,6 +199,76 @@ export function createPermissionManager(deps: PermissionManagerDeps): Permission
     auditChunk(runId, data)
   })
 
+  const resolveProfile = (
+    request: ResolvePermissionProfileRequest,
+    consumeOnce: boolean,
+  ): IpcResult<ResolvedPermissionProfile> => {
+    const definition = deps.registry.get(request.agentType)
+    if (definition === undefined) {
+      return fail(
+        invalid(
+          `Agent "${request.agentType}" is not registered.`,
+          `resolveProfile agentType=${JSON.stringify(request.agentType)}`,
+        ),
+      )
+    }
+    const approvalMode = request.approvalMode ?? 'manual'
+    const listed = deps.permissions.listApplicableRules(request.workspaceId, request.agentType)
+    if (!listed.ok) return listed
+
+    const allow: string[] = []
+    const deny: string[] = []
+    const notices: PermissionNotice[] = []
+    for (const rule of listed.data) {
+      switch (rule.action) {
+        case 'allow':
+          allow.push(rule.commandPattern)
+          break
+        case 'deny':
+          deny.push(rule.commandPattern)
+          break
+        case 'ask':
+          // ADR-0002: only `native` Agents have their own approval prompt.
+          // Everywhere else `ask` cannot prompt, so it degrades to
+          // audit-only and the notice carries that reason to the UI.
+          notices.push({
+            ruleId: rule.id,
+            action: 'ask',
+            reason:
+              definition.permissionEnforcement === 'native'
+                ? 'Handled by the Agent CLI’s own approval prompt.'
+                : `${ASK_DEGRADED_PREFIX}${definition.id}" cannot prompt for approval (permissionEnforcement=${definition.permissionEnforcement}); this rule is audit-only and does not constrain execution.`,
+          })
+          break
+        case 'audit':
+          break
+      }
+    }
+    const merged = mergeSession(
+      sessionKey(request.workspaceId, request.agentType),
+      allow,
+      deny,
+      consumeOnce,
+    )
+    // Conservative merge: deny wins over allow for the same pattern.
+    const effectiveDeny = dedupe(merged.deny)
+    const effectiveAllow = dedupe(merged.allow).filter(
+      (pattern) => !effectiveDeny.includes(pattern),
+    )
+    return {
+      ok: true,
+      data: {
+        profile: {
+          id: `workspace:${request.workspaceId ?? 'global'}:agent:${request.agentType}:${approvalMode}`,
+          approvalMode,
+          allow: effectiveAllow,
+          deny: effectiveDeny,
+        },
+        notices,
+      },
+    }
+  }
+
   const manager: PermissionManager = {
     listRules(request = {}) {
       return deps.permissions.listApplicableRules(request.workspaceId)
@@ -236,74 +308,19 @@ export function createPermissionManager(deps: PermissionManagerDeps): Permission
     },
 
     resolveProfile(request) {
-      const definition = deps.registry.get(request.agentType)
-      if (definition === undefined) {
-        return fail(
-          invalid(
-            `Agent "${request.agentType}" is not registered.`,
-            `resolveProfile agentType=${JSON.stringify(request.agentType)}`,
-          ),
-        )
-      }
-      const approvalMode = request.approvalMode ?? 'manual'
-      const listed = deps.permissions.listApplicableRules(request.workspaceId, request.agentType)
-      if (!listed.ok) return listed
-
-      const allow: string[] = []
-      const deny: string[] = []
-      const notices: PermissionNotice[] = []
-      for (const rule of listed.data) {
-        switch (rule.action) {
-          case 'allow':
-            allow.push(rule.commandPattern)
-            break
-          case 'deny':
-            deny.push(rule.commandPattern)
-            break
-          case 'ask':
-            // ADR-0002: only `native` Agents have their own approval prompt.
-            // Everywhere else `ask` cannot prompt, so it degrades to
-            // audit-only and the notice carries that reason to the UI.
-            notices.push({
-              ruleId: rule.id,
-              action: 'ask',
-              reason:
-                definition.permissionEnforcement === 'native'
-                  ? 'Handled by the Agent CLI’s own approval prompt.'
-                  : `${ASK_DEGRADED_PREFIX}${definition.id}" cannot prompt for approval (permissionEnforcement=${definition.permissionEnforcement}); this rule is audit-only and does not constrain execution.`,
-            })
-            break
-          case 'audit':
-            break
-        }
-      }
-      const merged = mergeSession(sessionKey(request.workspaceId, request.agentType), allow, deny)
-      // Conservative merge: deny wins over allow for the same pattern.
-      const effectiveDeny = dedupe(merged.deny)
-      const effectiveAllow = dedupe(merged.allow).filter(
-        (pattern) => !effectiveDeny.includes(pattern),
-      )
-      return {
-        ok: true,
-        data: {
-          profile: {
-            id: `workspace:${request.workspaceId ?? 'global'}:agent:${request.agentType}:${approvalMode}`,
-            approvalMode,
-            allow: effectiveAllow,
-            deny: effectiveDeny,
-          },
-          notices,
-        },
-      }
+      return resolveProfile(request, false)
     },
 
     prepareRunPermission({ definition, workspaceId, role, approvalMode, runDir }) {
-      const resolved = manager.resolveProfile({
-        agentType: definition.id,
-        workspaceId,
-        approvalMode,
-        ...(role === undefined ? {} : { role }),
-      })
+      const resolved = resolveProfile(
+        {
+          agentType: definition.id,
+          workspaceId,
+          approvalMode,
+          ...(role === undefined ? {} : { role }),
+        },
+        true,
+      )
       if (!resolved.ok) return resolved
       for (const notice of resolved.data.notices) {
         if (notice.reason.startsWith(ASK_DEGRADED_PREFIX)) {
