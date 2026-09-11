@@ -1,8 +1,26 @@
-import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
-import { Button, Card, Empty, Input, List, Modal, Popconfirm, Select, Space, Spin, Tag, Typography } from 'antd'
+import { DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons'
+import {
+  Button,
+  Card,
+  Empty,
+  Input,
+  List,
+  Modal,
+  Popconfirm,
+  Select,
+  Space,
+  Spin,
+  Tag,
+  Typography,
+} from 'antd'
 import { useEffect, useState } from 'react'
 
-import { MEMORY_TYPES, type Memory, type MemoryType } from '@teskra/contracts'
+import {
+  MEMORY_TYPES,
+  type BuiltContext,
+  type Memory,
+  type MemoryType,
+} from '@teskra/contracts'
 
 import { AppErrorAlert } from '../components/app-error-alert'
 import { isRepoLocalMemory, useMemoryStore } from '../stores/memory-store'
@@ -29,9 +47,11 @@ type EditorState = { readonly mode: 'add' } | { readonly mode: 'edit'; readonly 
 
 interface MemoryPanelProps {
   readonly workspaceId: string
+  /** When set, the context preview includes this Task (criteria, handoff). */
+  readonly taskId?: string
 }
 
-export function MemoryPanel({ workspaceId }: MemoryPanelProps) {
+export function MemoryPanel({ workspaceId, taskId }: MemoryPanelProps) {
   const memories = useMemoryStore((state) => state.memories)
   const loading = useMemoryStore((state) => state.loading)
   const saving = useMemoryStore((state) => state.saving)
@@ -45,10 +65,29 @@ export function MemoryPanel({ workspaceId }: MemoryPanelProps) {
   const [editor, setEditor] = useState<EditorState>()
   const [type, setType] = useState<MemoryType>('summary')
   const [content, setContent] = useState('')
+  const [preview, setPreview] = useState<BuiltContext>()
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [previewing, setPreviewing] = useState(false)
 
   useEffect(() => {
     void synchronize(workspaceId)
   }, [synchronize, workspaceId])
+
+  const handlePreview = async (): Promise<void> => {
+    setPreviewing(true)
+    try {
+      const built = await window.teskra.context.preview({
+        workspaceId,
+        ...(taskId === undefined ? {} : { taskId }),
+      })
+      if (built.ok) {
+        setPreview(built.data)
+        setPreviewOpen(true)
+      }
+    } finally {
+      setPreviewing(false)
+    }
+  }
 
   const openEditor = (next: EditorState): void => {
     setEditor(next)
@@ -71,14 +110,24 @@ export function MemoryPanel({ workspaceId }: MemoryPanelProps) {
       className="task-detail-card"
       title="Workspace Memory"
       extra={
-        <Button
-          size="small"
-          icon={<PlusOutlined />}
-          disabled={saving}
-          onClick={() => openEditor({ mode: 'add' })}
-        >
-          Add memory
-        </Button>
+        <Space>
+          <Button
+            size="small"
+            icon={<EyeOutlined />}
+            loading={previewing}
+            onClick={() => void handlePreview()}
+          >
+            Preview context
+          </Button>
+          <Button
+            size="small"
+            icon={<PlusOutlined />}
+            disabled={saving}
+            onClick={() => openEditor({ mode: 'add' })}
+          >
+            Add memory
+          </Button>
+        </Space>
       }
     >
       {error !== undefined && (
@@ -171,6 +220,28 @@ export function MemoryPanel({ workspaceId }: MemoryPanelProps) {
             />
           </label>
         </Space>
+      </Modal>
+      <Modal
+        title="Context preview"
+        open={previewOpen}
+        width={720}
+        footer={null}
+        onCancel={() => setPreviewOpen(false)}
+      >
+        {preview !== undefined && (
+          <Space direction="vertical" size={12} className="task-modal-fields">
+            <Typography.Text type="secondary">
+              {`${preview.totalChars} / ${preview.budgetChars} chars · ${preview.parts.length} sections included · ${preview.omittedCount} omitted`}
+            </Typography.Text>
+            {preview.content.length === 0 ? (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="The context is empty" />
+            ) : (
+              <Typography.Paragraph>
+                <pre className="context-preview-content">{preview.content}</pre>
+              </Typography.Paragraph>
+            )}
+          </Space>
+        )}
       </Modal>
     </Card>
   )

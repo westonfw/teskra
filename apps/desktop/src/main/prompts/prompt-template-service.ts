@@ -32,8 +32,9 @@ import testTemplate from '../../../resources/prompts/test.md?raw'
  *   override  <repo>/.teskra/prompts/<name>.md  (committable, team-shared)
  *
  * Renderable variables: {{task.title}}, {{task.description}}, {{criteria}},
- * {{role}}, {{memory}} (placeholder until ContextBuilder / TASK-068 — renders
- * as an empty string), {{previousHandoff}}, {{env.TESKRA_HANDOFF_PATH}},
+ * {{role}}, {{memory}} (the ContextBuilder-packed Workspace Memory section,
+ * TASK-068 — callers that do not wire a ContextBuilder render it as an empty
+ * string), {{previousHandoff}}, {{env.TESKRA_HANDOFF_PATH}},
  * {{env.TESKRA_ARTIFACT_DIR}}. A template referencing an unknown or
  * unprovided variable fails with VALIDATION_FAILED naming the variables —
  * `{{...}}` is never left in the output silently.

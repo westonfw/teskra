@@ -69,6 +69,9 @@ const bridge: TeskraBridge = {
     update: (request) => invoke(IPC_CHANNELS.memoryUpdate, request),
     delete: (request) => invoke(IPC_CHANNELS.memoryDelete, request),
   },
+  context: {
+    preview: (request) => invoke(IPC_CHANNELS.contextPreview, request),
+  },
   review: {
     listFindings: (request) => invoke(IPC_CHANNELS.reviewListFindings, request),
     listCriterionScores: (request) => invoke(IPC_CHANNELS.reviewListCriterionScores, request),

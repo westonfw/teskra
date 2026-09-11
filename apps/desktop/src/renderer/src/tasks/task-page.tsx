@@ -160,7 +160,7 @@ export function TaskPage() {
         <AppErrorAlert className="page-alert" error={agentError} onClose={clearAgentError} />
       )}
 
-      <MemoryPanel workspaceId={workspace.id} />
+      <MemoryPanel workspaceId={workspace.id} taskId={selected?.id} />
 
       <div className="task-workbench">
         <Card className="task-list-card" title={`${workspace.name} Tasks`}>

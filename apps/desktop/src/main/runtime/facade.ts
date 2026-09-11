@@ -15,6 +15,8 @@ import type {
   ArtifactContent,
   ArtifactIdRequest,
   BindRunCriteriaRequest,
+  BuildContextRequest,
+  BuiltContext,
   CreateCriteriaSetRequest,
   CreateTaskRequest,
   CreateTerminalRequest,
@@ -238,6 +240,15 @@ export interface MemoryPort {
 }
 
 /**
+ * TASK-068: ContextBuilder (plan §47). `preview` returns the packed,
+ * budget-limited context (with `omittedCount` for dropped sections) so the
+ * UI can show exactly what an Agent would receive before a Run starts.
+ */
+export interface ContextPort {
+  preview(request: BuildContextRequest): IpcResult<BuiltContext>
+}
+
+/**
  * TASK-065 (ADR-0002): rule CRUD, layered profile resolution (with `ask`
  * downgrade notices), approval decisions, and the post-hoc audit trail.
  */
@@ -351,6 +362,7 @@ export interface TeskraRuntime {
   readonly artifact: ArtifactPort
   readonly handoff: HandoffPort
   readonly memory: MemoryPort
+  readonly context: ContextPort
   readonly permission: PermissionPort
   readonly review: ReviewPort
   readonly agent: AgentCatalogPort

@@ -18,6 +18,7 @@ import type { EventBus } from '../events/event-bus'
 import { type InternalAppError, toPublicError } from '../errors'
 import type { WorktreeManager } from '../git/worktree-manager'
 import { getLogger } from '../logger'
+import type { ContextBuilder } from '../memory/context-builder'
 import type { TeskraPaths } from '../paths'
 import type { PromptTemplateService } from '../prompts/prompt-template-service'
 import type { WorkflowEngine } from './workflow-engine'
@@ -90,6 +91,13 @@ export interface DispatchServiceDeps {
   readonly agents: Pick<AgentManager, 'get'>
   readonly handoffs: Pick<HandoffRepository, 'getByRunId'>
   readonly promptTemplates: Pick<PromptTemplateService, 'render'>
+  /**
+   * TASK-068: packs the Workspace Memory section for the `{{memory}}`
+   * template variable under its own budget. Optional so older consumers keep
+   * rendering without memory; when present the memory content is part of the
+   * final Context the adapter receives.
+   */
+  readonly contextBuilder?: Pick<ContextBuilder, 'buildContext'>
   readonly paths: TeskraPaths
   readonly events: EventBus<WorkbenchEvents>
   readonly createAgentRunId?: () => string
@@ -98,6 +106,8 @@ export interface DispatchServiceDeps {
 /** Fixed identity of the one-node definition snapshot every dispatch persists. */
 const DISPATCH_DEFINITION_ID = 'dispatch'
 const DISPATCH_NODE_ID = 'implement'
+/** TASK-068: the `{{memory}}` section gets half the standard context budget. */
+const DISPATCH_MEMORY_BUDGET_CHARS = 4000
 
 function fail<T>(error: InternalAppError): IpcResult<T> {
   return { ok: false, error: toPublicError(error) }
@@ -203,6 +213,23 @@ export function createDispatchService(deps: DispatchServiceDeps): DispatchServic
           }
           criteria = rows.data.map((criterion) => criterion.description)
         }
+        // TASK-068: the {{memory}} variable carries the ContextBuilder-packed
+        // Workspace Memory section (budget-limited; empty workspace memory
+        // renders as an empty section).
+        let memory: string | undefined
+        if (deps.contextBuilder !== undefined) {
+          const built = deps.contextBuilder.buildContext({
+            workspaceId: request.workspaceId,
+            budgetChars: DISPATCH_MEMORY_BUDGET_CHARS,
+          })
+          if (!built.ok) {
+            discardWorktree()
+            return built
+          }
+          if (built.data.content.length > 0) {
+            memory = built.data.content
+          }
+        }
         const rendered = deps.promptTemplates.render(
           {
             name: 'implement',
@@ -212,6 +239,7 @@ export function createDispatchService(deps: DispatchServiceDeps): DispatchServic
                 description: task.data.description ?? '',
               },
               ...(criteria === undefined ? {} : { criteria }),
+              ...(memory === undefined ? {} : { memory }),
               role: 'implementer',
               env: {
                 TESKRA_HANDOFF_PATH: runFiles.data.handoff,

@@ -194,6 +194,18 @@ function fakeRuntime(): TeskraRuntime {
       update: vi.fn(() => ok(null)),
       delete: vi.fn(() => ok(true)),
     },
+    context: {
+      preview: vi.fn(() =>
+        ok({
+          workspaceId: 'ws-1',
+          budgetChars: 8000,
+          totalChars: 0,
+          omittedCount: 0,
+          parts: [],
+          content: '',
+        }),
+      ),
+    },
     permission: {
       listRules: vi.fn(() => ok([])),
       createRule: vi.fn(() => {

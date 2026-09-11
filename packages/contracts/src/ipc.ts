@@ -54,6 +54,12 @@ import {
   type DeleteCredentialRequest,
   type SetCredentialRequest,
 } from './credential'
+import {
+  buildContextRequestSchema,
+  builtContextSchema,
+  type BuildContextRequest,
+  type BuiltContext,
+} from './context'
 import { ipcResultSchema, type IpcResult } from './error'
 import { handoffRecordSchema, type HandoffRecord } from './handoff'
 import {
@@ -341,6 +347,7 @@ export const IPC_CHANNELS = {
   memoryCreate: 'teskra:memory:create',
   memoryUpdate: 'teskra:memory:update',
   memoryDelete: 'teskra:memory:delete',
+  contextPreview: 'teskra:context:preview',
   reviewListFindings: 'teskra:review:findings:list',
   reviewListCriterionScores: 'teskra:review:criterion-scores:list',
   reviewPanelStart: 'teskra:review:panel:start',
@@ -597,6 +604,12 @@ export const memoryDeleteChannel = channel(
   IPC_CHANNELS.memoryDelete,
   memoryIdRequestSchema,
   z.boolean(),
+)
+// TASK-068: read-only preview of the packed ContextBuilder output.
+export const contextPreviewChannel = channel(
+  IPC_CHANNELS.contextPreview,
+  buildContextRequestSchema,
+  builtContextSchema,
 )
 export const reviewListFindingsChannel = channel(
   IPC_CHANNELS.reviewListFindings,
@@ -1015,6 +1028,7 @@ export const ipcChannelDefinitions = {
   memoryCreate: memoryCreateChannel,
   memoryUpdate: memoryUpdateChannel,
   memoryDelete: memoryDeleteChannel,
+  contextPreview: contextPreviewChannel,
   reviewListFindings: reviewListFindingsChannel,
   reviewListCriterionScores: reviewListCriterionScoresChannel,
   reviewPanelStart: reviewPanelStartChannel,
@@ -1149,6 +1163,10 @@ export interface TeskraBridge {
     create(request: CreateMemoryRequest): Promise<IpcResult<Memory>>
     update(request: UpdateMemoryRequest): Promise<IpcResult<Memory | null>>
     delete(request: MemoryIdRequest): Promise<IpcResult<boolean>>
+  }
+  /** TASK-068: ContextBuilder preview — the packed prompt context for a workspace/task. */
+  readonly context: {
+    preview(request: BuildContextRequest): Promise<IpcResult<BuiltContext>>
   }
   readonly review: {
     listFindings(request: ListReviewFindingsRequest): Promise<IpcResult<ReviewFindingRecord[]>>

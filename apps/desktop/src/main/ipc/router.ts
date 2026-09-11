@@ -207,6 +207,10 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.memory.delete(request)),
   )
   register(
+    ipcChannelDefinitions.contextPreview,
+    withRuntime((runtime, request) => runtime.context.preview(request)),
+  )
+  register(
     ipcChannelDefinitions.reviewListFindings,
     withRuntime((runtime, request) => runtime.review.listFindings(request)),
   )
