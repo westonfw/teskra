@@ -132,7 +132,7 @@ body {
 
 .settings-field {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(180px, 280px);
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 280px);
   gap: 30px;
   align-items: center;
   padding: 18px 0;
@@ -148,6 +148,10 @@ body {
   gap: 8px;
   align-items: center;
   margin-bottom: 5px;
+}
+
+.settings-field-control {
+  min-width: 0;
 }
 
 .settings-field-control > * {
