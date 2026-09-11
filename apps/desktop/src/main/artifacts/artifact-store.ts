@@ -1,5 +1,13 @@
 import { randomUUID } from 'node:crypto'
-import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } from 'node:fs'
+import {
+  closeSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+  statSync,
+} from 'node:fs'
 import { isAbsolute, resolve, sep } from 'node:path'
 
 import type {
@@ -130,6 +138,25 @@ export function createArtifactStore(deps: ArtifactStoreDeps): ArtifactStore {
       return invalid(
         'The artifact file path escapes the Run artifact directory.',
         `artifact id=${JSON.stringify(artifact.id)} filePath=${JSON.stringify(artifact.filePath)} artifactDir=${directory.data}`,
+      )
+    }
+    // The lexical check above cannot see symlinks: an Agent can drop a symlink
+    // inside its own artifact directory that points anywhere on the host, and
+    // stat/read would follow it. Compare real paths so the resolved target
+    // must stay inside the real artifact directory.
+    let realDirectory: string
+    let realTarget: string
+    try {
+      realDirectory = realpathSync(directory.data)
+      realTarget = realpathSync(resolved)
+    } catch {
+      // A missing file is reported by the read step with its own error.
+      return { ok: true, data: resolved }
+    }
+    if (realTarget !== realDirectory && !realTarget.startsWith(realDirectory + sep)) {
+      return invalid(
+        'The artifact file path escapes the Run artifact directory.',
+        `artifact id=${JSON.stringify(artifact.id)} filePath=${JSON.stringify(artifact.filePath)} resolves to ${realTarget}, outside ${realDirectory}`,
       )
     }
     return { ok: true, data: resolved }

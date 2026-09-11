@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -256,6 +256,34 @@ describe('ArtifactStore.get (TASK-050)', () => {
       ok: false,
       error: { code: 'VALIDATION_FAILED' },
     })
+  })
+
+  it('rejects file payloads behind a symlink escaping the artifact directory', () => {
+    const files = createTeskraPaths({ TESKRA_HOME: home }).runFiles('run-1')
+    if (!files.ok) throw new Error(files.error.message)
+    const outside = join(home, 'outside')
+    mkdirSync(outside)
+    writeFileSync(join(outside, 'secret.txt'), 'TOP SECRET')
+    symlinkSync(join(outside, 'secret.txt'), join(files.data.artifacts, 'leak.txt'))
+    symlinkSync(outside, join(files.data.artifacts, 'linked-dir'))
+
+    for (const [name, filePath] of [
+      ['symlink file', 'leak.txt'],
+      ['symlinked directory component', 'linked-dir/secret.txt'],
+    ] as const) {
+      const recorded = store.record({
+        taskId: 'task-1',
+        runId: 'run-1',
+        type: 'diff',
+        name,
+        filePath,
+      })
+      if (!recorded.ok) throw new Error(recorded.error.message)
+      expect(store.get({ artifactId: recorded.data.id })).toMatchObject({
+        ok: false,
+        error: { code: 'VALIDATION_FAILED' },
+      })
+    }
   })
 })
 
