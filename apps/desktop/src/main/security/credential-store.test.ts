@@ -112,6 +112,31 @@ describe('CredentialStore (TASK-088)', () => {
     expect(loaded.ok).toBe(false)
     if (!loaded.ok) expect(loaded.error.code).toBe('UNKNOWN')
   })
+
+  it('reports a structurally invalid store file as corrupted instead of silently emptying it', () => {
+    const store = createCredentialStore({ paths, cipher: mockCipher() })
+    expect(store.set('OPENAI_API_KEY', 'sk-test-secret-123').ok).toBe(true)
+
+    // Valid JSON, wrong shape: no `entries` record.
+    writeFileSync(paths.credentials(), '{ "version": 1 }\n')
+    const listed = store.list()
+    expect(listed.ok).toBe(false)
+    if (listed.ok) return
+    expect(listed.error.code).toBe('UNKNOWN')
+    // get must not pretend the credential is gone.
+    expect(store.get('OPENAI_API_KEY').ok).toBe(false)
+    // set must refuse rather than overwrite the file with only the new entry.
+    expect(store.set('OTHER_KEY', 'value').ok).toBe(false)
+    expect(readFileSync(paths.credentials(), 'utf8')).toBe('{ "version": 1 }\n')
+
+    // Valid JSON, wrong value type inside `entries`.
+    writeFileSync(paths.credentials(), '{ "version": 1, "entries": { "KEY": 42 } }\n')
+    expect(store.list().ok).toBe(false)
+
+    // Valid JSON, unsupported format version.
+    writeFileSync(paths.credentials(), '{ "version": 2, "entries": {} }\n')
+    expect(store.list().ok).toBe(false)
+  })
 })
 
 describe('workspace env secret references (TASK-088)', () => {

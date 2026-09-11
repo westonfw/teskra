@@ -70,6 +70,25 @@ interface CredentialFile {
   readonly entries: Record<string, string>
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Structural validation: parsed JSON is not trusted to match the format. */
+function asCredentialFile(parsed: unknown): CredentialFile | null {
+  if (!isRecord(parsed) || parsed['version'] !== 1 || !isRecord(parsed['entries'])) {
+    return null
+  }
+  const entries: Record<string, string> = {}
+  for (const [key, value] of Object.entries(parsed['entries'])) {
+    if (typeof value !== 'string') {
+      return null
+    }
+    entries[key] = value
+  }
+  return { version: 1, entries }
+}
+
 function fail<T>(error: InternalAppError): IpcResult<T> {
   return { ok: false, error: toPublicError(error) }
 }
@@ -133,7 +152,15 @@ export function createCredentialStore(deps: CredentialStoreDeps): CredentialStor
       })
     }
     try {
-      const parsed = JSON.parse(raw) as CredentialFile
+      const parsed = asCredentialFile(JSON.parse(raw))
+      if (parsed === null) {
+        return fail({
+          code: 'UNKNOWN',
+          message: 'The credential store is corrupted.',
+          retryable: false,
+          detail: `unexpected shape in ${filePath}`,
+        })
+      }
       return { ok: true, data: { ...parsed.entries } }
     } catch (cause) {
       return fail({
