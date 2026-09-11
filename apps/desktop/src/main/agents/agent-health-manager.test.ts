@@ -40,7 +40,28 @@ describe('AgentHealthManager (TASK-024)', () => {
       ok: true,
       data: { installed: true, available: true, executable: '/usr/bin/codex' },
     })
-    if (result.ok) expect(result.data).not.toHaveProperty('quota')
+    if (result.ok) {
+      // TASK-089 / plan §145: availability comes from executable detection
+      // alone; quota / rate-limit probes are routing signals and must never
+      // gate it — the manager does not even populate them.
+      expect(result.data).not.toHaveProperty('quota')
+      expect(result.data).not.toHaveProperty('rateLimited')
+    }
+  })
+
+  it('keeps availability detection-based even when the runtime supplies no quota signal', async () => {
+    const manager = createAgentHealthManager({
+      registry: registry(),
+      detector: { detect: vi.fn(async ({ agentId }) => detected(agentId)) },
+    })
+    const result = await manager.list({ runtime: { kind: 'wsl' } })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    for (const entry of result.data) {
+      expect(entry.available).toBe(true)
+      expect(entry).not.toHaveProperty('quota')
+    }
   })
 
   it('reports an uninstalled Agent explicitly', async () => {

@@ -115,6 +115,16 @@ export function AgentCatalogPage() {
     () => Object.fromEntries(definitions.map((definition) => [definition.id, definition.name])),
     [definitions],
   )
+  const runtimeHealth = useMemo(
+    () =>
+      workspace === undefined
+        ? []
+        : definitions.flatMap((definition) => {
+            const status = health[agentRuntimeKey(definition.id, workspace.runtime)]
+            return status === undefined ? [] : [status]
+          }),
+    [definitions, health, workspace],
+  )
   const enforcement = useMemo(
     () =>
       Object.fromEntries(
@@ -169,6 +179,7 @@ export function AgentCatalogPage() {
         </div>
         <AgentPicker
           definitions={definitions}
+          health={runtimeHealth}
           value={selectedId}
           onChange={setSelectedId}
           disabled={loading}

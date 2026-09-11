@@ -23,13 +23,13 @@ import {
   type AgentRunStatus,
   type TaskStatus,
 } from '@teskra/contracts'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { AgentPicker } from '../agents/agent-picker'
 import { AgentRunTerminal } from '../agents/agent-run-terminal'
 import { AppErrorAlert } from '../components/app-error-alert'
 import { RunCommandsPanel } from '../permissions/run-commands-panel'
-import { useAgentStore } from '../stores/agent-store'
+import { agentRuntimeKey, useAgentStore } from '../stores/agent-store'
 import { useTaskStore } from '../stores/task-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
 import { RunWorktreePanel } from './run-worktree-panel'
@@ -81,6 +81,8 @@ export function TaskPage() {
   const agentError = useAgentStore((state) => state.error)
   const starting = useAgentStore((state) => state.starting)
   const loadDefinitions = useAgentStore((state) => state.loadDefinitions)
+  const loadHealth = useAgentStore((state) => state.loadHealth)
+  const health = useAgentStore((state) => state.health)
   const startRunSynchronization = useAgentStore((state) => state.startSynchronization)
   const startRun = useAgentStore((state) => state.startRun)
   const loadRunOutput = useAgentStore((state) => state.loadRunOutput)
@@ -102,11 +104,12 @@ export function TaskPage() {
     const stopTasks = startTaskSynchronization(workspace.id)
     const stopRuns = startRunSynchronization(workspace.id)
     void loadDefinitions()
+    void loadHealth(workspace.runtime)
     return () => {
       stopTasks()
       stopRuns()
     }
-  }, [loadDefinitions, startRunSynchronization, startTaskSynchronization, workspace])
+  }, [loadDefinitions, loadHealth, startRunSynchronization, startTaskSynchronization, workspace])
 
   useEffect(() => {
     setTitle(selected?.title ?? '')
@@ -117,6 +120,17 @@ export function TaskPage() {
   useEffect(() => {
     if (agentId === undefined && definitions[0] !== undefined) setAgentId(definitions[0].id)
   }, [agentId, definitions])
+
+  const runtimeHealth = useMemo(
+    () =>
+      workspace === undefined
+        ? []
+        : definitions.flatMap((definition) => {
+            const status = health[agentRuntimeKey(definition.id, workspace.runtime)]
+            return status === undefined ? [] : [status]
+          }),
+    [definitions, health, workspace],
+  )
 
   if (workspace === undefined) return null
 
@@ -274,7 +288,12 @@ export function TaskPage() {
                 message="直接修改主工作区，未做隔离"
               />
               <div className="task-run-launcher">
-                <AgentPicker definitions={definitions} value={agentId} onChange={setAgentId} />
+                <AgentPicker
+                  definitions={definitions}
+                  health={runtimeHealth}
+                  value={agentId}
+                  onChange={setAgentId}
+                />
                 <Input.TextArea
                   value={prompt}
                   autoSize={{ minRows: 2, maxRows: 5 }}
