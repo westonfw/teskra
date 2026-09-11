@@ -135,7 +135,15 @@ export function createReconciliationService(
               runtime,
               timeoutMs: GIT_PROBE_TIMEOUT_MS,
             })
-            if (!git.ok || git.data.exitCode !== 0 || git.data.stdout.trim() !== 'true') {
+            if (!git.ok) {
+              // The probe itself failed (timeout, spawn error, WSL not ready
+              // yet at startup): that says nothing about the worktree, so
+              // leave its state unchanged instead of mislabeling it orphaned.
+              logger.warn(
+                { worktreeId: worktree.id, error: git.error },
+                'Worktree Git probe failed; state left unchanged.',
+              )
+            } else if (git.data.exitCode !== 0 || git.data.stdout.trim() !== 'true') {
               state = 'orphaned'
             }
           }

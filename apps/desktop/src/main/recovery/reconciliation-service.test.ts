@@ -195,6 +195,35 @@ describe('ReconciliationService (TASK-040)', () => {
     })
   })
 
+  it('leaves a worktree untouched when the Git probe itself fails', async () => {
+    const context = setup()
+    const probePath = join(context.home, 'probe-worktree')
+    mkdirSync(probePath)
+    context.worktrees.create({
+      id: 'worktree-probe',
+      workspaceId: 'workspace-1',
+      branch: 'agent/probe',
+      baseBranch: 'main',
+      path: probePath,
+      state: 'ready',
+      isolation: 'worktree',
+    })
+    // A probe failure (timeout, spawn error, WSL not ready at startup) says
+    // nothing about the worktree — it must not be reclassified as orphaned.
+    context.commands.run = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: 'COMMAND_TIMEOUT', message: 'timed out', retryable: true },
+    }))
+
+    const result = await context.service().reconcile()
+
+    expect(result).toMatchObject({ ok: true, data: { brokenWorktrees: [] } })
+    expect(context.worktrees.getById('worktree-probe')).toMatchObject({
+      ok: true,
+      data: { state: 'ready' },
+    })
+  })
+
   it('classifies absent and non-Git worktrees without mutating them twice', async () => {
     const context = setup()
     const absentPath = join(context.home, 'absent-worktree')
