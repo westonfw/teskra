@@ -128,6 +128,12 @@ import {
   type DoctorReport,
   type RunDoctorRequest,
 } from './doctor'
+import {
+  listRecoveryIssuesRequestSchema,
+  recoveryReportSchema,
+  type ListRecoveryIssuesRequest,
+  type RecoveryReport,
+} from './recovery'
 import type { WorkbenchEventName, WorkbenchEvents } from './event'
 import {
   listPromptTemplatesRequestSchema,
@@ -388,6 +394,7 @@ export const IPC_CHANNELS = {
   credentialList: 'teskra:credential:list',
   systemOpenDirectory: 'teskra:system:directory:open',
   doctorRun: 'teskra:doctor:run',
+  recoveryList: 'teskra:recovery:list',
   promptListTemplates: 'teskra:prompt:list-templates',
   promptRender: 'teskra:prompt:render',
   workflowListDefinitions: 'teskra:workflow:definitions:list',
@@ -872,6 +879,11 @@ export const doctorRunChannel = channel(
   runDoctorRequestSchema,
   doctorReportSchema,
 )
+export const recoveryListChannel = channel(
+  IPC_CHANNELS.recoveryList,
+  listRecoveryIssuesRequestSchema,
+  recoveryReportSchema,
+)
 export const promptListTemplatesChannel = channel(
   IPC_CHANNELS.promptListTemplates,
   listPromptTemplatesRequestSchema,
@@ -1030,6 +1042,7 @@ export const ipcChannelDefinitions = {
   credentialList: credentialListChannel,
   systemOpenDirectory: systemOpenDirectoryChannel,
   doctorRun: doctorRunChannel,
+  recoveryList: recoveryListChannel,
   promptListTemplates: promptListTemplatesChannel,
   promptRender: promptRenderChannel,
   workflowListDefinitions: workflowListDefinitionsChannel,
@@ -1167,6 +1180,9 @@ export interface TeskraBridge {
     ): Promise<IpcResult<string | null>>
     requireCapability(request: RequireRuntimePortRequest): Promise<IpcResult<unknown>>
     doctor(request?: RunDoctorRequest): Promise<IpcResult<DoctorReport>>
+  }
+  readonly recovery: {
+    list(request?: ListRecoveryIssuesRequest): Promise<IpcResult<RecoveryReport>>
   }
   readonly settings: {
     resolveConfig(request?: ResolveConfigRequest): Promise<IpcResult<ResolvedConfig>>

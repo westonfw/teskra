@@ -4,6 +4,7 @@ import {
   ControlOutlined,
   FolderOutlined,
   GitlabOutlined,
+  MedicineBoxOutlined,
   PlayCircleOutlined,
   ProjectOutlined,
   SafetyCertificateOutlined,
@@ -15,6 +16,7 @@ import { useEffect } from 'react'
 import { SettingsPage } from '../settings/settings-page'
 import { ChangesPage } from '../git/changes-page'
 import { DoctorPage } from '../doctor/doctor-page'
+import { RecoveryPage } from '../recovery/recovery-page'
 import { TaskPage } from '../tasks/task-page'
 import { AgentCatalogPage } from '../agents/agent-catalog-page'
 import type { SettingsSectionRegistry } from '../settings/registry'
@@ -30,6 +32,7 @@ const navigation = [
   { key: 'git', label: 'Git', icon: <GitlabOutlined /> },
   { key: 'terminal', label: 'Terminal', icon: <CodeOutlined /> },
   { key: 'doctor', label: 'Doctor', icon: <SafetyCertificateOutlined /> },
+  { key: 'recovery', label: 'Recovery', icon: <MedicineBoxOutlined /> },
   { key: 'settings', label: 'Settings', icon: <SettingOutlined /> },
 ] satisfies ReadonlyArray<{ key: WorkbenchPage; label: string; icon: React.ReactNode }>
 
@@ -124,6 +127,7 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
             {page === 'runs' && needsWorkspace('Runs', <AgentCatalogPage />)}
             {page === 'git' && needsWorkspace('Git', <ChangesPage />)}
             {page === 'doctor' && <DoctorPage />}
+            {page === 'recovery' && needsWorkspace('Recovery Center', <RecoveryPage />)}
             {page === 'settings' && (
               <SettingsPage registry={settingsRegistry} workspaceId={workspace?.id} />
             )}
