@@ -749,6 +749,73 @@ describe('AgentManager resume (TASK-042)', () => {
     ).toMatchObject({ nativeSession: true })
   })
 
+  it('rejects a concurrent second resume while the first is still detecting', async () => {
+    const context = setup()
+    const worktree = context.worktrees.create({
+      id: 'worktree-1',
+      workspaceId: 'workspace-1',
+      branch: 'teskra/run-1',
+      baseBranch: 'main',
+      path: '/worktrees/run-1',
+      state: 'ready',
+      isolation: 'worktree',
+    })
+    if (!worktree.ok) throw new Error(worktree.error.message)
+    await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'claude',
+      executionMode: 'orchestrated',
+      worktreeId: 'worktree-1',
+    })
+    interrupt(context, 'run-1')
+
+    // Hold both resumes inside the async detection window: both callers read
+    // status 'interrupted' before either one transitions the Run.
+    let releaseDetect!: () => void
+    const gate = new Promise<void>((resolve) => {
+      releaseDetect = resolve
+    })
+    const claude = context.adapters.claude
+    vi.mocked(claude.detect).mockImplementation(async ({ runtime }) => {
+      await gate
+      return {
+        ok: true as const,
+        data: {
+          agentId: 'claude',
+          runtime,
+          installed: true,
+          executable: 'claude',
+          version: 'test',
+          overridden: false,
+          fromCache: false,
+          checkedAt: '2026-09-10T00:00:00.000Z',
+        },
+      }
+    })
+
+    const first = context.manager.resume({ runId: 'run-1' })
+    const second = context.manager.resume({ runId: 'run-1' })
+    releaseDetect()
+
+    expect(await first).toMatchObject({ ok: true, data: { status: 'running' } })
+    expect(await second).toMatchObject({
+      ok: false,
+      error: { code: 'VALIDATION_FAILED' },
+    })
+    // Exactly one relaunch and one resume request — never two processes for
+    // the same Run (the second ProcessManager.start would collide on the
+    // process id and mark the running Run failed).
+    expect(claude.resume).toHaveBeenCalledOnce()
+    const history = context.agentEvents.listByRun('run-1')
+    expect(
+      history.ok &&
+        history.data.filter(({ eventType }) => eventType === 'agent.resume_requested'),
+    ).toHaveLength(1)
+    expect(
+      history.ok && history.data.filter(({ eventType }) => eventType === 'agent.resumed'),
+    ).toHaveLength(1)
+  })
+
   it('starts a new session with injected context when native resume is unavailable', async () => {
     const context = setup()
     await context.manager.start({

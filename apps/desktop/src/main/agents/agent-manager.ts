@@ -764,6 +764,25 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         })
       }
 
+      // Detection is the only async gap in resume(); a concurrent resume (or
+      // any other lifecycle transition) may have moved the Run off
+      // 'interrupted' while it was in flight. Everything below is synchronous
+      // up to the status transition, so re-checking here means exactly one
+      // caller relaunches the Run — a second ProcessManager.start would
+      // collide on the process id and fail the Run the first caller just
+      // relaunched.
+      const recheck = deps.runs.getById(request.runId)
+      if (!recheck.ok) return recheck
+      if (recheck.data === null) return missing('Agent run', request.runId)
+      if (recheck.data.status !== 'interrupted') {
+        return fail({
+          code: 'VALIDATION_FAILED',
+          message: 'Only interrupted Agent runs can be resumed.',
+          retryable: false,
+          detail: `resume run=${run.id} status=${recheck.data.status} after detection`,
+        })
+      }
+
       const task = run.taskId === undefined ? undefined : deps.tasks.getById(run.taskId)
       if (task !== undefined && !task.ok) return task
       if (task !== undefined && task.data === null) return missing('task', run.taskId as string)
