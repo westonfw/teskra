@@ -19,7 +19,7 @@ let output = ''
 const timer = setTimeout(() => {
   terminal.kill()
   console.error('node-pty Electron ABI smoke timed out')
-  process.exitCode = 1
+  process.exit(1)
 }, 5_000)
 
 terminal.onData((data) => {
@@ -29,8 +29,10 @@ terminal.onExit(({ exitCode }) => {
   clearTimeout(timer)
   if (exitCode !== 0 || !output.includes('teskra-node-pty-smoke')) {
     console.error(`node-pty smoke failed (exit=${String(exitCode)}): ${JSON.stringify(output)}`)
-    process.exitCode = 1
-    return
+    process.exit(1)
   }
   console.log('node-pty Electron ABI smoke OK')
+  // ConPTY keeps the agent pipes open after the child exits on Windows; the
+  // event loop never drains, so exit explicitly instead of hanging CI.
+  process.exit(0)
 })
