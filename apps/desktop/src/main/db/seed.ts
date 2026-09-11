@@ -206,9 +206,11 @@ export function seedDatabase(connection: Database.Database, now?: string): SeedG
     connection
       .prepare(
         `INSERT INTO criterion_scores (id, run_id, criterion_id, result, evidence_json, created_at)
-         VALUES (?, ?, ?, 'pass', '{"note":"seed"}', ?)`,
+         VALUES (?, ?, ?, 'pass', ?, ?)`,
       )
-      .run(criterionScoreId, reviewerRunId, criterionIds[0], at)
+      // plan §123 Evidence-First: evidence_json is a JSON array of strings;
+      // the ReviewRepository validates that shape on every read.
+      .run(criterionScoreId, reviewerRunId, criterionIds[0], '["seed: all unit tests pass"]', at)
 
     connection
       .prepare(

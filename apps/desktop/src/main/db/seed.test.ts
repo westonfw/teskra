@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { migrateDatabase } from './migrations'
 import { createHandoffRepository } from './repositories/handoff-repository'
+import { createReviewRepository } from './repositories/review-repository'
 import { seedDatabase } from './seed'
 
 /** TASK-090 acceptance: the seed builds the full demo relation graph. */
@@ -146,6 +147,18 @@ describe('seedDatabase (TASK-090)', () => {
         type: 'implementation',
         summary: 'done',
       })
+    }
+  })
+
+  it('seeds a criterion score the Repository layer can read back', () => {
+    const db = migratedDb()
+    const graph = seedDatabase(db, '2026-09-09T00:00:00.000Z')
+
+    // evidence_json is the plan §123 string array, not a free-form object.
+    const scores = createReviewRepository(db).listScoresByRun(graph.reviewerRunId)
+    expect(scores.ok).toBe(true)
+    if (scores.ok) {
+      expect(scores.data).toHaveLength(1)
     }
   })
 })
