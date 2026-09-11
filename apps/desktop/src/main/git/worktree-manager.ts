@@ -329,9 +329,16 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
       const worktreeId = created.data.id
 
       // Failure cleanup: drop the half-created worktree and its record so the
-      // runId stays reusable and Reconciliation sees no phantom intent.
-      const rollback = async (): Promise<void> => {
+      // runId stays reusable and Reconciliation sees no phantom intent. When
+      // `worktree add` succeeded, the branch it created must go too — a
+      // leftover branch makes every retry fail with "branch already exists".
+      // The branch is only deleted when this call created it (never when
+      // `worktree add` itself failed, e.g. on a pre-existing branch).
+      const rollback = async (deleteCreatedBranch: boolean): Promise<void> => {
         await git(context.data, 'worktree-remove', ['worktree', 'remove', '--force', path])
+        if (deleteCreatedBranch) {
+          await git(context.data, 'branch-delete', ['branch', '-D', branch])
+        }
         deps.worktrees.delete(worktreeId)
       }
 
@@ -344,13 +351,13 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
         base.data,
       ])
       if (!added.ok) {
-        await rollback()
+        await rollback(false)
         return added
       }
 
       const excluded = await ensureExcludeEntries(context.data)
       if (!excluded.ok) {
-        await rollback()
+        await rollback(true)
         return excluded
       }
 

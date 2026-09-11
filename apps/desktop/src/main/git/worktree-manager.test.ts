@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { IpcResult, WorkbenchEvents } from '@teskra/contracts'
+import type { IpcResult, WorkbenchEvents, Workspace } from '@teskra/contracts'
 
 import { migrateDatabase } from '../db/migrations'
 import { createWorkspaceRepository, createWorktreeRepository } from '../db/repositories'
@@ -30,9 +30,11 @@ afterEach(() => {
 
 interface Fixture {
   readonly manager: ReturnType<typeof createWorktreeManager>
+  readonly workspaces: ReturnType<typeof createWorkspaceRepository>
   readonly worktrees: ReturnType<typeof createWorktreeRepository>
   readonly events: EventBus<WorkbenchEvents>
   readonly commands: CommandRunner
+  readonly resolveRuntime: (workspace: Workspace) => IpcResult<WorkspaceRuntime>
   readonly repoDir: string
   readonly dataRoot: string
 }
@@ -84,15 +86,16 @@ async function setup(): Promise<Fixture> {
 
   const paths = createTeskraPaths({ TESKRA_HOME: dataRoot })
   const events = createEventBus<WorkbenchEvents>()
+  const resolveRuntime = (candidate: Workspace) =>
+    createWorkspaceRuntime(candidate.runtime, { hostPlatform: 'linux', paths })
   const manager = createWorktreeManager({
     commands,
     workspaces,
     worktrees,
     events,
-    resolveRuntime: (candidate) =>
-      createWorkspaceRuntime(candidate.runtime, { hostPlatform: 'linux', paths }),
+    resolveRuntime,
   })
-  return { manager, worktrees, events, commands, repoDir, dataRoot }
+  return { manager, workspaces, worktrees, events, commands, resolveRuntime, repoDir, dataRoot }
 }
 
 function requireOk<T>(result: IpcResult<T>): T {
@@ -188,6 +191,44 @@ describe('WorktreeManager (TASK-043)', () => {
     const after = readFileSync(join(fixture.repoDir, '.git', 'info', 'exclude'), 'utf8')
     expect(after).toBe(exclude)
     expect(after.split('\n').filter((line) => line === '.teskra/handoff/')).toHaveLength(1)
+  })
+
+  it('rolls back the created branch when the exclude update fails so the runId stays reusable', async () => {
+    const fixture = await setup()
+    // Fail only the exclude-locating probe (it runs after `worktree add`).
+    const failingExclude: CommandRunner = {
+      async run(request) {
+        if (request.args?.includes('--git-path') === true) {
+          return { ok: true as const, data: { stdout: '', stderr: 'fatal: boom', exitCode: 128 } }
+        }
+        return fixture.commands.run(request)
+      },
+    }
+    const fragile = createWorktreeManager({
+      commands: failingExclude,
+      workspaces: fixture.workspaces,
+      worktrees: fixture.worktrees,
+      events: fixture.events,
+      resolveRuntime: fixture.resolveRuntime,
+    })
+
+    const failed = await fragile.create({ workspaceId: 'workspace-1', runId: 'run-1' })
+    expect(failed).toMatchObject({ ok: false, error: { code: 'UNKNOWN' } })
+
+    // Rollback removed the worktree, the DB record AND the half-created branch.
+    const branches = await fixture.commands.run({
+      command: 'git',
+      args: ['branch', '--format=%(refname)'],
+      cwd: fixture.repoDir,
+      timeoutMs: 15_000,
+    })
+    expect(requireOk(branches).stdout).not.toContain('refs/heads/agent/run-1')
+
+    // The runId is reusable: a retry with a healthy runner succeeds.
+    const retried = requireOk(
+      await fixture.manager.create({ workspaceId: 'workspace-1', runId: 'run-1' }),
+    )
+    expect(retried.state).toBe('ready')
   })
 
   it('rejects a duplicate runId and invalid path segments', async () => {
