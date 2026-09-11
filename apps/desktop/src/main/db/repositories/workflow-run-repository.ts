@@ -51,6 +51,7 @@ interface WorkflowRunRow {
   status: string
   current_iteration: number
   total_iterations: number
+  criteria_iteration: number
   criteria_set_id: string | null
   created_at: string
   completed_at: string | null
@@ -88,6 +89,9 @@ export interface UpdateWorkflowRunInput {
   readonly status?: WorkflowRunStatus
   readonly currentIteration?: number
   readonly totalIterations?: number
+  /** TASK-062: re-anchoring the per-version round counter (null clears the anchor). */
+  readonly criteriaSetId?: string | null
+  readonly criteriaIteration?: number
   readonly completedAt?: string | null
 }
 
@@ -146,6 +150,7 @@ function runToDomain(row: WorkflowRunRow): IpcResult<WorkflowRun> {
     status: row.status,
     currentIteration: row.current_iteration,
     totalIterations: row.total_iterations,
+    criteriaIteration: row.criteria_iteration,
     criteriaSetId: row.criteria_set_id ?? undefined,
     createdAt: row.created_at,
     completedAt: row.completed_at ?? undefined,
@@ -237,6 +242,14 @@ export function createWorkflowRunRepository(connection: Database.Database): Work
       if (patch.totalIterations !== undefined) {
         sets.push('total_iterations = ?')
         values.push(patch.totalIterations)
+      }
+      if (patch.criteriaSetId !== undefined) {
+        sets.push('criteria_set_id = ?')
+        values.push(patch.criteriaSetId)
+      }
+      if (patch.criteriaIteration !== undefined) {
+        sets.push('criteria_iteration = ?')
+        values.push(patch.criteriaIteration)
       }
       if (patch.completedAt !== undefined) {
         sets.push('completed_at = ?')

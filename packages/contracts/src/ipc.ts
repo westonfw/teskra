@@ -233,6 +233,8 @@ import {
   workflowDefinitionSchema,
   workflowDispatchRequestSchema,
   workflowDispatchResultSchema,
+  workflowIterateRequestSchema,
+  workflowIterateResultSchema,
   workflowRunDetailSchema,
   workflowRunIdRequestSchema,
   workflowRunSchema,
@@ -246,6 +248,8 @@ import {
   type WorkflowDefinitionFileInfo,
   type WorkflowDispatchRequest,
   type WorkflowDispatchResult,
+  type WorkflowIterateRequest,
+  type WorkflowIterateResult,
   type WorkflowRun,
   type WorkflowRunDetail,
   type WorkflowRunIdRequest,
@@ -345,6 +349,7 @@ export const IPC_CHANNELS = {
   workflowRunCancel: 'teskra:workflow:run:cancel',
   workflowStepResolve: 'teskra:workflow:step:resolve',
   workflowDispatch: 'teskra:workflow:dispatch',
+  workflowIterate: 'teskra:workflow:iterate',
 } as const
 export type IpcChannelName = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
 
@@ -809,6 +814,11 @@ export const workflowDispatchChannel = channel(
   workflowDispatchRequestSchema,
   workflowDispatchResultSchema,
 )
+export const workflowIterateChannel = channel(
+  IPC_CHANNELS.workflowIterate,
+  workflowIterateRequestSchema,
+  workflowIterateResultSchema,
+)
 
 export const ipcChannelDefinitions = {
   ping: pingChannel,
@@ -901,6 +911,7 @@ export const ipcChannelDefinitions = {
   workflowRunCancel: workflowRunCancelChannel,
   workflowStepResolve: workflowStepResolveChannel,
   workflowDispatch: workflowDispatchChannel,
+  workflowIterate: workflowIterateChannel,
 } as const
 
 export interface TeskraBridge {
@@ -1033,6 +1044,7 @@ export interface TeskraBridge {
     cancelRun(request: WorkflowRunIdRequest): Promise<IpcResult<WorkflowRun>>
     resolveStep(request: WorkflowStepResolveRequest): Promise<IpcResult<WorkflowStep>>
     dispatch(request: WorkflowDispatchRequest): Promise<IpcResult<WorkflowDispatchResult>>
+    iterate(request: WorkflowIterateRequest): Promise<IpcResult<WorkflowIterateResult>>
   }
   readonly events: {
     subscribe<Name extends WorkbenchEventName>(

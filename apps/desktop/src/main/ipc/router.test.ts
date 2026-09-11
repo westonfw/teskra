@@ -113,6 +113,7 @@ const WORKFLOW_RUN: WorkflowRun = {
   status: 'running',
   currentIteration: 0,
   totalIterations: 1,
+  criteriaIteration: 0,
   createdAt: '2026-09-10T00:00:00.000Z',
 }
 
@@ -368,6 +369,9 @@ function fakeRuntime(): TeskraRuntime {
       cancelRun: vi.fn(async () => ok({ ...WORKFLOW_RUN, status: 'cancelled' as const })),
       resolveStep: vi.fn(() => ok(WORKFLOW_STEP)),
       dispatch: vi.fn(async () => ok(DISPATCH_RESULT)),
+      iterate: vi.fn(async () =>
+        ok({ run: WORKFLOW_RUN, rounds: 1, stopReason: 'passed' as const }),
+      ),
     },
     dispose: vi.fn(() => ok(undefined)),
   }

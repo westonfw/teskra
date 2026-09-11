@@ -138,6 +138,8 @@ const SCHEMA: Record<string, TableSpec> = {
       ['criteria_set_id', 'TEXT', 0, null, 0],
       ['created_at', 'TEXT', 1, null, 0],
       ['completed_at', 'TEXT', 0, null, 0],
+      // 008_workflow_run_criteria_iteration (TASK-062): ALTER TABLE appends at the end.
+      ['criteria_iteration', 'INTEGER', 1, '0', 0],
     ],
     foreignKeys: [
       // ADR-0006: SET NULL like agent_runs.task_id — 删除 Task 保留执行历史。

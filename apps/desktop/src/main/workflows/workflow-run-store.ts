@@ -28,9 +28,10 @@ import { type InternalAppError, toPublicError } from '../errors'
  * - A run may belong to no Task at all (ADR-0006).
  * - Steps follow a state machine (see STEP_TRANSITIONS); illegal transitions
  *   are rejected, never silently applied.
- * - Iterations are recorded on the run (`currentIteration` / `totalIterations`)
- *   and on every step (`iteration`); the same node id yields one step row per
- *   iteration — that is the expected shape (plan §153).
+ * - Iterations are recorded on the run (`currentIteration` / `totalIterations`
+ *   plus TASK-062's per-criteria-version `criteriaIteration`) and on every
+ *   step (`iteration`); the same node id yields one step row per iteration —
+ *   that is the expected shape (plan §153).
  * - The store holds NO in-memory state: every read goes to the repository, so
  *   constructing a fresh instance over the same database fully recovers the
  *   state after an app restart.
@@ -69,8 +70,19 @@ export interface WorkflowRunStore {
     to: WorkflowStepStatus,
     options?: TransitionStepOptions,
   ): IpcResult<WorkflowStep>
-  /** Moves the run to the next iteration (currentIteration + 1). */
+  /**
+   * Moves the run to the next iteration: `currentIteration` + 1 and
+   * `criteriaIteration` + 1 (TASK-062: the per-criteria-version counter only
+   * resets via `anchorCriteriaSet`, the total never resets).
+   */
   advanceIteration(runId: string): IpcResult<WorkflowRun>
+  /**
+   * TASK-062 (plan §124): re-anchors the run to the task's currently confirmed
+   * criteria set — records `criteriaSetId` and resets `criteriaIteration` to 0.
+   * Called by the IterationController when it detects the user confirmed a new
+   * criteria version; the total round count (`currentIteration`) is untouched.
+   */
+  anchorCriteriaSet(runId: string, criteriaSetId: string | null): IpcResult<WorkflowRun>
   setRunStatus(runId: string, status: WorkflowRunStatus): IpcResult<WorkflowRun>
 }
 
@@ -276,7 +288,30 @@ export function createWorkflowRunStore(deps: WorkflowRunStoreDeps): WorkflowRunS
           `advanceIteration: current=${String(run.data.currentIteration)}, total=${String(run.data.totalIterations)}`,
         )
       }
-      return requireUpdated(runs.updateRun(runId, { currentIteration: next }), 'run', runId)
+      return requireUpdated(
+        runs.updateRun(runId, {
+          currentIteration: next,
+          criteriaIteration: run.data.criteriaIteration + 1,
+        }),
+        'run',
+        runId,
+      )
+    },
+
+    anchorCriteriaSet(runId, criteriaSetId) {
+      const run = requireRun(runId)
+      if (!run.ok) return run
+      if (TERMINAL_RUN_STATUSES.has(run.data.status)) {
+        return invalid(
+          `Workflow run "${runId}" is ${run.data.status}; the criteria anchor cannot change.`,
+          `anchorCriteriaSet on terminal run ${runId}`,
+        )
+      }
+      return requireUpdated(
+        runs.updateRun(runId, { criteriaSetId, criteriaIteration: 0 }),
+        'run',
+        runId,
+      )
     },
 
     setRunStatus(runId, status) {

@@ -182,6 +182,12 @@ export const workflowRunSchema = z.strictObject({
   status: workflowRunStatusSchema,
   currentIteration: z.number().int().nonnegative(),
   totalIterations: z.number().int().nonnegative(),
+  /**
+   * TASK-062 (plan §124): rounds executed under the criteria set the run is
+   * currently anchored to (`criteriaSetId`). Resets when the anchor changes;
+   * `currentIteration` keeps counting across criteria versions.
+   */
+  criteriaIteration: z.number().int().nonnegative(),
   criteriaSetId: z.string().optional(),
   createdAt: z.string().datetime(),
   completedAt: z.string().datetime().optional(),
@@ -275,3 +281,69 @@ export const workflowStepResolveRequestSchema = z.strictObject({
   result: z.record(z.string(), z.unknown()).optional(),
 })
 export type WorkflowStepResolveRequest = z.infer<typeof workflowStepResolveRequestSchema>
+
+/**
+ * TASK-062 Iterate Safety Cap (plan §124): two independent round limits.
+ * `maxRoundsPerCriteriaVersion` anchors to the currently confirmed criteria
+ * set version and resets when the user confirms a new version;
+ * `maxTotalRounds` accumulates across criteria versions and never resets.
+ */
+export const iterationPolicySchema = z.strictObject({
+  maxRoundsPerCriteriaVersion: z.number().int().positive(),
+  maxTotalRounds: z.number().int().positive(),
+})
+export type IterationPolicy = z.infer<typeof iterationPolicySchema>
+
+/** plan §124 defaults. */
+export const DEFAULT_ITERATION_POLICY: IterationPolicy = {
+  maxRoundsPerCriteriaVersion: 3,
+  maxTotalRounds: 8,
+}
+
+/** How an iterate loop ended (TASK-062). */
+export const WORKFLOW_ITERATE_STOP_REASONS = [
+  'passed',
+  'max_rounds_per_criteria_version',
+  'max_total_rounds',
+  'cancelled',
+] as const
+export const workflowIterateStopReasonSchema = z.enum(WORKFLOW_ITERATE_STOP_REASONS)
+export type WorkflowIterateStopReason = z.infer<typeof workflowIterateStopReasonSchema>
+
+/**
+ * TASK-062 Iterate Primitive (Implement → Review → Fix → Review). Without
+ * `runId` a new WorkflowRun is created from the built-in iterate definition
+ * (then `agent` and `reviewers` are required); with `runId` an existing
+ * capped run (`needs_user_review`) resumes — the per-version counter resets
+ * only when the task's confirmed criteria set changed, the total never does.
+ */
+export const workflowIterateRequestSchema = z
+  .strictObject({
+    workspaceId: z.string().min(1),
+    taskId: z.string().min(1),
+    runId: z.string().min(1).optional(),
+    /** AgentRegistry id of the implementer/fixer agent (free-form string). */
+    agent: z.string().min(1).optional(),
+    /** AgentRegistry ids of the review-panel reviewers. */
+    reviewers: z.array(z.string().min(1)).min(1).optional(),
+    policy: iterationPolicySchema.partial().optional(),
+    /** Present → agent steps run orchestrated in this worktree (ADR-0002). */
+    worktreeId: z.string().min(1).optional(),
+    model: z.string().min(1).optional(),
+    /** Round-1 prompt override; the 'implement' template is rendered otherwise. */
+    prompt: z.string().optional(),
+    /** Round ≥2 prompt override; the 'fix' template is rendered otherwise. */
+    fixPrompt: z.string().optional(),
+  })
+  .refine((request) => request.runId !== undefined || (request.agent !== undefined && request.reviewers !== undefined), {
+    message: 'agent and reviewers are required when starting a new iterate run.',
+  })
+export type WorkflowIterateRequest = z.infer<typeof workflowIterateRequestSchema>
+
+export const workflowIterateResultSchema = z.strictObject({
+  run: workflowRunSchema,
+  /** Rounds executed in total (across criteria versions), 1-based. */
+  rounds: z.number().int().nonnegative(),
+  stopReason: workflowIterateStopReasonSchema,
+})
+export type WorkflowIterateResult = z.infer<typeof workflowIterateResultSchema>

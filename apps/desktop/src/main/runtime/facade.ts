@@ -94,6 +94,8 @@ import type {
   WorkflowDefinitionFileInfo,
   WorkflowDispatchRequest,
   WorkflowDispatchResult,
+  WorkflowIterateRequest,
+  WorkflowIterateResult,
   WorkflowRun,
   WorkflowRunDetail,
   WorkflowRunIdRequest,
@@ -255,6 +257,8 @@ export interface WorkflowPort {
   cancelRun(request: WorkflowRunIdRequest): Promise<IpcResult<WorkflowRun>>
   resolveStep(request: WorkflowStepResolveRequest): IpcResult<WorkflowStep>
   dispatch(request: WorkflowDispatchRequest): Promise<IpcResult<WorkflowDispatchResult>>
+  /** TASK-062 Iterate Primitive: Implement → Review → Fix → Review with safety caps. */
+  iterate(request: WorkflowIterateRequest): Promise<IpcResult<WorkflowIterateResult>>
 }
 
 export type FutureRuntimePort = object

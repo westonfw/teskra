@@ -10,6 +10,7 @@ import artifactsMemorySql from './migrations/004_artifacts_memory.sql?raw'
 import permissionsSql from './migrations/005_permissions.sql?raw'
 import worktreeArchiveSql from './migrations/006_worktree_archive.sql?raw'
 import workflowRunTaskOptionalSql from './migrations/007_workflow_run_task_optional.sql?raw'
+import workflowRunCriteriaIterationSql from './migrations/008_workflow_run_criteria_iteration.sql?raw'
 
 /**
  * The canonical migration chain (TASK-006). The .sql files under
@@ -35,6 +36,7 @@ export const MIGRATIONS: readonly Migration[] = [
     // not implicit-DELETE the copied rows' dependents; checked in-transaction.
     foreignKeysOff: true,
   },
+  { version: 8, name: '008_workflow_run_criteria_iteration', sql: workflowRunCriteriaIterationSql },
 ]
 
 /** Brings the database schema up to the latest known version. */

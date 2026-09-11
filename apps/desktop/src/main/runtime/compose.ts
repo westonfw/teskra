@@ -56,6 +56,7 @@ import { createCriteriaManager } from '../tasks/criteria-manager'
 import { createTaskManager } from '../tasks/task-manager'
 import { createWorkflowDefinitionLoader } from '../workflows/definition-loader'
 import { createDispatchService } from '../workflows/dispatch-service'
+import { createIterationController } from '../workflows/iteration-controller'
 import { createReviewPanelStepExecutor } from '../workflows/review-panel-step-executor'
 import { createWorkflowEngine } from '../workflows/workflow-engine'
 import { createWorkflowRunStore } from '../workflows/workflow-run-store'
@@ -403,6 +404,21 @@ export async function composeTeskraRuntime(
     paths,
     events,
   })
+  // TASK-062: the Iterate Primitive drives the loop the engine deliberately
+  // does not have — one DAG pass per round, safety caps per plan §124.
+  const iterationController = createIterationController({
+    runs: workflowRunStore,
+    engine: workflowEngine,
+    registry: registeredAgents.data,
+    tasks: repositories.tasks,
+    taskManager,
+    criteria: repositories.criteria,
+    workspaces: repositories.workspaces,
+    events,
+    promptTemplates,
+    handoffs: repositories.handoffs,
+    paths,
+  })
   const reconciled = await createReconciliationService({
     runs: repositories.agentRuns,
     agentEvents: repositories.agentEvents,
@@ -531,6 +547,7 @@ export async function composeTeskraRuntime(
           ...(result === undefined ? {} : { result }),
         }),
       dispatch: (request) => dispatchService.dispatch(request),
+      iterate: (request) => iterationController.iterate(request),
     },
     git: {
       status: ({ workspaceId }) => gitManager.status(workspaceId),

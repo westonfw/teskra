@@ -214,8 +214,8 @@ describe('runMigrations (TASK-006)', () => {
 })
 
 describe('MIGRATIONS registry (TASK-006)', () => {
-  it('is the ordered 001–007 chain', () => {
-    expect(MIGRATIONS.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7])
+  it('is the ordered 001–008 chain', () => {
+    expect(MIGRATIONS.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
     expect(MIGRATIONS.map((m) => m.name)).toEqual([
       '001_init',
       '002_runs',
@@ -224,6 +224,7 @@ describe('MIGRATIONS registry (TASK-006)', () => {
       '005_permissions',
       '006_worktree_archive',
       '007_workflow_run_task_optional',
+      '008_workflow_run_criteria_iteration',
     ])
   })
 
@@ -232,15 +233,15 @@ describe('MIGRATIONS registry (TASK-006)', () => {
     const result = migrateDatabase(db)
     expect(result).toEqual({
       ok: true,
-      data: { fromVersion: 0, toVersion: 7, applied: [1, 2, 3, 4, 5, 6, 7] },
+      data: { fromVersion: 0, toVersion: 8, applied: [1, 2, 3, 4, 5, 6, 7, 8] },
     })
-    expect(appliedVersions(db)).toEqual([1, 2, 3, 4, 5, 6, 7])
+    expect(appliedVersions(db)).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
 
     const second = migrateDatabase(db)
-    expect(second).toEqual({ ok: true, data: { fromVersion: 7, toVersion: 7, applied: [] } })
+    expect(second).toEqual({ ok: true, data: { fromVersion: 8, toVersion: 8, applied: [] } })
   })
 
-  it('007 upgrades a populated v6 database without losing workflow runs or steps (TASK-056)', () => {
+  it('007/008 upgrade a populated v6 database without losing workflow runs or steps (TASK-056/062)', () => {
     const db = memoryDb()
     db.pragma('foreign_keys = ON')
     const first = runMigrations(db, MIGRATIONS.slice(0, 6))
@@ -265,7 +266,7 @@ describe('MIGRATIONS registry (TASK-006)', () => {
     ).run(AT)
 
     const upgraded = migrateDatabase(db)
-    expect(upgraded).toEqual({ ok: true, data: { fromVersion: 6, toVersion: 7, applied: [7] } })
+    expect(upgraded).toEqual({ ok: true, data: { fromVersion: 6, toVersion: 8, applied: [7, 8] } })
 
     // Rows survived the table rebuild (DROP TABLE would have cascaded with FK on).
     expect(db.prepare('SELECT COUNT(*) AS n FROM workflow_runs').get()).toEqual({ n: 1 })
@@ -273,6 +274,10 @@ describe('MIGRATIONS registry (TASK-006)', () => {
     expect(db.prepare('SELECT task_id FROM workflow_runs WHERE id = ?').get('wr1')).toEqual({
       task_id: 't1',
     })
+    // 008 (TASK-062): pre-existing rows gain the per-criteria-version counter at 0.
+    expect(db.prepare('SELECT criteria_iteration FROM workflow_runs WHERE id = ?').get('wr1')).toEqual(
+      { criteria_iteration: 0 },
+    )
     // task_id is nullable now; FK enforcement is back on.
     expect(db.pragma('foreign_keys', { simple: true })).toBe(1)
     expect(() =>
