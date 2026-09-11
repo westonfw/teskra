@@ -87,7 +87,7 @@ describe('ClaudeAdapter arguments (TASK-027)', () => {
       ),
     ).toEqual([
       '--permission-mode',
-      'manual',
+      'default',
       '--model',
       'sonnet',
       '--session-id',
@@ -122,7 +122,7 @@ describe('ClaudeAdapter arguments (TASK-027)', () => {
     }
     expect(buildClaudeResumeArguments(resumeRequest)).toEqual([
       '--permission-mode',
-      'auto',
+      'acceptEdits',
       '--print',
       '--resume',
       'claude-session',
@@ -135,7 +135,32 @@ describe('ClaudeAdapter arguments (TASK-027)', () => {
         prompt: undefined,
         providerSession: { provider: 'claude' },
       }),
-    ).toEqual(['--permission-mode', 'auto', '--continue'])
+    ).toEqual(['--permission-mode', 'acceptEdits', '--continue'])
+  })
+
+  it('links a projected settings file via --settings when the Manager provides one', () => {
+    expect(
+      buildClaudeArguments(
+        {
+          ...request,
+          permissionProfile: {
+            id: 'claude:read-only',
+            approvalMode: 'read-only',
+            allow: [],
+            deny: ['Bash(rm *)'],
+          },
+          permissionConfigPath: '/runs/run-claude-1/permission-settings.json',
+        },
+        '550e8400-e29b-41d4-a716-446655440002',
+      ),
+    ).toEqual([
+      '--permission-mode',
+      'plan',
+      '--settings',
+      '/runs/run-claude-1/permission-settings.json',
+      '--session-id',
+      '550e8400-e29b-41d4-a716-446655440002',
+    ])
   })
 })
 
@@ -162,7 +187,7 @@ describe('ClaudeAdapter process contract (TASK-027)', () => {
     expect(deps.processes.start).toHaveBeenCalledWith(
       expect.objectContaining({
         command: 'claude',
-        args: ['--permission-mode', 'manual', '--session-id', sessionId, 'Review'],
+        args: ['--permission-mode', 'default', '--session-id', sessionId, 'Review'],
       }),
     )
     expect(await adapter.send(request.runId, 'next\r')).toEqual({ ok: true, data: undefined })
@@ -183,7 +208,7 @@ describe('ClaudeAdapter process contract (TASK-027)', () => {
     expect(result).toMatchObject({ ok: true, data: { providerSession } })
     expect(deps.processes.start).toHaveBeenCalledWith(
       expect.objectContaining({
-        args: ['--permission-mode', 'manual', '--resume', 'session-to-resume'],
+        args: ['--permission-mode', 'default', '--resume', 'session-to-resume'],
       }),
     )
   })

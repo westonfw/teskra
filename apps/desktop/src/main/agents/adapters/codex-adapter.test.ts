@@ -93,6 +93,21 @@ describe('CodexAdapter arguments (TASK-026)', () => {
       '--last',
     ])
   })
+
+  it('prefers the projected permission profile over the bare approval mode (TASK-077)', () => {
+    expect(
+      buildCodexArguments({
+        ...baseRequest,
+        approvalMode: 'full-auto',
+        permissionProfile: {
+          id: 'codex:read-only',
+          approvalMode: 'read-only',
+          allow: [],
+          deny: [],
+        },
+      }),
+    ).toEqual(['--sandbox', 'read-only', '--ask-for-approval', 'on-request'])
+  })
 })
 
 describe('CodexAdapter process integration (TASK-026)', () => {

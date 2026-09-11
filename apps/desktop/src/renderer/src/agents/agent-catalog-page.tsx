@@ -18,6 +18,7 @@ import {
   type AgentRun,
   type AgentRunStatus,
   type ApprovalMode,
+  type PermissionEnforcement,
 } from '@teskra/contracts'
 import { inspectRunWatchdog, type WatchdogInspection } from '@teskra/shared'
 import { useEffect, useMemo, useState } from 'react'
@@ -114,6 +115,14 @@ export function AgentCatalogPage() {
     () => Object.fromEntries(definitions.map((definition) => [definition.id, definition.name])),
     [definitions],
   )
+  const enforcement = useMemo(
+    () =>
+      Object.fromEntries(
+        definitions.map((definition) => [definition.id, definition.permissionEnforcement]),
+      ),
+    [definitions],
+  )
+  const selectedDefinition = definitions.find((definition) => definition.id === selectedId)
 
   const handleStart = async (): Promise<void> => {
     if (workspace === undefined || selectedId === undefined) return
@@ -178,6 +187,15 @@ export function AgentCatalogPage() {
       />
 
       <Card className="run-launch-card" title="Start an attended run">
+        {selectedDefinition?.permissionEnforcement === 'none' && (
+          <Alert
+            className="page-alert"
+            type="warning"
+            showIcon
+            message="该 Agent 的权限无法由 Teskra 约束，仅依赖 worktree 隔离"
+            description="This Agent exposes no permission mechanism Teskra can project to. Approval mode has no effect on it; only worktree isolation limits what it can change."
+          />
+        )}
         <div className="run-launch-form">
           <Input.TextArea
             value={prompt}
@@ -291,6 +309,7 @@ export function AgentCatalogPage() {
           <RunDetail
             run={selectedRun}
             workspaceName={workspace?.name ?? selectedRun.workspaceId}
+            permissionEnforcement={enforcement[selectedRun.agentType]}
             activity={activity[selectedRun.id]}
             output={output[selectedRun.id]}
             now={now}
@@ -386,6 +405,7 @@ function RunListItem({
 interface RunDetailProps {
   readonly run: AgentRun
   readonly workspaceName: string
+  readonly permissionEnforcement?: PermissionEnforcement
   readonly activity?: string
   readonly output?: string
   readonly now: number
@@ -398,6 +418,7 @@ interface RunDetailProps {
 function RunDetail({
   run,
   workspaceName,
+  permissionEnforcement,
   activity,
   output,
   now,
@@ -410,6 +431,14 @@ function RunDetail({
     <Space direction="vertical" size={20} className="run-detail">
       {run.executionMode === 'attended' && run.worktreeId === undefined && (
         <Alert type="warning" showIcon message="直接修改主工作区，未做隔离" />
+      )}
+      {permissionEnforcement === 'none' && (
+        <Alert
+          type="warning"
+          showIcon
+          message="该 Agent 的权限无法由 Teskra 约束，仅依赖 worktree 隔离"
+          description="This Agent exposes no permission mechanism Teskra can project to; its approval mode was not enforceable."
+        />
       )}
       {run.status === 'interrupted' && (
         <Alert

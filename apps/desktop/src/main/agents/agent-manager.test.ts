@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -972,5 +972,50 @@ describe('AgentManager handoff collection (TASK-051, ADR-0004)', () => {
       ok: true,
       data: { status: 'completed', exitCode: 0 },
     })
+  })
+})
+
+describe('AgentManager permission projection (TASK-077)', () => {
+  it('projects the approval mode into CLI-side config before launching Claude', async () => {
+    const context = setup()
+    const started = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'claude',
+      approvalMode: 'read-only',
+    })
+    if (!started.ok) throw new Error(started.error.message)
+
+    const request = vi.mocked(context.adapters.claude.start).mock.calls[0]?.[0]
+    expect(request?.permissionProfile).toEqual({
+      id: 'claude:read-only',
+      approvalMode: 'read-only',
+      allow: [],
+      deny: [],
+    })
+    const files = context.paths.runFiles('run-1')
+    if (!files.ok) throw new Error(files.error.message)
+    const expectedPath = join(files.data.directory, 'permission-settings.json')
+    expect(request?.permissionConfigPath).toBe(expectedPath)
+    expect(JSON.parse(readFileSync(expectedPath, 'utf8'))).toEqual({
+      permissions: { defaultMode: 'plan' },
+    })
+  })
+
+  it('projects an args-only profile for Codex without writing any config file', async () => {
+    const context = setup()
+    const started = await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    if (!started.ok) throw new Error(started.error.message)
+
+    const request = vi.mocked(context.adapters.codex.start).mock.calls[0]?.[0]
+    expect(request?.permissionProfile).toEqual({
+      id: 'codex:safe-auto',
+      approvalMode: 'safe-auto',
+      allow: [],
+      deny: [],
+    })
+    expect(request?.permissionConfigPath).toBeUndefined()
+    const files = context.paths.runFiles('run-1')
+    if (!files.ok) throw new Error(files.error.message)
+    expect(existsSync(join(files.data.directory, 'permission-settings.json'))).toBe(false)
   })
 })

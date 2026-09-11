@@ -32,6 +32,10 @@ import { buildHandoffContext } from '@teskra/shared'
 import type { AgentRegistry } from './agent-registry'
 import { createAgentOutputBatcher } from './agent-output-batcher'
 import { createHandoffCollector, type HandoffCollector } from './handoff-collector'
+import {
+  prepareAgentPermission,
+  permissionProfileForApprovalMode,
+} from './permissions/permission-projection'
 import type { ReviewCollector } from './review-collector'
 import type { RunLogStore } from './run-log-store'
 import type { CodingAgentAdapter } from './adapters/coding-agent-adapter'
@@ -606,6 +610,18 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         deps.runs.delete(runId)
         return runFiles
       }
+      // TASK-077 (ADR-0002): project the resolved permission profile onto the
+      // Agent CLI's own mechanism before launch. `none`-enforcement agents get
+      // no projection — nothing is generated that claims to constrain them.
+      const permission = prepareAgentPermission({
+        definition,
+        profile: permissionProfileForApprovalMode(definition.id, approvalMode),
+        runDir: runDirectory.data,
+      })
+      if (!permission.ok) {
+        deps.runs.delete(runId)
+        return permission
+      }
       appendEvent(runId, 'agent.created', { agentType: definition.id, executionMode })
       deps.events.emit('agent.created', { runId })
       synchronizeTaskStatus(created.data)
@@ -619,6 +635,14 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           ...(task === undefined ? {} : { task }),
           mode,
           approvalMode,
+          ...(permission.data === undefined
+            ? {}
+            : {
+                permissionProfile: permission.data.profile,
+                ...(permission.data.configPath === undefined
+                  ? {}
+                  : { permissionConfigPath: permission.data.configPath }),
+              }),
           ...(request.model === undefined ? {} : { model: request.model }),
           ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
           ...(worktreePath === undefined ? {} : { worktreePath }),
@@ -732,6 +756,18 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
 
       const runFiles = deps.paths.runFiles(run.id)
       if (!runFiles.ok) return runFiles
+      // TASK-077: re-project the persisted approval mode on resume so the
+      // relaunched process gets the same CLI-side policy as the original run.
+      const resumeDefaultApproval = approvalModeSchema.safeParse(definition.defaults.permissionProfile)
+      const resumePermission = prepareAgentPermission({
+        definition,
+        profile: permissionProfileForApprovalMode(
+          definition.id,
+          run.approvalMode ?? (resumeDefaultApproval.success ? resumeDefaultApproval.data : 'manual'),
+        ),
+        runDir: runFiles.data.directory,
+      })
+      if (!resumePermission.ok) return resumePermission
       const pending: PendingRun = {
         adapter,
         resumed: true,
@@ -742,6 +778,14 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           ...(task?.data === null || task?.data === undefined ? {} : { task: task.data }),
           mode: 'interactive',
           approvalMode: run.approvalMode,
+          ...(resumePermission.data === undefined
+            ? {}
+            : {
+                permissionProfile: resumePermission.data.profile,
+                ...(resumePermission.data.configPath === undefined
+                  ? {}
+                  : { permissionConfigPath: resumePermission.data.configPath }),
+              }),
           model: run.model,
           prompt,
           ...(worktree?.data === null || worktree?.data === undefined

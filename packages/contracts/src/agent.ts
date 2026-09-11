@@ -51,6 +51,34 @@ export const PERMISSION_ENFORCEMENT_MODES = ['native', 'config', 'none'] as cons
 export const permissionEnforcementSchema = z.enum(PERMISSION_ENFORCEMENT_MODES)
 export type PermissionEnforcement = z.infer<typeof permissionEnforcementSchema>
 
+/**
+ * ADR-0002 / TASK-077 — the unified Teskra-side permission policy that is
+ * projected onto each Agent CLI's own mechanism (settings file / launch args)
+ * before the Run starts. This is pure data: the projection *functions* live on
+ * the Main side (`main/agents/permission-projection.ts`), never in contracts.
+ */
+export const teskraPermissionProfileSchema = z.strictObject({
+  id: z.string().min(1),
+  approvalMode: approvalModeSchema,
+  /** Tool/command rules the CLI should allow without prompting. */
+  allow: z.array(z.string().min(1)).default([]),
+  /** Tool/command rules the CLI should deny outright. */
+  deny: z.array(z.string().min(1)).default([]),
+})
+export type TeskraPermissionProfile = z.infer<typeof teskraPermissionProfileSchema>
+
+/**
+ * A CLI-specific policy document generated from a TeskraPermissionProfile
+ * (e.g. a Claude Code settings.json fragment). Written to the Run directory
+ * before launch; `permissionConfigPath` on AgentStartRequest carries the path.
+ */
+export const agentPermissionConfigSchema = z.strictObject({
+  /** Identifies the target document format, e.g. 'claude-code-settings'. */
+  kind: z.string().min(1),
+  document: z.record(z.string(), z.unknown()),
+})
+export type AgentPermissionConfig = z.infer<typeof agentPermissionConfigSchema>
+
 export const AGENT_COST_CLASSES = ['low', 'medium', 'high'] as const
 export const agentCostClassSchema = z.enum(AGENT_COST_CLASSES)
 
@@ -179,6 +207,10 @@ export const agentStartRequestSchema = z.strictObject({
   model: z.string().optional(),
   mode: z.enum(['interactive', 'exec']).optional(),
   approvalMode: approvalModeSchema.optional(),
+  /** TASK-077: resolved policy for this Run, projected by the Adapter into CLI args. */
+  permissionProfile: teskraPermissionProfileSchema.optional(),
+  /** TASK-077: CLI-side policy file written before launch (e.g. Claude settings.json). */
+  permissionConfigPath: z.string().min(1).optional(),
   worktreePath: z.string().optional(),
   handoffPath: z.string().optional(),
   artifactDir: z.string().optional(),

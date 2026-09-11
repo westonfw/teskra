@@ -3,11 +3,14 @@ import { randomUUID } from 'node:crypto'
 import type {
   AgentResumeRequest,
   AgentStartRequest,
-  ApprovalMode,
   ProviderSessionRef,
 } from '@teskra/contracts'
 
 import { CLAUDE_AGENT } from '../definitions/claude'
+import {
+  CLAUDE_PERMISSION_MAPPING,
+  permissionProfileForApprovalMode,
+} from '../permissions/permission-projection'
 import { createCliAgentAdapter, type CliAgentAdapterOptions } from './cli-agent-adapter'
 import type { CodingAgentAdapter } from './coding-agent-adapter'
 
@@ -18,22 +21,17 @@ export interface ClaudeAdapterOptions extends Omit<
   readonly createSessionId?: () => string
 }
 
-function permissionArguments(mode: ApprovalMode | undefined): string[] {
-  switch (mode ?? 'manual') {
-    case 'read-only':
-      return ['--permission-mode', 'plan']
-    case 'manual':
-      return ['--permission-mode', 'manual']
-    case 'safe-auto':
-      return ['--permission-mode', 'auto']
-    case 'full-auto':
-      return ['--permission-mode', 'bypassPermissions']
-  }
+/** TASK-077: permission args come from the shared policy projection mapping. */
+function permissionArguments(request: AgentStartRequest): string[] {
+  const profile =
+    request.permissionProfile ??
+    permissionProfileForApprovalMode(CLAUDE_AGENT.id, request.approvalMode ?? 'manual')
+  return CLAUDE_PERMISSION_MAPPING.buildArgs?.(profile, request.permissionConfigPath) ?? []
 }
 
 function commonArguments(request: AgentStartRequest): string[] {
   return [
-    ...permissionArguments(request.approvalMode),
+    ...permissionArguments(request),
     ...(request.model === undefined ? [] : ['--model', request.model]),
   ]
 }

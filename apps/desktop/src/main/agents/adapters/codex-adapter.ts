@@ -1,6 +1,10 @@
-import type { AgentResumeRequest, AgentStartRequest, ApprovalMode } from '@teskra/contracts'
+import type { AgentResumeRequest, AgentStartRequest } from '@teskra/contracts'
 
 import { CODEX_AGENT } from '../definitions/codex'
+import {
+  CODEX_PERMISSION_MAPPING,
+  permissionProfileForApprovalMode,
+} from '../permissions/permission-projection'
 import { createCliAgentAdapter, type CliAgentAdapterOptions } from './cli-agent-adapter'
 import type { CodingAgentAdapter } from './coding-agent-adapter'
 
@@ -9,21 +13,17 @@ export type CodexAdapterOptions = Omit<
   'definition' | 'baseArgs' | 'buildLaunch' | 'buildResumeLaunch'
 >
 
-function permissionArguments(mode: ApprovalMode | undefined): string[] {
-  switch (mode ?? 'safe-auto') {
-    case 'read-only':
-      return ['--sandbox', 'read-only', '--ask-for-approval', 'on-request']
-    case 'manual':
-    case 'safe-auto':
-      return ['--sandbox', 'workspace-write', '--ask-for-approval', 'on-request']
-    case 'full-auto':
-      return ['--sandbox', 'workspace-write', '--ask-for-approval', 'never']
-  }
+/** TASK-077: approval/sandbox args come from the shared policy projection mapping. */
+function permissionArguments(request: AgentStartRequest): string[] {
+  const profile =
+    request.permissionProfile ??
+    permissionProfileForApprovalMode(CODEX_AGENT.id, request.approvalMode ?? 'safe-auto')
+  return CODEX_PERMISSION_MAPPING.buildArgs?.(profile) ?? []
 }
 
 function commonArguments(request: AgentStartRequest): string[] {
   return [
-    ...permissionArguments(request.approvalMode),
+    ...permissionArguments(request),
     ...(request.model === undefined ? [] : ['--model', request.model]),
   ]
 }
