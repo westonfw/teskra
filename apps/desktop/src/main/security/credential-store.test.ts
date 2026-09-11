@@ -113,6 +113,19 @@ describe('CredentialStore (TASK-088)', () => {
     if (!loaded.ok) expect(loaded.error.code).toBe('UNKNOWN')
   })
 
+  it('treats Object.prototype member names as absent keys', () => {
+    const store = createCredentialStore({ paths, cipher: mockCipher() })
+    // No file at all: these keys must behave like any unknown key.
+    expect(store.get('toString')).toEqual({ ok: true, data: null })
+    expect(store.delete('toString')).toEqual({ ok: true, data: false })
+
+    // A credential literally named "__proto__" still round-trips.
+    expect(store.set('__proto__', 'sk-test-secret-123')).toEqual({ ok: true, data: undefined })
+    expect(store.get('__proto__')).toEqual({ ok: true, data: 'sk-test-secret-123' })
+    expect(store.list()).toEqual({ ok: true, data: ['__proto__'] })
+    expect(store.delete('__proto__')).toEqual({ ok: true, data: true })
+  })
+
   it('reports a structurally invalid store file as corrupted instead of silently emptying it', () => {
     const store = createCredentialStore({ paths, cipher: mockCipher() })
     expect(store.set('OPENAI_API_KEY', 'sk-test-secret-123').ok).toBe(true)

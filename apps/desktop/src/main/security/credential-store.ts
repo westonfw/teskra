@@ -74,12 +74,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/**
+ * Prototype-less record: credential keys are caller-controlled, so key lookup
+ * must be own-key only — an inherited member (`toString`, `constructor`, ...)
+ * must never masquerade as a stored ciphertext.
+ */
+function emptyEntries(): Record<string, string> {
+  return Object.create(null) as Record<string, string>
+}
+
 /** Structural validation: parsed JSON is not trusted to match the format. */
 function asCredentialFile(parsed: unknown): CredentialFile | null {
   if (!isRecord(parsed) || parsed['version'] !== 1 || !isRecord(parsed['entries'])) {
     return null
   }
-  const entries: Record<string, string> = {}
+  const entries = emptyEntries()
   for (const [key, value] of Object.entries(parsed['entries'])) {
     if (typeof value !== 'string') {
       return null
@@ -141,7 +150,7 @@ export function createCredentialStore(deps: CredentialStoreDeps): CredentialStor
     } catch (cause) {
       const code = (cause as NodeJS.ErrnoException).code
       if (code === 'ENOENT' || code === 'ENOTDIR') {
-        return { ok: true, data: {} }
+        return { ok: true, data: emptyEntries() }
       }
       return fail({
         code: 'UNKNOWN',
@@ -161,7 +170,7 @@ export function createCredentialStore(deps: CredentialStoreDeps): CredentialStor
           detail: `unexpected shape in ${filePath}`,
         })
       }
-      return { ok: true, data: { ...parsed.entries } }
+      return { ok: true, data: Object.assign(emptyEntries(), parsed.entries) }
     } catch (cause) {
       return fail({
         code: 'UNKNOWN',
