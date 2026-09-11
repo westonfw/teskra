@@ -4,6 +4,7 @@ import {
   ControlOutlined,
   FolderOutlined,
   GitlabOutlined,
+  HomeOutlined,
   MedicineBoxOutlined,
   PlayCircleOutlined,
   ProjectOutlined,
@@ -16,6 +17,7 @@ import { useEffect } from 'react'
 import { SettingsPage } from '../settings/settings-page'
 import { ChangesPage } from '../git/changes-page'
 import { DoctorPage } from '../doctor/doctor-page'
+import { HomePage } from '../home/home-page'
 import { RecoveryPage } from '../recovery/recovery-page'
 import { TaskPage } from '../tasks/task-page'
 import { AgentCatalogPage } from '../agents/agent-catalog-page'
@@ -26,6 +28,7 @@ import { TerminalKeepAliveHost } from '../terminal/terminal-keep-alive-host'
 import { WorkspacePage } from '../workspace/workspace-page'
 
 const navigation = [
+  { key: 'home', label: 'Home', icon: <HomeOutlined /> },
   { key: 'workspace', label: 'Workspace', icon: <FolderOutlined /> },
   { key: 'tasks', label: 'Tasks', icon: <ProjectOutlined /> },
   { key: 'runs', label: 'Runs', icon: <PlayCircleOutlined /> },
@@ -122,6 +125,7 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
 
         <main className="workbench-content">
           <div className={page === 'terminal' ? 'route-layer route-layer-hidden' : 'route-layer'}>
+            {page === 'home' && <HomePage />}
             {page === 'workspace' && <WorkspacePage />}
             {page === 'tasks' && needsWorkspace('Tasks', <TaskPage />)}
             {page === 'runs' && needsWorkspace('Runs', <AgentCatalogPage />)}

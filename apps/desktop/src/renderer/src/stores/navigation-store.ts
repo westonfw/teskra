@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 
 export const WORKBENCH_PAGES = [
+  'home',
   'workspace',
   'tasks',
   'runs',
@@ -18,6 +19,6 @@ interface NavigationState {
 }
 
 export const useNavigationStore = create<NavigationState>((set) => ({
-  page: 'workspace',
+  page: 'home',
   navigate: (page) => set({ page }),
 }))
