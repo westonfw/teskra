@@ -553,3 +553,20 @@ CSP + sandbox 已经挡掉了大部分利用路径，但这些是零成本的纵
    持续失败的 filePatch 每个 refresh 周期重试并覆盖 clearError()。现失败 path 进
    patchFailedPaths 标记、不再自动重试；显式 selectFile（用户重新点击）或一次
    成功 fetch 会解除标记。
+
+## 11. 第六轮 Review 修复状态（2026-09-12）
+
+1. **'alive' 的 run 是无出口僵尸**（agent-manager）：reconciliation 留下的 active
+   run 在本实例没有 adapter 绑定——cancel() 返回 PROCESS_NOT_FOUND、resume() 只接
+   interrupted、并发额度与 attended 写冲突永久占用。现 cancel() 对「非终态且无
+   adapter 绑定」的 run 直接落 cancelled（终态、不可 resume，不引入双写），释放
+   并发槽；terminate 失败留下的老 'alive' 分支同路修复。原
+   `errorMessage.agentRunNoActiveProcess` 文案已无用，字典同步删除。
+2. **失败标记漏 workspace 维度**（git-store）：patchFailedPaths 按裸 path 建键，
+   workspace A 拉失败后同仓 worktree 的 workspace B 同名文件被误伤（不发 IPC、
+   面板长期空白）。标记改为 `${workspaceId} ${path}` 建键。
+3. **「显式重选可重试」在 UI 上做不到**（git-store/changes-page）：裸 Set 清除不
+   触发订阅，重复点击同一文件 selectedPath 不变、effect 永不重跑。失败标记移入
+   store state（`patchFailures: Record<string, true>`），selectFile 清除是状态
+   变更；changes-page 把当前 patch 的失败标志纳入 effect 依赖，清除后 effect
+   自然重跑。changes-page 注释同步更新。

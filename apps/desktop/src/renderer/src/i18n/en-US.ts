@@ -242,7 +242,6 @@ export const enUS = {
   'errorMessage.terminalNotActive': 'Terminal "{id}" is not active.',
   'errorMessage.agentRunNotFound': 'Agent run "{id}" was not found.',
   'errorMessage.agentRunNotActive': 'Agent run "{runId}" is not active.',
-  'errorMessage.agentRunNoActiveProcess': 'Agent run "{runId}" has no active process.',
   'errorMessage.onlyInterruptedResumable': 'Only interrupted Agent runs can be resumed.',
   'errorMessage.workspaceRequiredForRunHistory':
     'A workspace is required when listing historical Agent runs.',

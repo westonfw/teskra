@@ -223,7 +223,6 @@ export const zhCN: Record<TranslationKey, string> = {
   'errorMessage.terminalNotActive': '终端“{id}”不在活动状态。',
   'errorMessage.agentRunNotFound': '找不到 Agent 运行“{id}”。',
   'errorMessage.agentRunNotActive': 'Agent 运行“{runId}”不在活动状态。',
-  'errorMessage.agentRunNoActiveProcess': 'Agent 运行“{runId}”没有活动进程。',
   'errorMessage.onlyInterruptedResumable': '只有已中断的 Agent 运行可以恢复。',
   'errorMessage.workspaceRequiredForRunHistory': '列出历史 Agent 运行时必须指定工作区。',
   'errorMessage.taskNotFound': '找不到任务“{id}”。',

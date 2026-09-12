@@ -233,6 +233,28 @@ describe('Git store (TASK-037)', () => {
     )
   })
 
+  it('scopes patch failure marks per workspace', async () => {
+    const harness = createBridge()
+    vi.mocked(harness.bridge.git.filePatch).mockImplementation(async ({ workspaceId }) =>
+      workspaceId === 'workspace-1'
+        ? {
+            ok: false as const,
+            error: { code: 'UNKNOWN' as const, message: 'git diff failed', retryable: true },
+          }
+        : { ok: true as const, data: { patch: '@@ -1 +1 @@\n-old\n+new' } },
+    )
+    const store = createGitStore(() => harness.bridge)
+
+    await store.getState().loadPatch('workspace-1', 'src/main.ts')
+    expect(store.getState().patchFailures['workspace-1 src/main.ts']).toBe(true)
+
+    // The same path in another workspace is not blocked by workspace-1's mark.
+    await store.getState().loadPatch('workspace-2', 'src/main.ts')
+    expect(harness.bridge.git.filePatch).toHaveBeenCalledTimes(2)
+    expect(store.getState().patches['workspace-2 src/main.ts']).toContain('+new')
+    expect(store.getState().patchFailures['workspace-2 src/main.ts']).toBeUndefined()
+  })
+
   it('bumps refreshCount on every completed refresh', async () => {
     const harness = createBridge()
     const store = createGitStore(() => harness.bridge)

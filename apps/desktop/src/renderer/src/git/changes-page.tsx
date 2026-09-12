@@ -109,20 +109,23 @@ export function ChangesPage() {
   // stale fetch from a previous workspace cannot show its diff here.
   // refresh() clears the cache while selectedPath may survive, so the cached
   // entry — not the path — must gate the fetch, or a refresh leaves the panel
-  // permanently blank. refreshCount re-arms the effect after every refresh:
-  // a patch that never got cached (in-flight fetch voided by the refresh, or
-  // an IPC failure) would otherwise never be retried.
+  // permanently blank. refreshCount re-arms the effect after every refresh,
+  // and patchFailed re-arms it when the user re-selects a file whose fetch
+  // failed (loadPatch refuses auto-retries of marked failures).
   const selectedPatchKey =
     workspace === undefined || selectedPath === undefined
       ? undefined
       : `${workspace.id} ${selectedPath}`
   const selectedPatch = selectedPatchKey === undefined ? undefined : patches[selectedPatchKey]
   const refreshCount = useGitStore((state) => state.refreshCount)
+  const patchFailed = useGitStore((state) =>
+    selectedPatchKey === undefined ? false : state.patchFailures[selectedPatchKey] === true,
+  )
   useEffect(() => {
     if (workspace === undefined || selectedPath === undefined) return
     if (selectedPatch !== undefined) return
     void loadPatch(workspace.id, selectedPath)
-  }, [loadPatch, selectedPath, selectedPatch, refreshCount, workspace])
+  }, [loadPatch, selectedPath, selectedPatch, patchFailed, refreshCount, workspace])
 
   const displayPatch = patchForDisplay(
     selected === undefined || selectedPatchKey === undefined

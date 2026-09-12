@@ -1072,14 +1072,27 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       }
       const adapter = activeAdapters.get(runId)
       if (adapter === undefined) {
-        return fail({
-          code: 'PROCESS_NOT_FOUND',
-          message: `Agent run "${runId}" has no active process.`,
-          messageKey: 'errorMessage.agentRunNoActiveProcess',
-          params: { runId },
-          retryable: false,
-          detail: 'Persisted active run is missing its Adapter binding.',
-        })
+        // Explicit user cancel of a run this instance does not own. Its
+        // process is either already gone or belongs to a previous instance
+        // (e.g. a run reconciliation deliberately left active because its
+        // pid identity was unreadable, or one whose survivor could not be
+        // terminated). Such a run otherwise has no way out: resume() only
+        // accepts interrupted, and it holds a concurrency slot (plus the
+        // attended-write conflict) forever. Settling it to 'cancelled' —
+        // terminal, hence non-resumable — cannot invite the double-write
+        // reconciliation was avoiding, and releases everything it held.
+        const finishedAt = now()
+        appendEvent(runId, 'agent.cancelled', {})
+        const updated = deps.runs.update(runId, { status: 'cancelled', finishedAt }, finishedAt)
+        if (updated.ok && updated.data !== null) persistRunManifest(updated.data)
+        closeRunLogs(runId)
+        collectHandoff(runId)
+        deps.events.emit('agent.cancelled', { runId })
+        if (updated.ok && updated.data !== null) synchronizeTaskStatus(updated.data)
+        if (!updated.ok) return updated
+        return updated.data === null
+          ? missing('Agent run', runId)
+          : { ok: true, data: updated.data }
       }
 
       outputBatcher.flush(runId)

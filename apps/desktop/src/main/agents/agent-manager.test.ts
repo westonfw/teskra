@@ -675,6 +675,35 @@ describe('AgentManager (TASK-028)', () => {
     expect(context.manager.list({ activeOnly: true })).toEqual({ ok: true, data: [] })
   })
 
+  it('cancels an active run this instance does not own instead of failing', async () => {
+    const context = setup()
+    // A run reconciliation deliberately left active (pid identity unreadable)
+    // or whose survivor could not be terminated: no adapter binding exists in
+    // this instance, and without this path the run is an un-killable zombie
+    // holding a concurrency slot forever.
+    const runDir = context.paths.runDir('run-1')
+    if (!runDir.ok) throw new Error(runDir.error.message)
+    const created = context.runs.create({
+      id: 'run-1',
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      executionMode: 'attended',
+      runDir: runDir.data,
+      status: 'running',
+    })
+    if (!created.ok) throw new Error(created.error.message)
+
+    const cancelled = vi.fn()
+    context.events.subscribe('agent.cancelled', cancelled)
+    const result = await context.manager.cancel('run-1')
+
+    // 'cancelled' is terminal and non-resumable, so this releases the slot
+    // without inviting the double-write reconciliation was avoiding.
+    expect(result).toMatchObject({ ok: true, data: { status: 'cancelled' } })
+    expect(cancelled).toHaveBeenCalledWith({ runId: 'run-1' })
+    expect(context.manager.list({ activeOnly: true })).toEqual({ ok: true, data: [] })
+  })
+
   it('cancel stops only the process — the worktree, branch and files are untouched (TASK-047)', async () => {
     const context = setup()
     const worktree = context.worktrees.create({

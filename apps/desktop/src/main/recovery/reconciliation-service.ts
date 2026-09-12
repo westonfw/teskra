@@ -211,8 +211,11 @@ export function createReconciliationService(
        * startup ps timeout) is neither dead nor verified: the run is left
        * active ('alive') for manual handling — interrupting it would invite
        * the resume double-write, and probing-then-killing would reopen the
-       * arbitrary-kill path the token exists to close. Legacy rows without a
-       * token keep the probe-only behavior.
+       * arbitrary-kill path the token exists to close. The exit for such a
+       * run is an explicit user cancel(): AgentManager settles a non-terminal
+       * run without an adapter binding straight to 'cancelled' (terminal,
+       * non-resumable), releasing its concurrency slot. Legacy rows without
+       * a token keep the probe-only behavior.
        */
       const terminateSurvivor = async (run: AgentRun): Promise<'none' | 'terminated' | 'alive'> => {
         if (deps.hostProcesses === undefined || run.pid === undefined) return 'none'

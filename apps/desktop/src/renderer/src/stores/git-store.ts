@@ -44,6 +44,15 @@ interface GitState {
   readonly changes: DiffResult
   /** Lazy per-file patches, keyed by `${workspaceId} ${path}`; filled by loadPatch (P1-5). */
   readonly patches: Readonly<Record<string, string>>
+  /**
+   * Keys (same shape as `patches`) whose last fetch failed. The lazy-patch
+   * effect retries uncached patches on every refresh, so without this mark a
+   * persistently failing fetch would re-set `error` every cycle and make
+   * clearError() unusable. Kept in state — not a closure Set — so clearing a
+   * mark re-renders subscribers and the effect re-fires; cleared by a
+   * successful fetch or an explicit selectFile() (the user's manual retry).
+   */
+  readonly patchFailures: Readonly<Record<string, true>>
   readonly patchLoading: boolean
   readonly selectedPath?: string | undefined
   readonly loading: boolean
@@ -73,17 +82,11 @@ export function createGitStore(getBridge: () => GitStoreBridge) {
   const patchInFlight = new Set<string>()
   /** Keys that already used their one mid-flight re-issue (see loadPatch). */
   const patchRetried = new Set<string>()
-  /**
-   * Paths whose last fetch failed. The lazy-patch effect retries uncached
-   * patches on every refresh, so without this mark a persistently failing
-   * fetch would re-set `error` every cycle and make clearError() unusable.
-   * Cleared by a successful fetch or an explicit selectFile() (user retry).
-   */
-  const patchFailedPaths = new Set<string>()
 
   return create<GitState>((set, get) => ({
     changes: { files: [] },
     patches: {},
+    patchFailures: {},
     patchLoading: false,
     loading: false,
     refreshCount: 0,
@@ -184,9 +187,20 @@ export function createGitStore(getBridge: () => GitStoreBridge) {
     },
 
     selectFile(path) {
-      // Explicit (re)selection is the user's manual retry after a failure.
-      if (path !== undefined) patchFailedPaths.delete(path)
-      set({ selectedPath: path })
+      if (path === undefined) {
+        set({ selectedPath: path })
+        return
+      }
+      // Explicit (re)selection is the user's manual retry: clearing the
+      // failure marks for this path is a STATE change, so subscribers
+      // re-render and the lazy-patch effect re-fires even when the same file
+      // is clicked twice in a row.
+      set((state) => ({
+        selectedPath: path,
+        patchFailures: Object.fromEntries(
+          Object.entries(state.patchFailures).filter(([key]) => !key.endsWith(` ${path}`)),
+        ),
+      }))
     },
 
     async loadPatch(workspaceId, path) {
@@ -194,7 +208,7 @@ export function createGitStore(getBridge: () => GitStoreBridge) {
       if (
         get().patches[key] !== undefined ||
         patchInFlight.has(key) ||
-        patchFailedPaths.has(path)
+        get().patchFailures[key] === true
       ) {
         return
       }
@@ -207,17 +221,27 @@ export function createGitStore(getBridge: () => GitStoreBridge) {
         const result = await getBridge().git.filePatch({ workspaceId, path })
         if (generation !== refreshGeneration) return
         if (!result.ok) {
-          patchFailedPaths.add(path)
-          set({ error: result.error })
+          set((state) => ({
+            patchFailures: { ...state.patchFailures, [key]: true },
+            error: result.error,
+          }))
           return
         }
-        patchFailedPaths.delete(path)
         patchRetried.delete(key)
-        set((state) => ({ patches: { ...state.patches, [key]: result.data.patch } }))
+        set((state) => {
+          const patchFailures = { ...state.patchFailures }
+          delete patchFailures[key]
+          return {
+            patchFailures,
+            patches: { ...state.patches, [key]: result.data.patch },
+          }
+        })
       } catch {
         if (generation === refreshGeneration) {
-          patchFailedPaths.add(path)
-          set({ error: transportError() })
+          set((state) => ({
+            patchFailures: { ...state.patchFailures, [key]: true },
+            error: transportError(),
+          }))
         }
       } finally {
         patchInFlight.delete(key)
