@@ -64,7 +64,7 @@ export function WorkspacePage() {
             dataSource={[...recent]}
             renderItem={(workspace) => (
               <List.Item
-                className={workspace.id === current?.id ? 'workspace-list-active' : undefined}
+                {...(workspace.id === current?.id ? { className: 'workspace-list-active' } : {})}
                 actions={[
                   <Button
                     key="open"

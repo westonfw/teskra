@@ -134,7 +134,7 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
         <header className="workbench-topbar">
           <Select
             className="workspace-switcher"
-            value={workspace?.id}
+            {...(workspace === undefined ? {} : { value: workspace.id })}
             placeholder={t('topbar.noWorkspace')}
             options={recent.map((item) => ({ value: item.id, label: item.name }))}
             onChange={selectWorkspace}

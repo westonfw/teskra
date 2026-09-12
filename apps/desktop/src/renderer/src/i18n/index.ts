@@ -7,11 +7,7 @@ const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
   'zh-CN': zhCN,
 }
 
-function translate(
-  locale: Locale,
-  key: TranslationKey,
-  params?: TranslationParams,
-): string {
+export function translate(locale: Locale, key: TranslationKey, params?: TranslationParams): string {
   let text: string = dictionaries[locale][key] ?? dictionaries['en-US'][key] ?? key
   if (params !== undefined) {
     for (const [name, value] of Object.entries(params)) {
@@ -36,6 +32,11 @@ export function useTranslation(): Translation {
     setLocale,
     t: (key, params) => translate(locale, key, params),
   }
+}
+
+/** True when the key exists in the source (en-US) dictionary. */
+export function hasTranslationKey(key: string): key is TranslationKey {
+  return key in enUS
 }
 
 /** Builds a localized transport error for IPC failures outside React components. */

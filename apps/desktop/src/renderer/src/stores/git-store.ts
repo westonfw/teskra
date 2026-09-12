@@ -1,5 +1,6 @@
 import type {
   DiffResult,
+  GitRawDiff,
   GitStatus,
   IpcResult,
   PublicAppError,
@@ -27,6 +28,7 @@ export interface GitStoreBridge {
   readonly git: {
     status(request: { workspaceId: string }): Promise<IpcResult<GitStatus>>
     changes(request: { workspaceId: string }): Promise<IpcResult<DiffResult>>
+    filePatch(request: { workspaceId: string; path: string }): Promise<IpcResult<GitRawDiff>>
     openFile(request: { workspaceId: string; path: string }): Promise<IpcResult<void>>
   }
   readonly events: {
@@ -40,13 +42,17 @@ export interface GitStoreBridge {
 interface GitState {
   readonly status?: GitStatus
   readonly changes: DiffResult
-  readonly selectedPath?: string
+  /** Lazy per-file patches, keyed by path; filled by loadPatch (P1-5). */
+  readonly patches: Readonly<Record<string, string>>
+  readonly patchLoading: boolean
+  readonly selectedPath?: string | undefined
   readonly loading: boolean
-  readonly error?: PublicAppError
+  readonly error?: PublicAppError | undefined
   startSynchronization(workspaceId: string): () => void
   refresh(workspaceId: string): Promise<void>
   refreshOnFocus(workspaceId: string): void
   selectFile(path?: string): void
+  loadPatch(workspaceId: string, path: string): Promise<void>
   openFile(workspaceId: string, path: string): Promise<boolean>
   clearError(): void
 }
@@ -56,9 +62,12 @@ export function createGitStore(getBridge: () => GitStoreBridge) {
   let refreshGeneration = 0
   const refreshInFlight = new Map<string, Promise<void>>()
   const lastFocusRefreshAt = new Map<string, number>()
+  const patchInFlight = new Set<string>()
 
   return create<GitState>((set, get) => ({
     changes: { files: [] },
+    patches: {},
+    patchLoading: false,
     loading: false,
 
     startSynchronization(workspaceId) {
@@ -128,6 +137,9 @@ export function createGitStore(getBridge: () => GitStoreBridge) {
           set((state) => ({
             status: status.data,
             changes: changes.data,
+            // Stale patches must never survive a refresh: file contents may
+            // have changed, so the next selection re-fetches its patch.
+            patches: {},
             selectedPath:
               changes.data.files.find(({ path }) => path === state.selectedPath)?.path ??
               changes.data.files[0]?.path,
@@ -154,6 +166,30 @@ export function createGitStore(getBridge: () => GitStoreBridge) {
 
     selectFile(path) {
       set({ selectedPath: path })
+    },
+
+    async loadPatch(workspaceId, path) {
+      const key = `${workspaceId} ${path}`
+      if (get().patches[path] !== undefined || patchInFlight.has(key)) return
+      // A refresh invalidates loaded patches; a fetch that started before it
+      // must not write its (now stale) result back afterwards.
+      const generation = refreshGeneration
+      patchInFlight.add(key)
+      set({ patchLoading: true })
+      try {
+        const result = await getBridge().git.filePatch({ workspaceId, path })
+        if (generation !== refreshGeneration) return
+        if (!result.ok) {
+          set({ error: result.error })
+          return
+        }
+        set((state) => ({ patches: { ...state.patches, [path]: result.data.patch } }))
+      } catch {
+        if (generation === refreshGeneration) set({ error: transportError() })
+      } finally {
+        patchInFlight.delete(key)
+        set({ patchLoading: patchInFlight.size > 0 })
+      }
     },
 
     async openFile(workspaceId, path) {

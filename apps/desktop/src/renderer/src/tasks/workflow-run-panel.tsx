@@ -115,7 +115,9 @@ export function WorkflowRunPanel({ workspaceId, taskId }: WorkflowRunPanelProps)
                 ]}
               >
                 <Space wrap>
-                  <Tag color={runStatusColor[run.status]}>{run.status.replaceAll('_', ' ')}</Tag>
+                  <Tag color={runStatusColor[run.status] ?? 'default'}>
+                    {run.status.replaceAll('_', ' ')}
+                  </Tag>
                   <Typography.Text type="secondary">
                     {t('workflow.round', {
                       current: run.currentIteration + 1,

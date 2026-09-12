@@ -28,10 +28,10 @@ export interface TaskStoreBridge {
 
 interface TaskState {
   readonly tasks: readonly Task[]
-  readonly selectedId?: string
+  readonly selectedId?: string | undefined
   readonly loading: boolean
   readonly saving: boolean
-  readonly error?: PublicAppError
+  readonly error?: PublicAppError | undefined
   startSynchronization(workspaceId: string): () => void
   synchronize(workspaceId: string): Promise<void>
   createTask(request: CreateTaskRequest): Promise<Task | undefined>

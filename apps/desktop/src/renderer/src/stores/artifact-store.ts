@@ -28,7 +28,7 @@ interface ArtifactState {
   readonly artifacts: readonly Artifact[]
   readonly loading: boolean
   readonly scanning: boolean
-  readonly error?: PublicAppError
+  readonly error?: PublicAppError | undefined
   startSynchronization(taskId: string): () => void
   synchronize(taskId: string): Promise<void>
   /** Resolves an Artifact's payload for display; undefined on failure. */

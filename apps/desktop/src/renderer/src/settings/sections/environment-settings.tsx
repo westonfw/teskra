@@ -37,6 +37,14 @@ export function EnvironmentSettingsSection() {
     void inspect()
   }, [])
 
+  const handleDefaultDistro = async (name: string | null): Promise<void> => {
+    const result = await window.teskra.runtime.setDefaultWslDistribution({
+      name: name ?? null,
+    })
+    if (result.ok) await loadConfig()
+    else setError(result.error)
+  }
+
   return (
     <Space direction="vertical" size={18} className="settings-section-stack">
       <div>
@@ -63,20 +71,16 @@ export function EnvironmentSettingsSection() {
             allowClear
             placeholder={t('settings.environment.defaultDistro.placeholder')}
             loading={loading}
-            value={config?.environment.defaultDistro ?? undefined}
+            {...(config?.environment.defaultDistro == null
+              ? {}
+              : { value: config.environment.defaultDistro })}
             options={distributions.map((distribution) => ({
               value: distribution.name,
               label: distribution.isSystemDefault
                 ? t('settings.environment.distroDefault', { name: distribution.name })
                 : distribution.name,
             }))}
-            onChange={async (name) => {
-              const result = await window.teskra.runtime.setDefaultWslDistribution({
-                name: name ?? null,
-              })
-              if (result.ok) await loadConfig()
-              else setError(result.error)
-            }}
+            onChange={(name) => void handleDefaultDistro(name)}
           />
         </ConfigField>
       </Card>

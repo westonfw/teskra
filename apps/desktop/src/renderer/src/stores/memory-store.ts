@@ -29,7 +29,7 @@ interface MemoryState {
   readonly memories: readonly Memory[]
   readonly loading: boolean
   readonly saving: boolean
-  readonly error?: PublicAppError
+  readonly error?: PublicAppError | undefined
   synchronize(workspaceId: string): Promise<void>
   /** Builds the Run-context preview; undefined on failure (error is set). */
   previewContext(request: BuildContextRequest): Promise<BuiltContext | undefined>

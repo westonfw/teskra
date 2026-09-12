@@ -2,7 +2,7 @@ import { FileOutlined, FolderOpenOutlined, ReloadOutlined } from '@ant-design/ic
 import { Button, Card, Empty, Space, Spin, Tag, Typography } from 'antd'
 import { useEffect, useMemo } from 'react'
 
-import type { DiffFile, DiffFileStatus } from '@teskra/contracts'
+import type { DiffFileStatus, DiffFileSummary } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../components/app-error-alert'
 import { useTranslation } from '../i18n'
@@ -26,7 +26,7 @@ function patchForDisplay(patch: string): { text: string; truncated: boolean } {
     : { text: patch, truncated: false }
 }
 
-function filesForDisplay(files: readonly DiffFile[]): readonly DiffFile[] {
+function filesForDisplay(files: readonly DiffFileSummary[]): readonly DiffFileSummary[] {
   return files.slice(0, MAX_VISIBLE_CHANGE_FILES)
 }
 
@@ -35,7 +35,7 @@ function FileRow({
   selected,
   onSelect,
 }: {
-  readonly file: DiffFile
+  readonly file: DiffFileSummary
   readonly selected: boolean
   readonly onSelect: () => void
 }) {
@@ -65,6 +65,8 @@ export function ChangesPage() {
   const workspace = useWorkspaceStore((state) => state.current)
   const status = useGitStore((state) => state.status)
   const changes = useGitStore((state) => state.changes)
+  const patches = useGitStore((state) => state.patches)
+  const patchLoading = useGitStore((state) => state.patchLoading)
   const selectedPath = useGitStore((state) => state.selectedPath)
   const loading = useGitStore((state) => state.loading)
   const error = useGitStore((state) => state.error)
@@ -72,6 +74,7 @@ export function ChangesPage() {
   const refresh = useGitStore((state) => state.refresh)
   const refreshOnFocus = useGitStore((state) => state.refreshOnFocus)
   const selectFile = useGitStore((state) => state.selectFile)
+  const loadPatch = useGitStore((state) => state.loadPatch)
   const openFile = useGitStore((state) => state.openFile)
   const clearError = useGitStore((state) => state.clearError)
 
@@ -100,7 +103,14 @@ export function ChangesPage() {
   )
   const selected = changes.files.find(({ path }) => path === selectedPath)
   const visibleFiles = useMemo(() => filesForDisplay(changes.files), [changes.files])
-  const displayPatch = patchForDisplay(selected?.patch ?? '')
+
+  // Patches are lazy (P1-5): only the selected file's patch crosses IPC.
+  useEffect(() => {
+    if (workspace === undefined || selectedPath === undefined) return
+    void loadPatch(workspace.id, selectedPath)
+  }, [loadPatch, selectedPath, workspace])
+
+  const displayPatch = patchForDisplay(selected === undefined ? '' : (patches[selected.path] ?? ''))
   const diffLines = useMemo(() => splitDiffLines(displayPatch.text), [displayPatch.text])
 
   if (workspace === undefined) return null
@@ -188,17 +198,23 @@ export function ChangesPage() {
                   })}
                 </div>
               )}
-              <pre className="diff-patch" tabIndex={0}>
-                {diffLines.map((line, index) => (
-                  <span
-                    key={`${index}:${line.text}`}
-                    className={`diff-line diff-line-${line.kind}`}
-                  >
-                    {line.text}
-                    {'\n'}
-                  </span>
-                ))}
-              </pre>
+              <Spin
+                spinning={
+                  patchLoading && selected !== undefined && patches[selected.path] === undefined
+                }
+              >
+                <pre className="diff-patch" tabIndex={0}>
+                  {diffLines.map((line, index) => (
+                    <span
+                      key={`${index}:${line.text}`}
+                      className={`diff-line diff-line-${line.kind}`}
+                    >
+                      {line.text}
+                      {'\n'}
+                    </span>
+                  ))}
+                </pre>
+              </Spin>
             </Card>
           </div>
         )}

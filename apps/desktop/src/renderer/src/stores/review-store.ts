@@ -18,9 +18,7 @@ export interface ReviewStoreBridge {
     ): Promise<IpcResult<CriterionScoreRecord[]>>
   }
   readonly events: {
-    subscribe<
-      Name extends 'agent.completed' | 'agent.failed' | 'agent.cancelled' | 'task.updated',
-    >(
+    subscribe<Name extends 'agent.completed' | 'agent.failed' | 'agent.cancelled' | 'task.updated'>(
       name: Name,
       handler: (payload: WorkbenchEvents[Name]) => void,
     ): () => void
@@ -33,7 +31,7 @@ interface ReviewState {
   readonly scoreTaskId?: string
   readonly scores: readonly CriterionScoreRecord[]
   readonly loading: boolean
-  readonly error?: PublicAppError
+  readonly error?: PublicAppError | undefined
   /** Synchronizes the findings of one Run; refreshes when that Run terminates. */
   startSynchronization(runId: string): () => void
   synchronize(runId: string): Promise<void>

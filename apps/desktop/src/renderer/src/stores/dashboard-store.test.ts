@@ -112,7 +112,9 @@ function createBridge() {
           task({ id: 'task-3', status: 'completed' }),
         ]
         return ok(
-          request.status === undefined ? all : all.filter(({ status }) => status === request.status),
+          request.status === undefined
+            ? all
+            : all.filter(({ status }) => status === request.status),
         )
       }),
     },

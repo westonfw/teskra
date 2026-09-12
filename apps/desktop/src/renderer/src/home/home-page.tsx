@@ -12,7 +12,7 @@ import { useWorkspaceStore } from '../stores/workspace-store'
 
 interface DashboardSectionProps {
   readonly title: string
-  readonly count?: number
+  readonly count?: number | undefined
   readonly target: WorkbenchPage
   readonly block: DashboardBlock<unknown>
   readonly onRetry: () => void

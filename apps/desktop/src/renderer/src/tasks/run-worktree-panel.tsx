@@ -162,7 +162,9 @@ export function RunWorktreePanel({ run, workspace }: RunWorktreePanelProps) {
         worktree !== undefined && (
           <Space direction="vertical" size={12} className="run-worktree-panel">
             <Space size={12} wrap>
-              <Tag color={stateColor[worktree.state]}>{worktree.state.replaceAll('_', ' ')}</Tag>
+              <Tag color={stateColor[worktree.state] ?? 'default'}>
+                {worktree.state.replaceAll('_', ' ')}
+              </Tag>
               <Typography.Text code>{worktree.branch}</Typography.Text>
               <Typography.Text type="secondary">→ {worktree.baseBranch}</Typography.Text>
             </Space>

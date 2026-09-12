@@ -9,12 +9,12 @@ import { create } from 'zustand'
 import { transportError } from '../i18n'
 
 interface SettingsState {
-  readonly workspaceId?: string
+  readonly workspaceId?: string | undefined
   readonly targetLayer: WritableConfigLayer
-  readonly resolved?: ResolvedConfig
+  readonly resolved?: ResolvedConfig | undefined
   readonly loading: boolean
   readonly saving: boolean
-  readonly error?: PublicAppError
+  readonly error?: PublicAppError | undefined
   setWorkspace(workspaceId?: string): Promise<void>
   setTargetLayer(layer: WritableConfigLayer): void
   load(): Promise<void>

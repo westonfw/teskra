@@ -6,7 +6,7 @@ import type { TerminalShell, Workspace } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../components/app-error-alert'
 import { useTranslation } from '../i18n'
-import { useTerminalStore } from '../stores/terminal-store'
+import { useTerminalStore, historyText } from '../stores/terminal-store'
 import { TerminalView } from './terminal-view'
 
 interface TerminalKeepAliveHostProps {
@@ -19,7 +19,6 @@ export function TerminalKeepAliveHost({ workspace, visible }: TerminalKeepAliveH
   const { t } = useTranslation()
   const tabs = useTerminalStore((state) => state.tabs)
   const activeId = useTerminalStore((state) => state.activeId)
-  const history = useTerminalStore((state) => state.history)
   const loading = useTerminalStore((state) => state.loading)
   const error = useTerminalStore((state) => state.error)
   const synchronize = useTerminalStore((state) => state.synchronize)
@@ -68,7 +67,7 @@ export function TerminalKeepAliveHost({ workspace, visible }: TerminalKeepAliveH
         ) : (
           <Tabs
             className="terminal-tabs"
-            activeKey={activeId}
+            {...(activeId === undefined ? {} : { activeKey: activeId })}
             destroyOnHidden={false}
             onChange={activate}
             items={workspaceTabs.map((tab) => ({
@@ -85,7 +84,11 @@ export function TerminalKeepAliveHost({ workspace, visible }: TerminalKeepAliveH
                 <TerminalView
                   session={tab.session}
                   visible={visible && activeId === tab.session.id}
-                  initialData={history[tab.session.id]}
+                  // P1-2: history changes on every output batch, so it is read
+                  // non-reactively here; this component re-renders whenever a
+                  // tab mounts (tabs/activeId change), and TerminalView only
+                  // consumes initialData at mount.
+                  initialData={historyText(useTerminalStore.getState().history[tab.session.id])}
                   readOnly={tab.status === 'closed'}
                 />
               ),
@@ -93,7 +96,7 @@ export function TerminalKeepAliveHost({ workspace, visible }: TerminalKeepAliveH
             type="editable-card"
             hideAdd
             onEdit={(key, action) => {
-              if (action === 'remove') void closeTerminal(String(key))
+              if (action === 'remove' && typeof key === 'string') void closeTerminal(key)
             }}
           />
         )}

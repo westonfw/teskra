@@ -1,7 +1,7 @@
 import type { TerminalSurface } from '../terminal-session-binding'
 
 export interface TerminalRendererOptions {
-  readonly initialData?: string
+  readonly initialData?: string | undefined
   readonly readOnly?: boolean
 }
 

@@ -45,9 +45,7 @@ export function bindAgentRunTerminal(
     previousSize = size
     // Best-effort: ended runs have no live PTY, and a rejected resize must not
     // surface as an error on an otherwise healthy read-only view.
-    void transport
-      .resize(runId, cols, rows)
-      .catch(() => {})
+    void transport.resize(runId, cols, rows).catch(() => {})
   })
   const stopOutput = transport.subscribeOutput(runId, (data) => {
     if (!disposed) surface.write(data)

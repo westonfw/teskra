@@ -29,9 +29,7 @@ describe('taskDraftResetKey', () => {
     const before = task()
     expect(taskDraftResetKey(task({ id: 'task-2' }))).not.toBe(taskDraftResetKey(before))
     expect(taskDraftResetKey(task({ title: 'Renamed' }))).not.toBe(taskDraftResetKey(before))
-    expect(taskDraftResetKey(task({ description: 'Details' }))).not.toBe(
-      taskDraftResetKey(before),
-    )
+    expect(taskDraftResetKey(task({ description: 'Details' }))).not.toBe(taskDraftResetKey(before))
     expect(taskDraftResetKey(undefined)).not.toBe(taskDraftResetKey(before))
   })
 })

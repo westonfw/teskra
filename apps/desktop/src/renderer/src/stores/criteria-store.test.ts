@@ -100,9 +100,7 @@ function setup(initial: { sets?: AcceptanceCriteriaSet[]; criteria?: AcceptanceC
         const ordinal =
           criteria.reduce(
             (max, criterion) =>
-              criterion.criteriaSetId === request.setId
-                ? Math.max(max, criterion.ordinal)
-                : max,
+              criterion.criteriaSetId === request.setId ? Math.max(max, criterion.ordinal) : max,
             0,
           ) + 1
         const criterion = makeCriterion(request.setId, ordinal, {
@@ -115,7 +113,10 @@ function setup(initial: { sets?: AcceptanceCriteriaSet[]; criteria?: AcceptanceC
       }),
       updateCriterion: vi.fn(async (request) => {
         const criterion = criteria.find(({ id }) => id === request.criterionId)
-        const set = criterion === undefined ? { ok: false as const, error: rejected } : requireDraft(criterion.criteriaSetId)
+        const set =
+          criterion === undefined
+            ? { ok: false as const, error: rejected }
+            : requireDraft(criterion.criteriaSetId)
         if (!set.ok || criterion === undefined) return { ok: false as const, error: rejected }
         const updated: AcceptanceCriterion = {
           ...criterion,
@@ -158,8 +159,7 @@ function setup(initial: { sets?: AcceptanceCriteriaSet[]; criteria?: AcceptanceC
     events: {
       subscribe: vi.fn((_name, handler) => {
         handlers.add(handler as (payload: WorkbenchEvents['task.updated']) => void)
-        return () =>
-          handlers.delete(handler as (payload: WorkbenchEvents['task.updated']) => void)
+        return () => handlers.delete(handler as (payload: WorkbenchEvents['task.updated']) => void)
       }),
     },
   }
@@ -254,7 +254,9 @@ describe('Criteria store', () => {
 
     expect(await store.getState().confirmSet(draft.id)).toBe(true)
 
-    const byVersion = new Map(store.getState().details.map((detail) => [detail.set.version, detail]))
+    const byVersion = new Map(
+      store.getState().details.map((detail) => [detail.set.version, detail]),
+    )
     expect(byVersion.get(2)?.set.status).toBe('confirmed')
     expect(byVersion.get(2)?.set.confirmedAt).toBeDefined()
     expect(byVersion.get(1)?.set.status).toBe('superseded')
@@ -279,9 +281,9 @@ describe('Criteria store', () => {
     expect(draft?.criteria.map(({ description }) => description)).toEqual(['A', 'B'])
     expect(draft?.criteria[0]).toMatchObject({ category: 'functional', required: true })
     expect(draft?.criteria[1]?.required).toBe(false)
-    expect(
-      store.getState().details.find(({ set }) => set.id === confirmed.id)?.set.status,
-    ).toBe('confirmed')
+    expect(store.getState().details.find(({ set }) => set.id === confirmed.id)?.set.status).toBe(
+      'confirmed',
+    )
   })
 
   it('surfaces bridge rejections without mutating state (confirmed set stays immutable)', async () => {
@@ -293,9 +295,9 @@ describe('Criteria store', () => {
     const store = createCriteriaStore(() => context.bridge)
     await store.getState().synchronize('task-1')
 
-    expect(
-      await store.getState().addCriterion({ setId: confirmed.id, description: 'Nope' }),
-    ).toBe(false)
+    expect(await store.getState().addCriterion({ setId: confirmed.id, description: 'Nope' })).toBe(
+      false,
+    )
     expect(store.getState().error?.message).toBe(rejected.message)
     expect(store.getState().details[0]?.criteria).toHaveLength(1)
 
@@ -328,9 +330,7 @@ describe('Criteria store', () => {
 
     await context.bridge.criteria.addCriterion({ setId: draft.id, description: 'External' })
     context.emit('task-1')
-    await vi.waitFor(() =>
-      expect(store.getState().details[0]?.criteria).toHaveLength(1),
-    )
+    await vi.waitFor(() => expect(store.getState().details[0]?.criteria).toHaveLength(1))
     context.emit('other-task')
     expect(store.getState().details[0]?.criteria).toHaveLength(1)
     stop()

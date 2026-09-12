@@ -28,7 +28,7 @@ export function ConfigField({ path, label, description, children }: ConfigFieldP
       <div className="settings-field-copy">
         <div className="settings-field-title">
           <Typography.Text strong>{label}</Typography.Text>
-          <Tag bordered={false} color={source === 'workspace' ? 'cyan' : undefined}>
+          <Tag bordered={false} {...(source === 'workspace' ? { color: 'cyan' } : {})}>
             {t(sourceLabelKeys[source])}
           </Tag>
         </div>

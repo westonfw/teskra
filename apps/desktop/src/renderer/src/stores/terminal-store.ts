@@ -8,7 +8,7 @@ import type {
 import { create } from 'zustand'
 import { transportError } from '../i18n'
 
-const MAX_HISTORY_CHARS = 2_000_000
+export const TERMINAL_HISTORY_MAX_CHARS = 2_000_000
 const EXIT_MARKER = '\r\n\x1b[90m[terminal exited]\x1b[0m\r\n'
 
 export interface TerminalTab {
@@ -16,12 +16,27 @@ export interface TerminalTab {
   readonly status: 'running' | 'closed'
 }
 
+/**
+ * P1-2: history is a ring of output chunks, not one growing string. Appending
+ * is O(chunks) instead of O(total); the join happens only when a terminal
+ * surface mounts and needs replay text (`historyText`).
+ */
+export interface TerminalHistory {
+  readonly chunks: readonly string[]
+  readonly length: number
+}
+
+/** Joins a terminal's buffered chunks into replay text for initialData. */
+export function historyText(entry: TerminalHistory | undefined): string | undefined {
+  return entry === undefined ? undefined : entry.chunks.join('')
+}
+
 export interface TerminalStoreBridge {
   readonly terminal: {
     create(request: CreateTerminalRequest): Promise<IpcResult<TerminalSession>>
     close(request: { terminalId: string }): Promise<IpcResult<void>>
     get(request: { terminalId: string }): Promise<IpcResult<TerminalSession | null>>
-    list(request?: { workspaceId?: string }): Promise<IpcResult<TerminalSession[]>>
+    list(request?: { workspaceId?: string | undefined }): Promise<IpcResult<TerminalSession[]>>
   }
   readonly events: {
     subscribe<Name extends 'terminal.created' | 'terminal.output' | 'terminal.closed'>(
@@ -33,9 +48,9 @@ export interface TerminalStoreBridge {
 
 interface TerminalState {
   readonly tabs: readonly TerminalTab[]
-  readonly activeId?: string
-  readonly history: Readonly<Record<string, string>>
-  readonly error?: PublicAppError
+  readonly activeId?: string | undefined
+  readonly history: Readonly<Record<string, TerminalHistory>>
+  readonly error?: PublicAppError | undefined
   readonly loading: boolean
   startSynchronization(): () => void
   synchronize(workspaceId?: string): Promise<void>
@@ -46,9 +61,25 @@ interface TerminalState {
   clearError(): void
 }
 
-function appendHistory(history: Readonly<Record<string, string>>, id: string, data: string) {
-  const value = `${history[id] ?? ''}${data}`
-  return { ...history, [id]: value.slice(-MAX_HISTORY_CHARS) }
+function appendHistory(
+  history: Readonly<Record<string, TerminalHistory>>,
+  id: string,
+  data: string,
+): Readonly<Record<string, TerminalHistory>> {
+  const previous = history[id]
+  const chunks = [...(previous?.chunks ?? []), data]
+  let length = (previous?.length ?? 0) + data.length
+  let dropped = 0
+  // Drop whole chunks from the front (newest data always survives, even a
+  // single chunk larger than the cap).
+  while (length > TERMINAL_HISTORY_MAX_CHARS && dropped < chunks.length - 1) {
+    length -= (chunks[dropped] as string).length
+    dropped += 1
+  }
+  return {
+    ...history,
+    [id]: { chunks: dropped === 0 ? chunks : chunks.slice(dropped), length },
+  }
 }
 
 export function createTerminalStore(getBridge: () => TerminalStoreBridge) {

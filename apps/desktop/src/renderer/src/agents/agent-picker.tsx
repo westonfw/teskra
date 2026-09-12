@@ -16,12 +16,12 @@ type Translate = (key: TranslationKey) => string
 interface AgentPickerProps {
   readonly definitions: readonly AgentDefinition[]
   /** Health snapshots for the current runtime; omit while probes are loading. */
-  readonly health?: readonly AgentHealth[]
+  readonly health?: readonly AgentHealth[] | undefined
   /** When set, Agents whose default role matches rank first (TASK-089). */
-  readonly role?: AgentRole
-  readonly value?: string
-  readonly onChange?: (agentId: string) => void
-  readonly disabled?: boolean
+  readonly role?: AgentRole | undefined
+  readonly value?: string | undefined
+  readonly onChange?: ((agentId: string) => void) | undefined
+  readonly disabled?: boolean | undefined
 }
 
 export interface AgentPickerOption {
@@ -50,9 +50,7 @@ export function agentPickerOptions(
 ): AgentPickerOption[] {
   const context = role === undefined ? {} : { role }
   return rankAgents(definitions, health, context).map((definition) => {
-    const availability = agentAvailability(
-      health.find((entry) => entry.agentId === definition.id),
-    )
+    const availability = agentAvailability(health.find((entry) => entry.agentId === definition.id))
     const degraded = availability === 'unavailable' || availability === 'rate-limited'
     const alternative = degraded
       ? suggestAlternatives(definition.id, definitions, health, context)[0]
@@ -71,7 +69,7 @@ export function agentPickerOptions(
           )}
         </span>
       ),
-      title: definition.routing?.useWhen,
+      ...(definition.routing?.useWhen === undefined ? {} : { title: definition.routing.useWhen }),
       disabled: availability === 'unavailable',
       availability,
       ...(alternative === undefined ? {} : { suggestion: alternative.name }),
@@ -91,13 +89,13 @@ export function AgentPicker({
   return (
     <Select
       className="agent-picker"
-      value={value}
+      {...(value === undefined ? {} : { value })}
       options={agentPickerOptions(definitions, t, health, role, (name) =>
         t('agentPicker.suggestAlternative', { name }),
       )}
       placeholder={t('agentPicker.placeholder')}
       disabled={disabled || definitions.length === 0}
-      onChange={onChange}
+      {...(onChange === undefined ? {} : { onChange })}
     />
   )
 }

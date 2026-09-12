@@ -8,7 +8,7 @@ import { bindAgentRunTerminal } from './agent-run-terminal-binding'
 
 interface AgentRunTerminalProps {
   readonly run: AgentRun
-  readonly initialData?: string
+  readonly initialData?: string | undefined
 }
 
 const readOnlyStatuses = new Set<AgentRun['status']>([

@@ -23,7 +23,6 @@ describe('Changes page (TASK-037)', () => {
       status: 'modified' as const,
       additions: 1,
       deletions: 0,
-      patch: '+line',
     }))
 
     expect(filesForDisplay(files)).toHaveLength(MAX_VISIBLE_CHANGE_FILES)

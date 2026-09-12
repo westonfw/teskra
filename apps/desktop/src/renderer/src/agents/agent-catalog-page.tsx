@@ -357,7 +357,7 @@ interface RunListItemProps {
   readonly run: AgentRun
   readonly agentName: string
   readonly workspaceName: string
-  readonly activity?: string
+  readonly activity?: string | undefined
   readonly now: number
   readonly watchdog: WatchdogInspection
   readonly onOpen: () => void
@@ -408,7 +408,7 @@ function RunListItem({
         <div className="run-row-primary">
           <Space size={8} wrap>
             <Typography.Text strong>{agentName}</Typography.Text>
-            <Tag color={statusColor[run.status]}>{statusLabel(run.status)}</Tag>
+            <Tag color={statusColor[run.status] ?? 'default'}>{statusLabel(run.status)}</Tag>
             {run.executionMode === 'attended' && run.worktreeId === undefined && (
               <Tag color="orange">{t('runs.item.unisolated')}</Tag>
             )}
@@ -435,9 +435,9 @@ function RunListItem({
 interface RunDetailProps {
   readonly run: AgentRun
   readonly workspaceName: string
-  readonly permissionEnforcement?: PermissionEnforcement
-  readonly activity?: string
-  readonly output?: string
+  readonly permissionEnforcement?: PermissionEnforcement | undefined
+  readonly activity?: string | undefined
+  readonly output?: string | undefined
   readonly now: number
   readonly watchdog: WatchdogInspection
   readonly onCancel: () => void
@@ -505,7 +505,7 @@ function RunDetail({
       )}
       <Descriptions column={1} size="small" bordered>
         <Descriptions.Item label={t('runs.field.status')}>
-          <Tag color={statusColor[run.status]}>{statusLabel(run.status)}</Tag>
+          <Tag color={statusColor[run.status] ?? 'default'}>{statusLabel(run.status)}</Tag>
         </Descriptions.Item>
         <Descriptions.Item label={t('runs.field.workspace')}>{workspaceName}</Descriptions.Item>
         <Descriptions.Item label={t('runs.field.model')}>

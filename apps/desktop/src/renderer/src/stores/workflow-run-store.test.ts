@@ -114,7 +114,7 @@ function setup(initialRuns: WorkflowRun[] = []) {
     name: 'workflow.run_updated' | 'workflow.step_updated',
     payload: WorkbenchEvents['workflow.run_updated'] | WorkbenchEvents['workflow.step_updated'],
   ) => {
-    for (const handler of handlers.get(name) ?? []) handler(payload as { runId: string })
+    for (const handler of handlers.get(name) ?? []) handler(payload)
   }
   return { bridge, runs, summaries, emit, store: createWorkflowRunStore(() => bridge) }
 }

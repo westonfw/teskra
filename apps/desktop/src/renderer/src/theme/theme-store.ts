@@ -4,7 +4,7 @@ export const THEME_MODES = ['dark', 'light'] as const
 export type ThemeMode = (typeof THEME_MODES)[number]
 
 const STORAGE_KEY = 'teskra.theme'
-const DEFAULT_THEME: ThemeMode = 'dark'
+const DEFAULT_THEME: ThemeMode = 'light'
 
 function readInitialTheme(): ThemeMode {
   try {

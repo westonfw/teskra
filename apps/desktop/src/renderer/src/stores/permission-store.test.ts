@@ -9,10 +9,7 @@ import {
   permissionEnforcementInfo,
   riskTagColor,
 } from '../permissions/permission-view-model'
-import {
-  createPermissionStore,
-  type PermissionStoreBridge,
-} from './permission-store'
+import { createPermissionStore, type PermissionStoreBridge } from './permission-store'
 
 const translate = (key: TranslationKey): string => enUS[key]
 
@@ -29,7 +26,8 @@ function makeRule(overrides: Partial<PermissionRule> & Pick<PermissionRule, 'id'
 }
 
 function makeEntry(
-  overrides: Partial<PermissionAuditEntry> & Pick<PermissionAuditEntry, 'id' | 'command' | 'riskLevel'>,
+  overrides: Partial<PermissionAuditEntry> &
+    Pick<PermissionAuditEntry, 'id' | 'command' | 'riskLevel'>,
 ): PermissionAuditEntry {
   return { runId: 'run-1', detectedAt: AT, createdAt: AT, ...overrides }
 }
@@ -54,7 +52,7 @@ function setup(
         const index = rules.findIndex((rule) => rule.id === request.ruleId)
         if (index === -1) return { ok: true as const, data: null }
         rules[index] = { ...rules[index], ...request } as PermissionRule
-        return { ok: true as const, data: rules[index] as PermissionRule }
+        return { ok: true as const, data: rules[index] }
       }),
       deleteRule: vi.fn(async ({ ruleId }: { ruleId: string }) => {
         const index = rules.findIndex((rule) => rule.id === ruleId)
@@ -76,7 +74,8 @@ function setup(
         const registered = handlers.get(name) ?? new Set()
         registered.add(handler as (payload: { runId: string; riskLevel: string }) => void)
         handlers.set(name, registered)
-        return () => registered.delete(handler as (payload: { runId: string; riskLevel: string }) => void)
+        return () =>
+          registered.delete(handler as (payload: { runId: string; riskLevel: string }) => void)
       },
     },
   }
@@ -129,11 +128,13 @@ describe('PermissionStore (TASK-066)', () => {
     await store.getState().loadRules()
     expect(store.getState().rules.map((rule) => rule.id)).toEqual(['r-1'])
 
-    expect(await store.getState().createRule({
-      commandPattern: 'rm *',
-      action: 'deny',
-      scope: 'persistent',
-    })).toBe(true)
+    expect(
+      await store.getState().createRule({
+        commandPattern: 'rm *',
+        action: 'deny',
+        scope: 'persistent',
+      }),
+    ).toBe(true)
     expect(store.getState().rules.map((rule) => rule.id)).toEqual(['r-1', 'rule-2'])
 
     expect(await store.getState().updateRule({ ruleId: 'rule-2', action: 'audit' })).toBe(true)
@@ -144,22 +145,19 @@ describe('PermissionStore (TASK-066)', () => {
   })
 
   it('loads audit chronologically and refreshes on permission.audit_recorded for the run', async () => {
-    const { bridge, audit, emitAudit, store } = setup([], [
-      makeEntry({ id: 1, command: 'ls', riskLevel: 'READ_ONLY' }),
-    ])
-    const stop = store.getState().startAuditSynchronization('run-1')
-    await vi.waitFor(() =>
-      expect(store.getState().audit.map((entry) => entry.id)).toEqual([1]),
+    const { bridge, audit, emitAudit, store } = setup(
+      [],
+      [makeEntry({ id: 1, command: 'ls', riskLevel: 'READ_ONLY' })],
     )
+    const stop = store.getState().startAuditSynchronization('run-1')
+    await vi.waitFor(() => expect(store.getState().audit.map((entry) => entry.id)).toEqual([1]))
     expect(bridge.permission.listAudit).toHaveBeenCalledWith({ runId: 'run-1' })
 
     emitAudit('run-2')
     await vi.waitFor(() => expect(bridge.permission.listAudit).toHaveBeenCalledTimes(1))
     audit.push(makeEntry({ id: 2, command: 'rm -rf build', riskLevel: 'DESTRUCTIVE' }))
     emitAudit('run-1')
-    await vi.waitFor(() =>
-      expect(store.getState().audit.map((entry) => entry.id)).toEqual([1, 2]),
-    )
+    await vi.waitFor(() => expect(store.getState().audit.map((entry) => entry.id)).toEqual([1, 2]))
     stop()
   })
 

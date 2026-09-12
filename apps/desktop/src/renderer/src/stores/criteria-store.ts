@@ -34,7 +34,7 @@ interface CriteriaState {
   readonly details: readonly AcceptanceCriteriaSetDetail[]
   readonly loading: boolean
   readonly saving: boolean
-  readonly error?: PublicAppError
+  readonly error?: PublicAppError | undefined
   startSynchronization(taskId: string): () => void
   synchronize(taskId: string): Promise<void>
   /** Creates the next draft version, copying the source set's criteria when given. */
@@ -107,9 +107,7 @@ export function createCriteriaStore(getBridge: () => CriteriaStoreBridge) {
         }
         set({
           details: sortCriteriaDetails(
-            resolved.flatMap((result) =>
-              result.ok && result.data !== null ? [result.data] : [],
-            ),
+            resolved.flatMap((result) => (result.ok && result.data !== null ? [result.data] : [])),
           ),
           loading: false,
         })

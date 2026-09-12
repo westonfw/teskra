@@ -26,7 +26,6 @@ function createBridge() {
         status: 'modified',
         additions: 2,
         deletions: 1,
-        patch: '@@ -1 +1,2 @@\n-old\n+new\n+line',
       },
     ],
   }
@@ -34,6 +33,10 @@ function createBridge() {
     git: {
       status: vi.fn(async () => ({ ok: true as const, data: status })),
       changes: vi.fn(async () => ({ ok: true as const, data: changes })),
+      filePatch: vi.fn(async () => ({
+        ok: true as const,
+        data: { patch: '@@ -1 +1,2 @@\n-old\n+new\n+line' },
+      })),
       openFile: vi.fn(async () => ({ ok: true as const, data: undefined })),
     },
     events: {
@@ -85,6 +88,43 @@ describe('Git store (TASK-037)', () => {
       workspaceId: 'workspace-1',
       path: 'src/main.ts',
     })
+  })
+
+  it('lazy-loads the selected file patch once and drops it on refresh', async () => {
+    const harness = createBridge()
+    const store = createGitStore(() => harness.bridge)
+    await store.getState().refresh('workspace-1')
+    expect(harness.bridge.git.filePatch).not.toHaveBeenCalled()
+
+    await store.getState().loadPatch('workspace-1', 'src/main.ts')
+    expect(harness.bridge.git.filePatch).toHaveBeenCalledWith({
+      workspaceId: 'workspace-1',
+      path: 'src/main.ts',
+    })
+    expect(store.getState().patches['src/main.ts']).toContain('+new')
+
+    // Cached: a repeated load does not hit IPC again.
+    await store.getState().loadPatch('workspace-1', 'src/main.ts')
+    expect(harness.bridge.git.filePatch).toHaveBeenCalledTimes(1)
+
+    // A refresh invalidates loaded patches (file contents may have changed).
+    await store.getState().refresh('workspace-1')
+    expect(store.getState().patches).toEqual({})
+    await store.getState().loadPatch('workspace-1', 'src/main.ts')
+    expect(harness.bridge.git.filePatch).toHaveBeenCalledTimes(2)
+  })
+
+  it('surfaces a filePatch failure as the store error', async () => {
+    const harness = createBridge()
+    vi.mocked(harness.bridge.git.filePatch).mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'UNKNOWN', message: 'git diff failed', retryable: true },
+    })
+    const store = createGitStore(() => harness.bridge)
+
+    await store.getState().loadPatch('workspace-1', 'src/main.ts')
+    expect(store.getState().error?.message).toBe('git diff failed')
+    expect(store.getState().patches).toEqual({})
   })
 
   it('debounces high-frequency Agent output into one refresh', async () => {

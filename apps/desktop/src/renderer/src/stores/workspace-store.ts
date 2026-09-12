@@ -19,9 +19,9 @@ export interface WorkspaceStoreBridge {
 
 interface WorkspaceState {
   readonly recent: readonly Workspace[]
-  readonly current?: Workspace
+  readonly current?: Workspace | undefined
   readonly loading: boolean
-  readonly error?: PublicAppError
+  readonly error?: PublicAppError | undefined
   loadRecent(): Promise<void>
   openWorkspace(request: OpenWorkspaceRequest): Promise<Workspace | undefined>
   removeWorkspace(id: string): Promise<boolean>

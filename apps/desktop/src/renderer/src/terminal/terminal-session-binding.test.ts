@@ -20,16 +20,20 @@ function harness() {
   let resize: ((size: { cols: number; rows: number }) => void) | undefined
   let output: ((data: string) => void) | undefined
   let closed: (() => void) | undefined
-  const disposals = [vi.fn(), vi.fn(), vi.fn(), vi.fn()]
+  const inputDisposal = vi.fn()
+  const resizeDisposal = vi.fn()
+  const outputDisposal = vi.fn()
+  const closedDisposal = vi.fn()
+  const disposals = [inputDisposal, resizeDisposal, outputDisposal, closedDisposal]
   const surface: TerminalSurface = {
     write: vi.fn(),
     onData: (handler) => {
       input = handler
-      return { dispose: disposals[0] }
+      return { dispose: inputDisposal }
     },
     onResize: (handler) => {
       resize = handler
-      return { dispose: disposals[1] }
+      return { dispose: resizeDisposal }
     },
   }
   const transport: TerminalSessionTransport = {
@@ -37,11 +41,11 @@ function harness() {
     resize: vi.fn(async () => ok()),
     subscribeOutput: (_id, handler) => {
       output = handler
-      return disposals[2]
+      return outputDisposal
     },
     subscribeClosed: (_id, handler) => {
       closed = handler
-      return disposals[3]
+      return closedDisposal
     },
   }
   return {

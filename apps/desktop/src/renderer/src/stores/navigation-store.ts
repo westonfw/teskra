@@ -20,7 +20,7 @@ export interface NavigationIntent {
 
 interface NavigationState {
   readonly page: WorkbenchPage
-  readonly pendingRunId?: string
+  readonly pendingRunId?: string | undefined
   navigate(page: WorkbenchPage, intent?: NavigationIntent): void
   /** Reads and clears the pending Run intent; undefined when none is set. */
   consumePendingRunId(): string | undefined

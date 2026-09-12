@@ -133,10 +133,7 @@ export function createDashboardStore(getBridge: () => DashboardStoreBridge) {
     }
     const begin = (block: DashboardBlockKey): number => {
       const generation = ++generations[block]
-      set(
-        (state) =>
-          ({ [block]: { status: 'loading', data: state[block].data } }) as Partial<DashboardState>,
-      )
+      set((state) => ({ [block]: { status: 'loading', data: state[block].data } }))
       return generation
     }
     const succeed = (block: DashboardBlockKey, generation: number, data: unknown): void => {
@@ -145,12 +142,9 @@ export function createDashboardStore(getBridge: () => DashboardStoreBridge) {
     }
     const fail = (block: DashboardBlockKey, generation: number, error: PublicAppError): void => {
       if (generation !== generations[block]) return
-      set(
-        (state) =>
-          ({
-            [block]: { status: 'error', data: state[block].data, error },
-          }) as Partial<DashboardState>,
-      )
+      set((state) => ({
+        [block]: { status: 'error', data: state[block].data, error },
+      }))
     }
 
     const loadActiveTasks = async (workspaceId: string): Promise<void> => {
@@ -227,9 +221,7 @@ export function createDashboardStore(getBridge: () => DashboardStoreBridge) {
           fail('mergeReady', generation, result.error)
           return
         }
-        const worktrees = result.data
-          .filter(({ state }) => state === 'ready')
-          .sort(byUpdatedAtDesc)
+        const worktrees = result.data.filter(({ state }) => state === 'ready').sort(byUpdatedAtDesc)
         succeed('mergeReady', generation, summarize(worktrees))
       } catch {
         fail('mergeReady', generation, transportError())

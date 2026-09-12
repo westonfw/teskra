@@ -22,9 +22,10 @@ function relativeLuminance(hex: string): number {
 }
 
 function contrastRatio(foreground: string, background: string): number {
-  const [lighter, darker] = [relativeLuminance(foreground), relativeLuminance(background)].sort(
-    (a, b) => b - a,
-  )
+  const [lighter = 0, darker = 0] = [
+    relativeLuminance(foreground),
+    relativeLuminance(background),
+  ].sort((a, b) => b - a)
   return (lighter + 0.05) / (darker + 0.05)
 }
 
@@ -46,11 +47,11 @@ describe('xtermThemes', () => {
   // a near-white background, hence the relaxed 3:1 floor for the bright slots.
   it.each(ANSI_NORMAL)('light %s meets 4.5:1 against the light background', (key) => {
     const color = xtermThemes.light[key]
-    expect(contrastRatio(color!, xtermThemes.light.background!)).toBeGreaterThanOrEqual(4.5)
+    expect(contrastRatio(color!, xtermThemes.light.background)).toBeGreaterThanOrEqual(4.5)
   })
 
   it.each(ANSI_BRIGHT)('light %s meets 3:1 against the light background', (key) => {
     const color = xtermThemes.light[key]
-    expect(contrastRatio(color!, xtermThemes.light.background!)).toBeGreaterThanOrEqual(3)
+    expect(contrastRatio(color!, xtermThemes.light.background)).toBeGreaterThanOrEqual(3)
   })
 })

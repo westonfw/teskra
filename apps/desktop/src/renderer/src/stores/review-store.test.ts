@@ -26,7 +26,8 @@ function makeFinding(
 }
 
 function makeScore(
-  overrides: Partial<CriterionScoreRecord> & Pick<CriterionScoreRecord, 'id' | 'criterionId' | 'result'>,
+  overrides: Partial<CriterionScoreRecord> &
+    Pick<CriterionScoreRecord, 'id' | 'criterionId' | 'result'>,
 ): CriterionScoreRecord {
   return {
     runId: 'run-1',
@@ -156,9 +157,10 @@ describe('latestScoresByCriterion (TASK-054)', () => {
 
 describe('ReviewStore criterion scores (TASK-054)', () => {
   it('loads scores for a task and refreshes on terminal run and task events', async () => {
-    const { bridge, scores, emit, store } = setup([], [
-      makeScore({ id: 's-1', criterionId: 'c-1', result: 'unknown' }),
-    ])
+    const { bridge, scores, emit, store } = setup(
+      [],
+      [makeScore({ id: 's-1', criterionId: 'c-1', result: 'unknown' })],
+    )
     const stop = store.getState().startScoreSynchronization('task-1')
     await vi.waitFor(() =>
       expect(store.getState().scores.map((score) => score.id)).toEqual(['s-1']),

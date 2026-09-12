@@ -77,7 +77,7 @@ interface AgentState {
   readonly loading: boolean
   readonly runsLoading: boolean
   readonly starting: boolean
-  readonly error?: PublicAppError
+  readonly error?: PublicAppError | undefined
   startSynchronization(workspaceId: string): () => void
   synchronizeRuns(workspaceId: string): Promise<void>
   startRun(request: StartAgentRunRequest): Promise<AgentRun | undefined>

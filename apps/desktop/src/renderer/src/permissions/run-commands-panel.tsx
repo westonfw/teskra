@@ -111,7 +111,7 @@ export function RunCommandsPanel({
   definition,
 }: {
   readonly run: AgentRun
-  readonly definition?: AgentDefinition
+  readonly definition?: AgentDefinition | undefined
 }) {
   const entries = usePermissionStore((state) => state.audit)
   const loading = usePermissionStore((state) => state.loading)
@@ -150,10 +150,7 @@ export function RunCommandsPanel({
       )}
       <Spin spinning={loading && entries.length === 0}>
         {entries.length === 0 && !loading ? (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={t('permissions.audit.empty')}
-          />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('permissions.audit.empty')} />
         ) : (
           <List
             size="small"

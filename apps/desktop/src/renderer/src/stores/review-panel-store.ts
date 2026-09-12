@@ -31,10 +31,10 @@ export interface ReviewPanelStoreBridge {
 interface ReviewPanelState {
   readonly taskId?: string
   readonly panels: readonly ReviewPanel[]
-  readonly selectedId?: string
-  readonly detail?: ReviewPanelResult
+  readonly selectedId?: string | undefined
+  readonly detail?: ReviewPanelResult | undefined
   readonly loading: boolean
-  readonly error?: PublicAppError
+  readonly error?: PublicAppError | undefined
   /** Synchronizes the panels of one Task; refreshes on panel/task events. */
   startSynchronization(taskId: string): () => void
   synchronize(taskId: string): Promise<void>
@@ -54,7 +54,8 @@ export function createReviewPanelStore(getBridge: () => ReviewPanelStoreBridge) 
 
     startSynchronization(taskId) {
       const generation = ++synchronizationGeneration
-      if (get().taskId !== taskId) set({ taskId, panels: [], selectedId: undefined, detail: undefined })
+      if (get().taskId !== taskId)
+        set({ taskId, panels: [], selectedId: undefined, detail: undefined })
       const refresh = () => void get().synchronize(taskId)
       const stops = [
         getBridge().events.subscribe('review.panel_updated', (payload) => {

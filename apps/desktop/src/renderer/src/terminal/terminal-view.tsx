@@ -10,7 +10,7 @@ import { bindTerminalSession } from './terminal-session-binding'
 interface TerminalViewProps {
   readonly session: TerminalSession
   readonly visible?: boolean
-  readonly initialData?: string
+  readonly initialData?: string | undefined
   readonly readOnly?: boolean
   readonly className?: string
   readonly onClosed?: () => void

@@ -12,7 +12,7 @@ const NO_WARNINGS: ResolvedConfig['warnings'] = []
 
 interface SettingsPageProps {
   readonly registry: SettingsSectionRegistry
-  readonly workspaceId?: string
+  readonly workspaceId?: string | undefined
 }
 
 export function SettingsPage({ registry, workspaceId: selectedWorkspaceId }: SettingsPageProps) {

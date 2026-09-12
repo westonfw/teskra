@@ -41,12 +41,12 @@ export interface WorkflowRunStoreBridge {
 interface WorkflowRunState {
   readonly taskId?: string
   readonly runs: readonly WorkflowRun[]
-  readonly selectedId?: string
-  readonly detail?: WorkflowRunDetail
-  readonly summary?: FullWorkflowRunSummary
+  readonly selectedId?: string | undefined
+  readonly detail?: WorkflowRunDetail | undefined
+  readonly summary?: FullWorkflowRunSummary | undefined
   readonly starting: boolean
   readonly loading: boolean
-  readonly error?: PublicAppError
+  readonly error?: PublicAppError | undefined
   /** Synchronizes the runs of one Task; refreshes on workflow events. */
   startSynchronization(taskId: string): () => void
   synchronize(taskId: string): Promise<void>

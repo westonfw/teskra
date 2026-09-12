@@ -49,7 +49,7 @@ interface RecoveryState {
   readonly generatedAt?: string
   readonly loading: boolean
   readonly acting: Readonly<Record<string, boolean | undefined>>
-  readonly error?: PublicAppError
+  readonly error?: PublicAppError | undefined
   load(workspaceId: string): Promise<void>
   resumeRun(workspaceId: string, runId: string): Promise<boolean>
   repairWorktree(workspaceId: string, worktreeId: string): Promise<boolean>

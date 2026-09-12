@@ -69,8 +69,6 @@ export function riskTagColor(riskLevel: string): string {
 }
 
 /** Elevated-risk entries of one Run, chronological (for the pinned summary). */
-export function elevatedEntries(
-  entries: readonly PermissionAuditEntry[],
-): PermissionAuditEntry[] {
+export function elevatedEntries(entries: readonly PermissionAuditEntry[]): PermissionAuditEntry[] {
   return entries.filter((entry) => isElevatedRisk(entry.riskLevel))
 }

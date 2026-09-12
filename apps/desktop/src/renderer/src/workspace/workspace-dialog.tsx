@@ -51,6 +51,11 @@ export function WorkspaceDialog({ open, onClose, onOpened }: WorkspaceDialogProp
   const runtimeFor = (values: WorkspaceFormValues): WorkspaceRuntimeRef =>
     values.kind === 'wsl' ? { kind: 'wsl', distro: values.distro } : { kind: 'windows' }
 
+  const browseForPath = async (): Promise<void> => {
+    const path = await selectDirectory({ kind: 'windows' })
+    if (path !== null) form.setFieldValue('path', path)
+  }
+
   const submit = async (): Promise<void> => {
     const values = await form.validateFields()
     const workspace = await openWorkspace({
@@ -126,13 +131,7 @@ export function WorkspaceDialog({ open, onClose, onOpened }: WorkspaceDialogProp
               <Input placeholder={kind === 'windows' ? 'C:\\src\\project' : '/home/me/project'} />
             </Form.Item>
             {kind === 'windows' && (
-              <Button
-                icon={<FolderOpenOutlined />}
-                onClick={async () => {
-                  const path = await selectDirectory({ kind: 'windows' })
-                  if (path !== null) form.setFieldValue('path', path)
-                }}
-              >
+              <Button icon={<FolderOpenOutlined />} onClick={() => void browseForPath()}>
                 {t('workspace.dialog.browse')}
               </Button>
             )}

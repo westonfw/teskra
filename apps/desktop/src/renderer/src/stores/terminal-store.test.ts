@@ -1,7 +1,12 @@
 import type { TerminalSession, WorkbenchEvents } from '@teskra/contracts'
 import { describe, expect, it, vi } from 'vitest'
 
-import { createTerminalStore, type TerminalStoreBridge } from './terminal-store'
+import {
+  createTerminalStore,
+  historyText,
+  TERMINAL_HISTORY_MAX_CHARS,
+  type TerminalStoreBridge,
+} from './terminal-store'
 
 const FIRST: TerminalSession = {
   id: 'terminal-1',
@@ -38,7 +43,7 @@ function harness() {
           current = new Set()
           handlers.set(name, current)
         }
-        current.add(handler as (payload: never) => void)
+        current.add(handler)
         const stop = vi.fn(() => current?.delete(handler as (payload: never) => void))
         stops.push(stop)
         return stop
@@ -62,7 +67,7 @@ describe('terminal keep-alive store', () => {
     const stopSecond = store.getState().startSynchronization()
 
     test.emit('terminal.output', { terminalId: FIRST.id, data: '\x1b[32mlong job\x1b[0m' })
-    expect(store.getState().history[FIRST.id]).toContain('long job')
+    expect(historyText(store.getState().history[FIRST.id])).toContain('long job')
     expect(test.stops).toHaveLength(3)
 
     stopFirst()
@@ -84,7 +89,7 @@ describe('terminal keep-alive store', () => {
     store.getState().activate(FIRST.id)
     store.getState().activate(SECOND.id)
     expect(store.getState().tabs.map((tab) => tab.session.id)).toEqual([FIRST.id, SECOND.id])
-    expect(store.getState().history[FIRST.id]).toBe('still running')
+    expect(historyText(store.getState().history[FIRST.id])).toBe('still running')
     expect(test.bridge.terminal.close).not.toHaveBeenCalled()
     stop()
   })
@@ -97,10 +102,61 @@ describe('terminal keep-alive store', () => {
     test.emit('terminal.closed', { terminalId: FIRST.id })
 
     expect(store.getState().tabs[0]?.status).toBe('closed')
-    expect(store.getState().history[FIRST.id]).toContain('[terminal exited]')
+    expect(historyText(store.getState().history[FIRST.id])).toContain('[terminal exited]')
     await store.getState().closeTerminal(FIRST.id)
     expect(store.getState().tabs).toEqual([])
     expect(test.bridge.terminal.close).not.toHaveBeenCalled()
+    stop()
+  })
+
+  it('stores history as chunks and joins them in arrival order (P1-2)', () => {
+    const test = harness()
+    const store = createTerminalStore(() => test.bridge)
+    const stop = store.getState().startSynchronization()
+
+    test.emit('terminal.output', { terminalId: FIRST.id, data: 'abc' })
+    test.emit('terminal.output', { terminalId: FIRST.id, data: 'def' })
+    test.emit('terminal.output', { terminalId: FIRST.id, data: 'ghi' })
+
+    const history = store.getState().history[FIRST.id]
+    expect(history?.chunks).toEqual(['abc', 'def', 'ghi'])
+    expect(history?.length).toBe(9)
+    expect(historyText(history)).toBe('abcdefghi')
+    stop()
+  })
+
+  it('drops the oldest chunks once history exceeds the cap, keeping the tail intact (P1-2)', () => {
+    const test = harness()
+    const store = createTerminalStore(() => test.bridge)
+    const stop = store.getState().startSynchronization()
+    const chunkSize = Math.floor(TERMINAL_HISTORY_MAX_CHARS / 2) + 1
+
+    test.emit('terminal.output', { terminalId: FIRST.id, data: 'A'.repeat(chunkSize) })
+    test.emit('terminal.output', { terminalId: FIRST.id, data: 'B'.repeat(chunkSize) })
+
+    const history = store.getState().history[FIRST.id]
+    // 2 chunks × (cap/2 + 1) > cap, so the oldest chunk is dropped whole.
+    expect(history?.chunks).toHaveLength(1)
+    expect(history?.length).toBe(chunkSize)
+    const text = historyText(history)
+    expect(text).toHaveLength(chunkSize)
+    expect(text?.startsWith('B')).toBe(true)
+    stop()
+  })
+
+  it('retains a single chunk even when it alone exceeds the cap (P1-2)', () => {
+    const test = harness()
+    const store = createTerminalStore(() => test.bridge)
+    const stop = store.getState().startSynchronization()
+
+    test.emit('terminal.output', {
+      terminalId: FIRST.id,
+      data: 'x'.repeat(TERMINAL_HISTORY_MAX_CHARS + 100),
+    })
+
+    const history = store.getState().history[FIRST.id]
+    expect(history?.chunks).toHaveLength(1)
+    expect(historyText(history)).toHaveLength(TERMINAL_HISTORY_MAX_CHARS + 100)
     stop()
   })
 })

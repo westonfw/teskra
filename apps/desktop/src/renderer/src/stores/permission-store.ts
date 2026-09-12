@@ -38,7 +38,7 @@ interface PermissionState {
   readonly audit: readonly PermissionAuditEntry[]
   readonly auditFilter: ListPermissionAuditRequest
   readonly loading: boolean
-  readonly error?: PublicAppError
+  readonly error?: PublicAppError | undefined
   loadRules(workspaceId?: string): Promise<void>
   createRule(request: CreatePermissionRuleRequest): Promise<boolean>
   updateRule(request: UpdatePermissionRuleRequest): Promise<boolean>
@@ -99,7 +99,11 @@ export function createPermissionStore(getBridge: () => PermissionStoreBridge) {
           set({ error: result.error })
           return false
         }
-        set({ rules: get().rules.map((rule) => (rule.id === request.ruleId ? result.data ?? rule : rule)) })
+        set({
+          rules: get().rules.map((rule) =>
+            rule.id === request.ruleId ? (result.data ?? rule) : rule,
+          ),
+        })
         return true
       } catch {
         set({ error: transportError() })
