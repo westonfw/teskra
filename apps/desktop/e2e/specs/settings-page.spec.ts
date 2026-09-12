@@ -23,8 +23,6 @@ test.describe('Settings page', () => {
     expect(cardBox).not.toBeNull()
     expect(controlBox).not.toBeNull()
     expect(controlBox!.x).toBeGreaterThanOrEqual(cardBox!.x)
-    expect(controlBox!.x + controlBox!.width).toBeLessThanOrEqual(
-      cardBox!.x + cardBox!.width + 1,
-    )
+    expect(controlBox!.x + controlBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width + 1)
   })
 })

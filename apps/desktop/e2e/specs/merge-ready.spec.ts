@@ -103,7 +103,7 @@ test.describe('Merge Ready navigation', () => {
             const status = await page.evaluate(async () => {
               const runs = await window.teskra.workflow.listRuns({})
               if (!runs.ok || runs.data.length === 0) return undefined
-              return runs.data[0].status
+              return runs.data[0]?.status
             })
             return status
           },

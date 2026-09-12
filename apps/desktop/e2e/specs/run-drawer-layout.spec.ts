@@ -37,7 +37,10 @@ test.describe('Run drawer layout', () => {
       // Regression: the Output tab's vertical Space shrink-wrapped to ~195px,
       // squeezing every card (and the Agent PTY) into an unreadable strip.
       const body = await page.locator('.ant-drawer-open .ant-drawer-body').boundingBox()
-      const card = await page.locator('.ant-drawer-open .run-detail .ant-card').first().boundingBox()
+      const card = await page
+        .locator('.ant-drawer-open .run-detail .ant-card')
+        .first()
+        .boundingBox()
       const pty = await page.locator('.ant-drawer-open .agent-run-terminal').boundingBox()
       expect(body).not.toBeNull()
       expect(card).not.toBeNull()
