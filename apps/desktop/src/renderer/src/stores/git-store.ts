@@ -48,6 +48,14 @@ interface GitState {
   readonly selectedPath?: string | undefined
   readonly loading: boolean
   readonly error?: PublicAppError | undefined
+  /**
+   * Bumped by every completed refresh (the same set() that clears the patch
+   * cache). The lazy-patch effect keys on it so a patch that never got
+   * cached — an in-flight fetch voided by the refresh's generation check, or
+   * an IPC failure that only set `error` — is retried on the next refresh
+   * instead of leaving the diff panel blank forever.
+   */
+  readonly refreshCount: number
   startSynchronization(workspaceId: string): () => void
   refresh(workspaceId: string): Promise<void>
   refreshOnFocus(workspaceId: string): void
@@ -69,6 +77,7 @@ export function createGitStore(getBridge: () => GitStoreBridge) {
     patches: {},
     patchLoading: false,
     loading: false,
+    refreshCount: 0,
 
     startSynchronization(workspaceId) {
       const generation = ++synchronizationGeneration
@@ -140,6 +149,7 @@ export function createGitStore(getBridge: () => GitStoreBridge) {
             // Stale patches must never survive a refresh: file contents may
             // have changed, so the next selection re-fetches its patch.
             patches: {},
+            refreshCount: state.refreshCount + 1,
             selectedPath:
               changes.data.files.find(({ path }) => path === state.selectedPath)?.path ??
               changes.data.files[0]?.path,
@@ -189,6 +199,11 @@ export function createGitStore(getBridge: () => GitStoreBridge) {
       } finally {
         patchInFlight.delete(key)
         set({ patchLoading: patchInFlight.size > 0 })
+        // A refresh invalidated this fetch mid-flight: its result was dropped
+        // and the cache it was filling was cleared. Re-issue under the
+        // current generation or the panel stays blank (the effect's inputs
+        // did not change).
+        if (generation !== refreshGeneration) void get().loadPatch(workspaceId, path)
       }
     },
 

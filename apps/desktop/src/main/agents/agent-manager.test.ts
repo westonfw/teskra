@@ -296,6 +296,39 @@ describe('AgentManager (TASK-028)', () => {
     expect(started.ok ? started.data.pidIdentity : 'unexpected').toBeUndefined()
   })
 
+  it('does not resurrect a run that settled during the identity await', async () => {
+    let releaseIdentity!: (value: IpcResult<string | null>) => void
+    const identity = vi.fn(
+      () =>
+        new Promise<IpcResult<string | null>>((resolve) => {
+          releaseIdentity = resolve
+        }),
+    )
+    const context = setup(undefined, false, undefined, { identity })
+    const started = context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      prompt: 'Implement',
+    })
+    await vi.waitFor(() => expect(identity).toHaveBeenCalledWith(1001))
+
+    // The process exits while launch() is parked in identity(): the
+    // process.exited path writes the terminal status first.
+    context.events.emit('process.exited', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      exitCode: 1,
+    })
+    releaseIdentity({ ok: true, data: 'start-token-1001' })
+
+    // launch() must not write 'running' over the terminal state.
+    expect(await started).toMatchObject({ ok: true, data: { status: 'failed', exitCode: 1 } })
+    expect(context.manager.get('run-1')).toMatchObject({
+      ok: true,
+      data: { status: 'failed' },
+    })
+  })
+
   it('rejects orchestrated execution without a worktree before creating a run', async () => {
     const context = setup()
     const result = await context.manager.start({

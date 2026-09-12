@@ -398,6 +398,15 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         )
       }
     }
+    // The identity await yields the event loop for real on macOS/Windows
+    // (ps / PowerShell spawns): the process may have exited meanwhile and the
+    // process.exited path already wrote the terminal status — re-check before
+    // writing 'running', same as the post-adapter.start guard above.
+    const afterIdentity = deps.runs.getById(request.runId)
+    if (!afterIdentity.ok) return afterIdentity
+    if (afterIdentity.data !== null && isTerminal(afterIdentity.data)) {
+      return { ok: true, data: afterIdentity.data }
+    }
     const running = deps.runs.update(
       request.runId,
       {

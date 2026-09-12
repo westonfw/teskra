@@ -365,30 +365,78 @@ describe('ReconciliationService (TASK-040)', () => {
     })
   })
 
-  it('treats a run as dead when its pid is gone or its identity cannot be read', async () => {
-    for (const identity of [
-      vi.fn(async (): Promise<IpcResult<string | null>> => ({ ok: true, data: null })),
-      vi.fn(async (): Promise<IpcResult<string | null>> => ({
-        ok: false,
-        error: { code: 'UNKNOWN' as const, message: 'stat failed', retryable: true },
-      })),
-    ]) {
-      const context = setup()
-      context.createRunningRun(undefined, undefined, 'start-token-A')
-      const probe = vi.fn(async (): Promise<IpcResult<boolean>> => ({ ok: true, data: true }))
-      const terminate = vi.fn(async (): Promise<IpcResult<void>> => ({ ok: true, data: undefined }))
-      const service = context.service({ list: () => [] }, { probe, identity, terminate })
+  it('treats a run as dead when its pid is gone (identity returns null)', async () => {
+    const context = setup()
+    context.createRunningRun(undefined, undefined, 'start-token-A')
+    const probe = vi.fn(async (): Promise<IpcResult<boolean>> => ({ ok: true, data: true }))
+    const identity = vi.fn(async (): Promise<IpcResult<string | null>> => ({
+      ok: true,
+      data: null,
+    }))
+    const terminate = vi.fn(async (): Promise<IpcResult<void>> => ({ ok: true, data: undefined }))
+    const service = context.service({ list: () => [] }, { probe, identity, terminate })
 
-      expect(await service.reconcile()).toMatchObject({
-        ok: true,
-        data: {
-          interruptedRunIds: ['run-1'],
-          terminatedSurvivorRunIds: [],
-          survivingRunIds: [],
-        },
-      })
-      expect(terminate).not.toHaveBeenCalled()
-    }
+    expect(await service.reconcile()).toMatchObject({
+      ok: true,
+      data: {
+        interruptedRunIds: ['run-1'],
+        terminatedSurvivorRunIds: [],
+        survivingRunIds: [],
+      },
+    })
+    expect(terminate).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the liveness probe when the identity read fails', async () => {
+    // Probe says alive: terminate under degraded verification — leaving a
+    // live survivor unterminated while the run is marked interrupted would
+    // open the resume double-write P0-2 forbids.
+    const alive = setup()
+    alive.createRunningRun(undefined, undefined, 'start-token-A')
+    const aliveProbe = vi.fn(async (): Promise<IpcResult<boolean>> => ({ ok: true, data: true }))
+    const failingIdentity = vi.fn(async (): Promise<IpcResult<string | null>> => ({
+      ok: false,
+      error: { code: 'UNKNOWN' as const, message: 'stat failed', retryable: true },
+    }))
+    const aliveTerminate = vi.fn(async (): Promise<IpcResult<void>> => ({
+      ok: true,
+      data: undefined,
+    }))
+    const aliveService = alive.service(
+      { list: () => [] },
+      { probe: aliveProbe, identity: failingIdentity, terminate: aliveTerminate },
+    )
+    expect(await aliveService.reconcile()).toMatchObject({
+      ok: true,
+      data: {
+        interruptedRunIds: ['run-1'],
+        terminatedSurvivorRunIds: ['run-1'],
+        survivingRunIds: [],
+      },
+    })
+    expect(aliveTerminate).toHaveBeenCalledWith(4242)
+
+    // Probe says dead: nothing to terminate.
+    const dead = setup()
+    dead.createRunningRun(undefined, undefined, 'start-token-A')
+    const deadProbe = vi.fn(async (): Promise<IpcResult<boolean>> => ({ ok: true, data: false }))
+    const deadTerminate = vi.fn(async (): Promise<IpcResult<void>> => ({
+      ok: true,
+      data: undefined,
+    }))
+    const deadService = dead.service(
+      { list: () => [] },
+      { probe: deadProbe, identity: failingIdentity, terminate: deadTerminate },
+    )
+    expect(await deadService.reconcile()).toMatchObject({
+      ok: true,
+      data: {
+        interruptedRunIds: ['run-1'],
+        terminatedSurvivorRunIds: [],
+        survivingRunIds: [],
+      },
+    })
+    expect(deadTerminate).not.toHaveBeenCalled()
   })
 
   it('classifies absent and non-Git worktrees without mutating them twice', async () => {

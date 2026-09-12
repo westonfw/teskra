@@ -212,35 +212,47 @@ export function createReconciliationService(
        */
       const terminateSurvivor = async (run: AgentRun): Promise<'none' | 'terminated' | 'alive'> => {
         if (deps.hostProcesses === undefined || run.pid === undefined) return 'none'
-        if (run.pidIdentity !== undefined) {
-          const identity = await deps.hostProcesses.identity(run.pid)
-          if (!identity.ok) {
-            logger.warn(
-              { runId: run.id, pid: run.pid, error: identity.error },
-              'Host pid identity read failed; treating the process as dead.',
-            )
-            return 'none'
-          }
-          if (identity.data === null) return 'none'
-          if (identity.data !== run.pidIdentity) {
-            logger.warn(
-              { runId: run.id, pid: run.pid },
-              'The recorded pid now belongs to an unrelated process; treating the Agent process as dead.',
-            )
-            return 'none'
-          }
-        } else {
-          const probe = await deps.hostProcesses.probe(run.pid)
+        const hostProcesses = deps.hostProcesses
+        const pid = run.pid
+        // Legacy rows (pre-011) and degraded identity reads share this path.
+        const probeLiveness = async (): Promise<boolean> => {
+          const probe = await hostProcesses.probe(pid)
           if (!probe.ok) {
             logger.warn(
-              { runId: run.id, pid: run.pid, error: probe.error },
+              { runId: run.id, pid, error: probe.error },
               'Host pid probe failed; treating the process as dead.',
             )
-            return 'none'
+            return false
           }
-          if (!probe.data) return 'none'
+          return probe.data
         }
-        const terminated = await deps.hostProcesses.terminate(run.pid)
+        let identityVerified = false
+        if (run.pidIdentity !== undefined) {
+          const identity = await hostProcesses.identity(pid)
+          if (identity.ok) {
+            if (identity.data === null) return 'none'
+            if (identity.data !== run.pidIdentity) {
+              logger.warn(
+                { runId: run.id, pid },
+                'The recorded pid now belongs to an unrelated process; treating the Agent process as dead.',
+              )
+              return 'none'
+            }
+            identityVerified = true
+          } else {
+            // A failed identity read (startup spawn timeout, PowerShell
+            // unavailable) says nothing about liveness: fall back to the bare
+            // probe rather than interrupting a run whose Agent may still be
+            // writing — interrupt-then-resume onto a live worktree is the
+            // double-write P0-2 exists to prevent.
+            logger.warn(
+              { runId: run.id, pid, error: identity.error },
+              'Host pid identity read failed; falling back to the liveness probe.',
+            )
+          }
+        }
+        if (!identityVerified && !(await probeLiveness())) return 'none'
+        const terminated = await hostProcesses.terminate(pid)
         if (terminated.ok) {
           logger.warn(
             { runId: run.id, pid: run.pid },

@@ -127,6 +127,40 @@ describe('Git store (TASK-037)', () => {
     expect(store.getState().patches).toEqual({})
   })
 
+  it('re-issues a patch fetch that a refresh voided mid-flight', async () => {
+    const harness = createBridge()
+    let releasePatch!: (value: { ok: true; data: { patch: string } }) => void
+    vi.mocked(harness.bridge.git.filePatch).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releasePatch = resolve
+        }),
+    )
+    const store = createGitStore(() => harness.bridge)
+    await store.getState().refresh('workspace-1')
+
+    const loading = store.getState().loadPatch('workspace-1', 'src/main.ts')
+    await vi.waitFor(() => expect(harness.bridge.git.filePatch).toHaveBeenCalledTimes(1))
+    // The refresh bumps the generation and clears the cache mid-flight…
+    await store.getState().refresh('workspace-1')
+    releasePatch({ ok: true, data: { patch: '@@ stale' } })
+    await loading
+
+    // …so the voided fetch re-issues itself under the new generation.
+    await vi.waitFor(() => expect(store.getState().patches['src/main.ts']).toContain('+new'))
+    expect(harness.bridge.git.filePatch).toHaveBeenCalledTimes(2)
+  })
+
+  it('bumps refreshCount on every completed refresh', async () => {
+    const harness = createBridge()
+    const store = createGitStore(() => harness.bridge)
+    expect(store.getState().refreshCount).toBe(0)
+    await store.getState().refresh('workspace-1')
+    expect(store.getState().refreshCount).toBe(1)
+    await store.getState().refresh('workspace-1')
+    expect(store.getState().refreshCount).toBe(2)
+  })
+
   it('debounces high-frequency Agent output into one refresh', async () => {
     vi.useFakeTimers()
     const harness = createBridge()

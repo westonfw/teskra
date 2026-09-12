@@ -494,3 +494,39 @@ CSP + sandbox 已经挡掉了大部分利用路径，但这些是零成本的纵
    残留 2~3 个替换字符。
 8. `permission-manager.ts` 尾部 `*` 单词边界判定会打断 `npm run test*` 这类 token
    中间的前缀匹配（仅影响审计日志的规则归因，放行逻辑不经此函数）。
+
+## 9. 第四轮 Review 修复状态（2026-09-12）
+
+> 针对第三轮修复本身的复审。3 项已修复并补测试；3 项延后，记录在案。
+
+**已修复**
+
+1. **identity 的 await 重开终态窗口**（agent-manager）：`launch()` 在
+   `isTerminal(afterStart)` 守卫与 `runs.update({status:'running'})` 之间插入的
+   `await identity()`（macOS/Windows 要 spawn ps/PowerShell，是真实事件循环让出）
+   重开了进程在守卫后退出、run 被写回 running 的窗口。await 之后重做一次终态
+   检查（`afterIdentity`），命中直接返回终态 run。测试模拟 identity 挂起期间
+   process.exited 先到，断言 run 保持 failed。
+2. **identity 失败没回退 probe**（reconciliation）：带 token 的 run 把 identity()
+   当成唯一存活判据，读取失败（spawn 超时、PowerShell 不可用）被当作已死——活着
+   的幸存 Agent 不被 terminate，run 标 interrupted 后可 resume → worktree 双写。
+   现 `!identity.ok` 降级到 legacy probe() 分支（probe 活着则按降级校验 terminate，
+   probe 死了才按已死处理）。identity 返回 null / 令牌不匹配仍按已死处理不变。
+3. **面板空白只修了一半**（changes-page + git-store）：门控换 selectedPatch 只覆盖
+   「refresh 清缓存」；「在途 fetch 被 generation 检查作废」与「IPC !ok 只 set
+   error」两条路径下 selectedPatch 恒为 undefined、effect 不再触发。修复：
+   (a) store 暴露 `refreshCount`（每次完成 refresh 与清缓存同一个 set 内递增），
+   纳入 effect 依赖，下个 refresh 周期自动重试未缓存的 patch；(b) loadPatch 在
+   finally 中发现 generation 已过期时在最新 generation 下自发重发（re-issue），
+   不依赖 effect 再次触发。两条路径各有 store 级测试。
+
+**延后（可下轮处理）**
+
+4. Windows `identity()` 把「stdout 为空」一律映射成 null（进程已消失）；但
+   Get-Process 成功、StartTime 因权限读不到时同样 exit 0 + 空 stdout，活进程被
+   判死。应让脚本在「进程存在但 StartTime 不可读」时输出可区分标记。
+5. diff-service 未跟踪文件总数仍无上限：2 万个 `??` 条目 = 2 万次 git spawn 且
+   每次 refresh 重来。可比照 renderer 的 500 条上限加数量闸，超出记 0/0。
+6. Linux identity token 用 /proc/<pid>/stat field 22（自 boot 起的时钟滴答），不含
+   boot 标识，未真正覆盖「重启后 pid 复用」；macOS/Windows 用绝对时间，三平台语义
+   不一致。拼上 /proc/sys/kernel/random/boot_id 即可对齐。
