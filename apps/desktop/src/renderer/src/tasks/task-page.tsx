@@ -163,14 +163,12 @@ export function TaskPage() {
     <div className="workbench-page task-page">
       <header className="page-heading">
         <div>
-          <Typography.Text className="settings-eyebrow">TASK-FIRST WORKBENCH</Typography.Text>
-          <Typography.Title level={2}>Tasks</Typography.Title>
-          <Typography.Paragraph type="secondary">
-            Plan work, launch Agents, and keep every result attached to its intent.
-          </Typography.Paragraph>
+          <Typography.Text className="settings-eyebrow">{t('tasks.eyebrow')}</Typography.Text>
+          <Typography.Title level={2}>{t('tasks.title')}</Typography.Title>
+          <Typography.Paragraph type="secondary">{t('tasks.subtitle')}</Typography.Paragraph>
         </div>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-          Create Task
+          {t('tasks.create')}
         </Button>
       </header>
 
@@ -184,10 +182,13 @@ export function TaskPage() {
       <MemoryPanel workspaceId={workspace.id} taskId={selected?.id} />
 
       <div className="task-workbench">
-        <Card className="task-list-card" title={`${workspace.name} Tasks`}>
+        <Card className="task-list-card" title={t('tasks.listTitle', { name: workspace.name })}>
           <Spin spinning={loading}>
             {tasks.length === 0 && !loading ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Create your first Task" />
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={t('tasks.empty.createFirst')}
+              />
             ) : (
               <List
                 dataSource={[...tasks]}
@@ -202,7 +203,11 @@ export function TaskPage() {
                       <Typography.Text strong>{task.title}</Typography.Text>
                       <div className="task-list-meta">
                         <Tag color={taskStatusColor[task.status]}>{label(task.status)}</Tag>
-                        <span>{runs.filter(({ taskId }) => taskId === task.id).length} runs</span>
+                        <span>
+                          {t('tasks.runsCount', {
+                            count: runs.filter(({ taskId }) => taskId === task.id).length,
+                          })}
+                        </span>
                       </div>
                     </div>
                   </List.Item>
@@ -214,25 +219,25 @@ export function TaskPage() {
 
         {selected === undefined ? (
           <Card className="task-detail-card centered-empty">
-            <Empty description="Select a Task to inspect it" />
+            <Empty description={t('tasks.empty.selectTask')} />
           </Card>
         ) : (
           <div className="task-detail-stack">
             <Card
               className="task-detail-card"
-              title="Task detail"
+              title={t('tasks.detail.title')}
               extra={
                 <Space>
                   <Popconfirm
-                    title="Archive this Task?"
+                    title={t('tasks.detail.archiveConfirm')}
                     onConfirm={() => void archiveTask(selected.id, true)}
                   >
                     <Button icon={<InboxOutlined />} disabled={saving}>
-                      Archive
+                      {t('tasks.detail.archive')}
                     </Button>
                   </Popconfirm>
                   <Popconfirm
-                    title="Delete this Task? Historical Runs will be retained."
+                    title={t('tasks.detail.deleteConfirm')}
                     onConfirm={() => void deleteTask(selected.id)}
                   >
                     <Button danger icon={<DeleteOutlined />} disabled={saving} />
@@ -242,11 +247,13 @@ export function TaskPage() {
             >
               <div className="task-edit-form">
                 <label>
-                  <Typography.Text type="secondary">Title</Typography.Text>
+                  <Typography.Text type="secondary">{t('tasks.detail.fieldTitle')}</Typography.Text>
                   <Input value={title} onChange={(event) => setTitle(event.target.value)} />
                 </label>
                 <label>
-                  <Typography.Text type="secondary">Status</Typography.Text>
+                  <Typography.Text type="secondary">
+                    {t('tasks.detail.fieldStatus')}
+                  </Typography.Text>
                   <Select<TaskStatus>
                     value={selected.status}
                     options={TASK_STATUSES.map((status) => ({
@@ -257,7 +264,9 @@ export function TaskPage() {
                   />
                 </label>
                 <label className="task-description-field">
-                  <Typography.Text type="secondary">Description</Typography.Text>
+                  <Typography.Text type="secondary">
+                    {t('tasks.detail.fieldDescription')}
+                  </Typography.Text>
                   <Input.TextArea
                     value={description}
                     autoSize={{ minRows: 3, maxRows: 8 }}
@@ -276,7 +285,7 @@ export function TaskPage() {
                     })
                   }
                 >
-                  Save Task
+                  {t('tasks.detail.save')}
                 </Button>
               </div>
             </Card>
@@ -287,7 +296,7 @@ export function TaskPage() {
 
             <ReviewPanelsPanel taskId={selected.id} />
 
-            <Card className="task-detail-card" title="Start an Agent Run">
+            <Card className="task-detail-card" title={t('tasks.runLauncher.title')}>
               <Alert
                 className="page-alert attended-warning"
                 type="warning"
@@ -305,7 +314,7 @@ export function TaskPage() {
                   value={prompt}
                   autoSize={{ minRows: 2, maxRows: 5 }}
                   onChange={(event) => setPrompt(event.target.value)}
-                  placeholder="Instructions for this Run"
+                  placeholder={t('tasks.runLauncher.promptPlaceholder')}
                 />
                 <Button
                   type="primary"
@@ -323,14 +332,17 @@ export function TaskPage() {
                     })
                   }}
                 >
-                  Start
+                  {t('tasks.runLauncher.start')}
                 </Button>
               </div>
             </Card>
 
-            <Card className="task-detail-card" title={`Runs · ${taskRuns.length}`}>
+            <Card
+              className="task-detail-card"
+              title={t('tasks.runs.title', { count: taskRuns.length })}
+            >
               {taskRuns.length === 0 ? (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No Runs yet" />
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('tasks.runs.empty')} />
               ) : (
                 <List
                   dataSource={taskRuns}
@@ -338,7 +350,9 @@ export function TaskPage() {
                     <List.Item
                       actions={[
                         <Button key="open" type="link" onClick={() => void handleOpenRun(run)}>
-                          {ACTIVE_RUN_STATUSES.has(run.status) ? 'Open active Run' : 'View result'}
+                          {ACTIVE_RUN_STATUSES.has(run.status)
+                            ? t('tasks.runs.openActive')
+                            : t('tasks.runs.viewResult')}
                         </Button>,
                       ]}
                     >
@@ -349,7 +363,7 @@ export function TaskPage() {
                             <Tag>{label(run.status)}</Tag>
                           </Space>
                         }
-                        description={`${run.model ?? 'Default model'} · ${new Date(run.createdAt).toLocaleString()}`}
+                        description={`${run.model ?? t('tasks.runs.defaultModel')} · ${new Date(run.createdAt).toLocaleString()}`}
                       />
                     </List.Item>
                   )}
@@ -358,13 +372,16 @@ export function TaskPage() {
             </Card>
 
             <div className="task-secondary-grid">
-              <Card className="task-detail-card" title="Changes">
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No Git snapshot yet" />
+              <Card className="task-detail-card" title={t('tasks.changes.title')}>
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={t('tasks.changes.empty')}
+                />
               </Card>
               <ArtifactPanel taskId={selected.id} runIds={taskRuns.map((run) => run.id)} />
             </div>
 
-            <Card className="task-detail-card" title="Activity">
+            <Card className="task-detail-card" title={t('tasks.activity.title')}>
               <Timeline
                 items={[
                   ...taskRuns.map((run) => ({
@@ -377,7 +394,9 @@ export function TaskPage() {
                   })),
                   {
                     color: 'gray',
-                    children: `Task created · ${new Date(selected.createdAt).toLocaleString()}`,
+                    children: t('tasks.activity.taskCreated', {
+                      time: new Date(selected.createdAt).toLocaleString(),
+                    }),
                   },
                 ]}
               />
@@ -387,7 +406,7 @@ export function TaskPage() {
       </div>
 
       <Modal
-        title="Create Task"
+        title={t('tasks.create')}
         open={createOpen}
         confirmLoading={saving}
         okButtonProps={{ disabled: newTitle.trim().length === 0 }}
@@ -398,20 +417,24 @@ export function TaskPage() {
           <Input
             value={newTitle}
             onChange={(event) => setNewTitle(event.target.value)}
-            placeholder="Task title"
+            placeholder={t('tasks.createModal.titlePlaceholder')}
             autoFocus
           />
           <Input.TextArea
             value={newDescription}
             onChange={(event) => setNewDescription(event.target.value)}
-            placeholder="Description and desired outcome"
+            placeholder={t('tasks.createModal.descriptionPlaceholder')}
             autoSize={{ minRows: 4, maxRows: 8 }}
           />
         </Space>
       </Modal>
 
       <Drawer
-        title={openRun === undefined ? 'Run result' : `${openRun.agentType} Run`}
+        title={
+          openRun === undefined
+            ? t('tasks.drawer.runResult')
+            : t('tasks.drawer.agentRun', { name: openRun.agentType })
+        }
         width={680}
         open={openRun !== undefined}
         onClose={() => setOpenRunId(undefined)}
@@ -426,7 +449,7 @@ export function TaskPage() {
               items={[
                 {
                   key: 'output',
-                  label: 'Output',
+                  label: t('tasks.drawer.tabOutput'),
                   children: (
                     <Space direction="vertical" size={16} className="run-detail-tab">
                       <RunWorktreePanel run={openRun} workspace={workspace} />
@@ -441,7 +464,7 @@ export function TaskPage() {
                 },
                 {
                   key: 'commands',
-                  label: 'Commands',
+                  label: t('tasks.drawer.tabCommands'),
                   children: (
                     <RunCommandsPanel
                       run={openRun}

@@ -15,14 +15,10 @@ import {
 } from 'antd'
 import { useEffect, useState } from 'react'
 
-import {
-  MEMORY_TYPES,
-  type BuiltContext,
-  type Memory,
-  type MemoryType,
-} from '@teskra/contracts'
+import { MEMORY_TYPES, type BuiltContext, type Memory, type MemoryType } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../components/app-error-alert'
+import { useTranslation } from '../i18n'
 import { isRepoLocalMemory, useMemoryStore } from '../stores/memory-store'
 
 /**
@@ -62,6 +58,7 @@ export function MemoryPanel({ workspaceId, taskId }: MemoryPanelProps) {
   const update = useMemoryStore((state) => state.update)
   const remove = useMemoryStore((state) => state.remove)
   const clearError = useMemoryStore((state) => state.clearError)
+  const { t } = useTranslation()
 
   const [editor, setEditor] = useState<EditorState>()
   const [type, setType] = useState<MemoryType>('summary')
@@ -111,7 +108,7 @@ export function MemoryPanel({ workspaceId, taskId }: MemoryPanelProps) {
   return (
     <Card
       className="task-detail-card"
-      title="Workspace Memory"
+      title={t('memory.title')}
       extra={
         <Space>
           <Button
@@ -120,7 +117,7 @@ export function MemoryPanel({ workspaceId, taskId }: MemoryPanelProps) {
             loading={previewing}
             onClick={() => void handlePreview()}
           >
-            Preview context
+            {t('memory.preview')}
           </Button>
           <Button
             size="small"
@@ -128,7 +125,7 @@ export function MemoryPanel({ workspaceId, taskId }: MemoryPanelProps) {
             disabled={saving}
             onClick={() => openEditor({ mode: 'add' })}
           >
-            Add memory
+            {t('memory.add')}
           </Button>
         </Space>
       }
@@ -140,7 +137,11 @@ export function MemoryPanel({ workspaceId, taskId }: MemoryPanelProps) {
         <List
           size="small"
           dataSource={[...memories]}
-          locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No memories yet" /> }}
+          locale={{
+            emptyText: (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('memory.empty')} />
+            ),
+          }}
           renderItem={(memory) => {
             const readOnly = isRepoLocalMemory(memory)
             return (
@@ -159,7 +160,7 @@ export function MemoryPanel({ workspaceId, taskId }: MemoryPanelProps) {
                         />,
                         <Popconfirm
                           key="remove"
-                          title="Delete this memory?"
+                          title={t('memory.deleteConfirm')}
                           onConfirm={() => void remove(memory.id)}
                         >
                           <Button
@@ -177,13 +178,13 @@ export function MemoryPanel({ workspaceId, taskId }: MemoryPanelProps) {
                   title={
                     <Space>
                       <Tag color={typeColor[memory.type]}>{memory.type.replace('_', ' ')}</Tag>
-                      {readOnly && <Tag>repo</Tag>}
+                      {readOnly && <Tag>{t('memory.repoTag')}</Tag>}
                     </Space>
                   }
                   description={
                     <Typography.Paragraph
                       className="memory-content"
-                      ellipsis={{ rows: 3, expandable: true, symbol: 'more' }}
+                      ellipsis={{ rows: 3, expandable: true, symbol: t('memory.more') }}
                     >
                       {memory.content}
                     </Typography.Paragraph>
@@ -196,7 +197,7 @@ export function MemoryPanel({ workspaceId, taskId }: MemoryPanelProps) {
       </Spin>
 
       <Modal
-        title={editor?.mode === 'edit' ? 'Edit memory' : 'Add memory'}
+        title={editor?.mode === 'edit' ? t('memory.edit') : t('memory.add')}
         open={editor !== undefined}
         confirmLoading={saving}
         okButtonProps={{ disabled: content.trim().length === 0 }}
@@ -205,7 +206,7 @@ export function MemoryPanel({ workspaceId, taskId }: MemoryPanelProps) {
       >
         <Space direction="vertical" size={14} className="task-modal-fields">
           <label>
-            <Typography.Text type="secondary">Type</Typography.Text>
+            <Typography.Text type="secondary">{t('memory.fieldType')}</Typography.Text>
             <Select<MemoryType>
               value={type}
               options={MEMORY_TYPES.map((value) => ({ value, label: value.replace('_', ' ') }))}
@@ -213,19 +214,19 @@ export function MemoryPanel({ workspaceId, taskId }: MemoryPanelProps) {
             />
           </label>
           <label>
-            <Typography.Text type="secondary">Content</Typography.Text>
+            <Typography.Text type="secondary">{t('memory.fieldContent')}</Typography.Text>
             <Input.TextArea
               value={content}
               autoSize={{ minRows: 3, maxRows: 8 }}
               onChange={(event) => setContent(event.target.value)}
-              placeholder="What should every Agent working in this workspace know?"
+              placeholder={t('memory.contentPlaceholder')}
               autoFocus
             />
           </label>
         </Space>
       </Modal>
       <Modal
-        title="Context preview"
+        title={t('memory.previewTitle')}
         open={previewOpen}
         width={720}
         footer={null}
@@ -234,10 +235,15 @@ export function MemoryPanel({ workspaceId, taskId }: MemoryPanelProps) {
         {preview !== undefined && (
           <Space direction="vertical" size={12} className="task-modal-fields">
             <Typography.Text type="secondary">
-              {`${preview.totalChars} / ${preview.budgetChars} chars · ${preview.parts.length} sections included · ${preview.omittedCount} omitted`}
+              {t('memory.previewStats', {
+                used: preview.totalChars,
+                budget: preview.budgetChars,
+                sections: preview.parts.length,
+                omitted: preview.omittedCount,
+              })}
             </Typography.Text>
             {preview.content.length === 0 ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="The context is empty" />
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('memory.previewEmpty')} />
             ) : (
               <Typography.Paragraph>
                 <pre className="context-preview-content">{preview.content}</pre>

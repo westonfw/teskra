@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { AgentRun, PublicAppError, Workspace, Worktree } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../components/app-error-alert'
+import { useTranslation } from '../i18n'
 import { useNavigationStore } from '../stores/navigation-store'
 import { useTerminalStore } from '../stores/terminal-store'
 
@@ -48,6 +49,7 @@ export function RunWorktreePanel({ run, workspace }: RunWorktreePanelProps) {
   const [discarding, setDiscarding] = useState(false)
   const [openingTerminal, setOpeningTerminal] = useState(false)
   const { modal } = AntApp.useApp()
+  const { t } = useTranslation()
   const createTerminal = useTerminalStore((state) => state.createTerminal)
   const navigate = useNavigationStore((state) => state.navigate)
 
@@ -105,9 +107,9 @@ export function RunWorktreePanel({ run, workspace }: RunWorktreePanelProps) {
     if (worktree === undefined || worktree === null) return
     const target = worktree
     modal.confirm({
-      title: 'Discard this worktree?',
-      content: `This permanently deletes the worktree directory and its uncommitted changes. The branch "${target.branch}" and its commits are kept.`,
-      okText: 'Discard',
+      title: t('worktree.discardConfirm.title'),
+      content: t('worktree.discardConfirm.body', { branch: target.branch }),
+      okText: t('worktree.discard'),
       okButtonProps: { danger: true },
       onOk: async () => {
         setDiscarding(true)
@@ -129,13 +131,14 @@ export function RunWorktreePanel({ run, workspace }: RunWorktreePanelProps) {
     })
   }
 
-  const handleOpenTerminal = async (): Promise<void> => {    if (worktree === undefined || worktree === null) return
+  const handleOpenTerminal = async (): Promise<void> => {
+    if (worktree === undefined || worktree === null) return
     setOpeningTerminal(true)
     try {
       const session = await createTerminal({
         workspaceId: workspace.id,
         shell: workspace.runtime.kind === 'windows' ? 'powershell' : 'bash',
-        title: `resolve: ${worktree.branch}`,
+        title: t('worktree.terminalTitle', { branch: worktree.branch }),
       })
       if (session === undefined) return
       await window.teskra.terminal.write({
@@ -149,12 +152,12 @@ export function RunWorktreePanel({ run, workspace }: RunWorktreePanelProps) {
   }
 
   return (
-    <Card className="task-detail-card" size="small" title="Worktree">
+    <Card className="task-detail-card" size="small" title={t('worktree.title')}>
       {error !== undefined && (
         <AppErrorAlert className="page-alert" error={error} onClose={() => setError(undefined)} />
       )}
       {worktree === null ? (
-        <Typography.Text type="secondary">The linked worktree record is gone.</Typography.Text>
+        <Typography.Text type="secondary">{t('worktree.gone')}</Typography.Text>
       ) : (
         worktree !== undefined && (
           <Space direction="vertical" size={12} className="run-worktree-panel">
@@ -169,13 +172,10 @@ export function RunWorktreePanel({ run, workspace }: RunWorktreePanelProps) {
                 type="error"
                 showIcon
                 closable
-                message="Merge conflict — the worktree, branch and diff were preserved"
+                message={t('worktree.conflict.message')}
                 description={
                   <div>
-                    <div>
-                      Resolve the conflict inside the worktree (edit, then commit), then retry the
-                      merge. Nothing was deleted or aborted.
-                    </div>
+                    <div>{t('worktree.conflict.description')}</div>
                     {conflicts.length > 0 && (
                       <ul className="run-worktree-conflict-list">
                         {conflicts.map((path) => (
@@ -194,7 +194,10 @@ export function RunWorktreePanel({ run, workspace }: RunWorktreePanelProps) {
               <Alert
                 type="success"
                 showIcon
-                message={`Merged into ${worktree.baseBranch}; the branch "${worktree.branch}" is kept.`}
+                message={t('worktree.merged', {
+                  base: worktree.baseBranch,
+                  branch: worktree.branch,
+                })}
               />
             )}
 
@@ -209,13 +212,13 @@ export function RunWorktreePanel({ run, workspace }: RunWorktreePanelProps) {
                   onClick={() => void handleMerge()}
                 >
                   {worktree.state === 'conflict'
-                    ? 'Retry merge'
-                    : `Merge into ${worktree.baseBranch}`}
+                    ? t('worktree.retryMerge')
+                    : t('worktree.mergeInto', { base: worktree.baseBranch })}
                 </Button>
               )}
               {error?.code === 'MERGE_BLOCKED' && (
                 <Button danger loading={merging} onClick={() => void handleMerge(true)}>
-                  Merge anyway (force)
+                  {t('worktree.mergeForce')}
                 </Button>
               )}
               {worktree.state === 'conflict' && (
@@ -224,7 +227,7 @@ export function RunWorktreePanel({ run, workspace }: RunWorktreePanelProps) {
                   loading={openingTerminal}
                   onClick={() => void handleOpenTerminal()}
                 >
-                  Open terminal in worktree
+                  {t('worktree.openTerminal')}
                 </Button>
               )}
               {worktree.state !== 'merged' && worktree.state !== 'discarded' && (
@@ -234,7 +237,7 @@ export function RunWorktreePanel({ run, workspace }: RunWorktreePanelProps) {
                   loading={discarding}
                   onClick={handleDiscard}
                 >
-                  Discard
+                  {t('worktree.discard')}
                 </Button>
               )}
             </Space>

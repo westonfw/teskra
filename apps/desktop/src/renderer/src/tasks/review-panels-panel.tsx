@@ -10,6 +10,7 @@ import type {
 } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../components/app-error-alert'
+import { useTranslation } from '../i18n'
 import { sortFindingsBySeverity } from '../stores/review-store'
 import { useReviewPanelStore } from '../stores/review-panel-store'
 
@@ -39,19 +40,25 @@ const memberVerdictColor: Record<ReviewVerdict, string> = {
 }
 
 function VerdictTag({ panel }: { readonly panel: ReviewPanel }) {
-  if (panel.status === 'running') return <Tag color="blue">running</Tag>
-  if (panel.status === 'failed') return <Tag>failed</Tag>
+  const { t } = useTranslation()
+  if (panel.status === 'running') return <Tag color="blue">{t('reviewPanel.statusRunning')}</Tag>
+  if (panel.status === 'failed') return <Tag>{t('reviewPanel.statusFailed')}</Tag>
   const verdict = panel.aggregate?.verdict
-  if (verdict === undefined) return <Tag color="gold">no verdict</Tag>
-  return <Tag color={verdictColor[verdict]}>{verdict === 'pass' ? 'PASS' : 'BLOCK'}</Tag>
+  if (verdict === undefined) return <Tag color="gold">{t('reviewPanel.noVerdict')}</Tag>
+  return (
+    <Tag color={verdictColor[verdict]}>
+      {verdict === 'pass' ? t('reviewPanel.verdictPass') : t('reviewPanel.verdictBlock')}
+    </Tag>
+  )
 }
 
 function DisagreementItem({ disagreement }: { readonly disagreement: ReviewDisagreement }) {
+  const { t } = useTranslation()
   return (
     <List.Item>
       <Space direction="vertical" size={4}>
         <Space wrap>
-          <Tag color="orange">disagreement</Tag>
+          <Tag color="orange">{t('reviewPanel.disagreementTag')}</Tag>
           <Typography.Text strong>{disagreement.kind}</Typography.Text>
           <Typography.Text code>{disagreement.subject}</Typography.Text>
         </Space>
@@ -78,19 +85,20 @@ export function ReviewPanelsPanel({ taskId }: ReviewPanelsPanelProps) {
   const startSynchronization = useReviewPanelStore((state) => state.startSynchronization)
   const selectPanel = useReviewPanelStore((state) => state.selectPanel)
   const clearError = useReviewPanelStore((state) => state.clearError)
+  const { t } = useTranslation()
 
   useEffect(() => startSynchronization(taskId), [startSynchronization, taskId])
 
   const aggregate = detail?.panel.aggregate
 
   return (
-    <Card className="task-detail-card" title={`Review panels · ${panels.length}`}>
+    <Card className="task-detail-card" title={t('reviewPanel.title', { count: panels.length })}>
       {error !== undefined && (
         <AppErrorAlert className="page-alert" error={error} onClose={clearError} />
       )}
       <Spin spinning={loading}>
         {panels.length === 0 ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No review panels yet" />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('reviewPanel.empty')} />
         ) : (
           <List
             size="small"
@@ -100,11 +108,9 @@ export function ReviewPanelsPanel({ taskId }: ReviewPanelsPanelProps) {
                 actions={[
                   <a
                     key="toggle"
-                    onClick={() =>
-                      void selectPanel(panel.id === selectedId ? undefined : panel.id)
-                    }
+                    onClick={() => void selectPanel(panel.id === selectedId ? undefined : panel.id)}
                   >
-                    {panel.id === selectedId ? 'Hide' : 'View'}
+                    {panel.id === selectedId ? t('reviewPanel.hide') : t('reviewPanel.view')}
                   </a>,
                 ]}
               >
@@ -126,7 +132,11 @@ export function ReviewPanelsPanel({ taskId }: ReviewPanelsPanelProps) {
               <Alert
                 type={aggregate.verdict === 'pass' ? 'success' : 'error'}
                 showIcon
-                message={aggregate.verdict === 'pass' ? 'PASS' : 'BLOCK'}
+                message={
+                  aggregate.verdict === 'pass'
+                    ? t('reviewPanel.verdictPass')
+                    : t('reviewPanel.verdictBlock')
+                }
                 description={
                   <ul className="review-panel-reasons">
                     {(aggregate.reasons ?? []).map((reason) => (
@@ -140,7 +150,7 @@ export function ReviewPanelsPanel({ taskId }: ReviewPanelsPanelProps) {
             {aggregate !== undefined && aggregate.reviewers.length > 0 && (
               <List
                 size="small"
-                header={<Typography.Text strong>Reviewers</Typography.Text>}
+                header={<Typography.Text strong>{t('reviewPanel.reviewers')}</Typography.Text>}
                 dataSource={aggregate.reviewers}
                 renderItem={(reviewer) => (
                   <List.Item>
@@ -149,7 +159,12 @@ export function ReviewPanelsPanel({ taskId }: ReviewPanelsPanelProps) {
                       <Tag color={memberVerdictColor[reviewer.verdict]}>{reviewer.verdict}</Tag>
                       <Tag>{reviewer.isolation}</Tag>
                       <Typography.Text type="secondary">
-                        {`${String(reviewer.findings.critical)} critical · ${String(reviewer.findings.high)} high · ${String(reviewer.findings.medium)} medium · ${String(reviewer.findings.low)} low`}
+                        {t('reviewPanel.findingsSummary', {
+                          critical: reviewer.findings.critical,
+                          high: reviewer.findings.high,
+                          medium: reviewer.findings.medium,
+                          low: reviewer.findings.low,
+                        })}
                       </Typography.Text>
                     </Space>
                   </List.Item>
@@ -160,7 +175,7 @@ export function ReviewPanelsPanel({ taskId }: ReviewPanelsPanelProps) {
             {aggregate !== undefined && aggregate.disagreements.length > 0 && (
               <List
                 size="small"
-                header={<Typography.Text strong>Disagreements</Typography.Text>}
+                header={<Typography.Text strong>{t('reviewPanel.disagreements')}</Typography.Text>}
                 dataSource={aggregate.disagreements}
                 renderItem={(disagreement) => <DisagreementItem disagreement={disagreement} />}
               />
@@ -169,7 +184,11 @@ export function ReviewPanelsPanel({ taskId }: ReviewPanelsPanelProps) {
             {aggregate !== undefined && aggregate.findings.length > 0 && (
               <List
                 size="small"
-                header={<Typography.Text strong>{`Findings · ${aggregate.findings.length}`}</Typography.Text>}
+                header={
+                  <Typography.Text strong>
+                    {t('reviewPanel.findingsTitle', { count: aggregate.findings.length })}
+                  </Typography.Text>
+                }
                 dataSource={sortFindingsBySeverity(aggregate.findings)}
                 renderItem={(finding) => (
                   <List.Item>

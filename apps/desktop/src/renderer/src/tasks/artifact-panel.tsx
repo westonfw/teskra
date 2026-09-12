@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import type { Artifact, ArtifactContent } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../components/app-error-alert'
+import { useTranslation } from '../i18n'
 import { useArtifactStore } from '../stores/artifact-store'
 
 /**
@@ -31,6 +32,7 @@ export function ArtifactPanel({ taskId, runIds }: ArtifactPanelProps) {
   const loadContent = useArtifactStore((state) => state.loadContent)
   const scanRuns = useArtifactStore((state) => state.scanRuns)
   const clearError = useArtifactStore((state) => state.clearError)
+  const { t } = useTranslation()
 
   const [opened, setOpened] = useState<ArtifactContent>()
   const [contentLoading, setContentLoading] = useState(false)
@@ -47,7 +49,7 @@ export function ArtifactPanel({ taskId, runIds }: ArtifactPanelProps) {
   return (
     <Card
       className="task-detail-card"
-      title={`Artifacts · ${artifacts.length}`}
+      title={t('artifacts.title', { count: artifacts.length })}
       extra={
         runIds.length > 0 && (
           <Button
@@ -56,7 +58,7 @@ export function ArtifactPanel({ taskId, runIds }: ArtifactPanelProps) {
             loading={scanning}
             onClick={() => void scanRuns(runIds)}
           >
-            Scan run artifacts
+            {t('artifacts.scan')}
           </Button>
         )
       }
@@ -66,7 +68,7 @@ export function ArtifactPanel({ taskId, runIds }: ArtifactPanelProps) {
       )}
       <Spin spinning={loading || contentLoading}>
         {artifacts.length === 0 ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No artifacts yet" />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('artifacts.empty')} />
         ) : (
           <List
             size="small"
@@ -75,7 +77,7 @@ export function ArtifactPanel({ taskId, runIds }: ArtifactPanelProps) {
               <List.Item
                 actions={[
                   <Button key="view" type="link" onClick={() => void handleOpen(artifact)}>
-                    View
+                    {t('artifacts.view')}
                   </Button>,
                 ]}
               >
@@ -95,7 +97,7 @@ export function ArtifactPanel({ taskId, runIds }: ArtifactPanelProps) {
       </Spin>
 
       <Modal
-        title={opened?.artifact.name ?? 'Artifact'}
+        title={opened?.artifact.name ?? t('artifacts.fallbackTitle')}
         width={720}
         open={opened !== undefined}
         footer={null}
@@ -106,21 +108,17 @@ export function ArtifactPanel({ taskId, runIds }: ArtifactPanelProps) {
             <Space wrap>
               <Tag>{opened.artifact.type}</Tag>
               {opened.artifact.runId !== undefined && (
-                <Typography.Text type="secondary">run {opened.artifact.runId}</Typography.Text>
+                <Typography.Text type="secondary">
+                  {t('artifacts.runId', { id: opened.artifact.runId })}
+                </Typography.Text>
               )}
               {opened.artifact.filePath !== undefined && (
                 <Typography.Text code>{opened.artifact.filePath}</Typography.Text>
               )}
             </Space>
-            {opened.truncated && (
-              <Alert
-                type="info"
-                showIcon
-                message="This file is too large; only the beginning is shown."
-              />
-            )}
+            {opened.truncated && <Alert type="info" showIcon message={t('artifacts.truncated')} />}
             {opened.content.length === 0 ? (
-              <Typography.Text type="secondary">This artifact has no content.</Typography.Text>
+              <Typography.Text type="secondary">{t('artifacts.noContent')}</Typography.Text>
             ) : (
               <pre className="artifact-content">{opened.content}</pre>
             )}

@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import type { ReviewSeverity } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../components/app-error-alert'
+import { useTranslation } from '../i18n'
 import { sortFindingsBySeverity, useReviewStore } from '../stores/review-store'
 
 /**
@@ -29,17 +30,18 @@ export function FindingsPanel({ runId }: FindingsPanelProps) {
   const error = useReviewStore((state) => state.error)
   const startSynchronization = useReviewStore((state) => state.startSynchronization)
   const clearError = useReviewStore((state) => state.clearError)
+  const { t } = useTranslation()
 
   useEffect(() => startSynchronization(runId), [startSynchronization, runId])
 
   return (
-    <Card className="task-detail-card" title={`Review findings · ${findings.length}`}>
+    <Card className="task-detail-card" title={t('findings.title', { count: findings.length })}>
       {error !== undefined && (
         <AppErrorAlert className="page-alert" error={error} onClose={clearError} />
       )}
       <Spin spinning={loading}>
         {findings.length === 0 ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No review findings" />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('findings.empty')} />
         ) : (
           <List
             size="small"
@@ -57,7 +59,7 @@ export function FindingsPanel({ runId }: FindingsPanelProps) {
                       </Typography.Text>
                     )}
                     {finding.criterionId !== undefined && (
-                      <Tag>{`criterion ${finding.criterionId}`}</Tag>
+                      <Tag>{t('findings.criterion', { id: finding.criterionId })}</Tag>
                     )}
                   </Space>
                   {finding.description !== undefined && (

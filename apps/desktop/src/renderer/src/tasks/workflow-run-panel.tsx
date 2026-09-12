@@ -10,6 +10,7 @@ import type {
 } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../components/app-error-alert'
+import { useTranslation } from '../i18n'
 import { latestScoresByCriterion } from '../stores/review-store'
 import { useWorkflowRunStore } from '../stores/workflow-run-store'
 
@@ -70,6 +71,7 @@ export function WorkflowRunPanel({ workspaceId, taskId }: WorkflowRunPanelProps)
   const selectRun = useWorkflowRunStore((state) => state.selectRun)
   const startFullWorkflow = useWorkflowRunStore((state) => state.startFullWorkflow)
   const clearError = useWorkflowRunStore((state) => state.clearError)
+  const { t } = useTranslation()
 
   useEffect(() => startSynchronization(taskId), [startSynchronization, taskId])
 
@@ -79,7 +81,7 @@ export function WorkflowRunPanel({ workspaceId, taskId }: WorkflowRunPanelProps)
   return (
     <Card
       className="task-detail-card"
-      title={`Full workflow · ${runs.length}`}
+      title={t('workflow.title', { count: runs.length })}
       extra={
         <Button
           type="primary"
@@ -87,7 +89,7 @@ export function WorkflowRunPanel({ workspaceId, taskId }: WorkflowRunPanelProps)
           loading={starting}
           onClick={() => void startFullWorkflow({ workspaceId, taskId })}
         >
-          Start full workflow
+          {t('workflow.start')}
         </Button>
       }
     >
@@ -96,10 +98,7 @@ export function WorkflowRunPanel({ workspaceId, taskId }: WorkflowRunPanelProps)
       )}
       <Spin spinning={loading}>
         {runs.length === 0 ? (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="No workflow runs yet — start the default full workflow"
-          />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('workflow.empty')} />
         ) : (
           <List
             size="small"
@@ -111,14 +110,17 @@ export function WorkflowRunPanel({ workspaceId, taskId }: WorkflowRunPanelProps)
                     key="toggle"
                     onClick={() => void selectRun(run.id === selectedId ? undefined : run.id)}
                   >
-                    {run.id === selectedId ? 'Hide' : 'View'}
+                    {run.id === selectedId ? t('workflow.hide') : t('workflow.view')}
                   </a>,
                 ]}
               >
                 <Space wrap>
                   <Tag color={runStatusColor[run.status]}>{run.status.replaceAll('_', ' ')}</Tag>
                   <Typography.Text type="secondary">
-                    {`round ${String(run.currentIteration + 1)}/${String(run.totalIterations)}`}
+                    {t('workflow.round', {
+                      current: run.currentIteration + 1,
+                      total: run.totalIterations,
+                    })}
                   </Typography.Text>
                   <Typography.Text type="secondary">
                     {new Date(run.createdAt).toLocaleString()}
@@ -135,25 +137,25 @@ export function WorkflowRunPanel({ workspaceId, taskId }: WorkflowRunPanelProps)
               <Alert
                 type="warning"
                 showIcon
-                message="Iteration limit reached — user review required"
-                description="The safety caps stopped the loop (plan §124). Review the results, adjust the acceptance criteria if needed, then resume the run."
+                message={t('workflow.limitReached.message')}
+                description={t('workflow.limitReached.description')}
               />
             )}
             {selected.run.status === 'completed' && (
               <Alert
                 type="success"
                 showIcon
-                message="Passed — awaiting user review"
-                description="Review the diff and the criteria result below, then merge or adjust the task."
+                message={t('workflow.passed.message')}
+                description={t('workflow.passed.description')}
               />
             )}
             {selected.run.status === 'failed' && (
-              <Alert type="error" showIcon message="The workflow run failed." />
+              <Alert type="error" showIcon message={t('workflow.failed')} />
             )}
 
             <List
               size="small"
-              header={<Typography.Text strong>Steps</Typography.Text>}
+              header={<Typography.Text strong>{t('workflow.steps')}</Typography.Text>}
               dataSource={[...selected.steps].sort(
                 (a, b) => a.iteration - b.iteration || a.createdAt.localeCompare(b.createdAt),
               )}
@@ -164,7 +166,7 @@ export function WorkflowRunPanel({ workspaceId, taskId }: WorkflowRunPanelProps)
                     <Tag>{step.nodeType}</Tag>
                     <Tag color={stepStatusColor[step.status]}>{step.status}</Tag>
                     <Typography.Text type="secondary">
-                      {`round ${String(step.iteration + 1)}`}
+                      {t('workflow.roundSingle', { n: step.iteration + 1 })}
                     </Typography.Text>
                   </Space>
                 </List.Item>
@@ -175,7 +177,10 @@ export function WorkflowRunPanel({ workspaceId, taskId }: WorkflowRunPanelProps)
               <>
                 {summary.worktree !== null && (
                   <Typography.Text type="secondary">
-                    {`Worktree ${summary.worktree.branch} (base ${summary.worktree.baseBranch})`}
+                    {t('workflow.worktreeLine', {
+                      branch: summary.worktree.branch,
+                      base: summary.worktree.baseBranch,
+                    })}
                   </Typography.Text>
                 )}
 
@@ -200,7 +205,7 @@ export function WorkflowRunPanel({ workspaceId, taskId }: WorkflowRunPanelProps)
                 {summary.criteriaOutcome !== null && (
                   <Space direction="vertical" size={8}>
                     <Space wrap>
-                      <Typography.Text strong>Criteria result</Typography.Text>
+                      <Typography.Text strong>{t('workflow.criteriaResult')}</Typography.Text>
                       <Tag color={outcomeColor[summary.criteriaOutcome]}>
                         {summary.criteriaOutcome}
                       </Tag>
@@ -212,7 +217,7 @@ export function WorkflowRunPanel({ workspaceId, taskId }: WorkflowRunPanelProps)
                         <List.Item>
                           <Space wrap>
                             <Typography.Text>{criterion.description}</Typography.Text>
-                            {criterion.required && <Tag color="red">required</Tag>}
+                            {criterion.required && <Tag color="red">{t('workflow.required')}</Tag>}
                             {scores.has(criterion.id) && (
                               <Tag
                                 color={scoreColor[scores.get(criterion.id)?.result ?? 'unknown']}

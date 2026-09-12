@@ -27,6 +27,7 @@ import {
 import { computeCriteriaReviewOutcome } from '@teskra/shared'
 
 import { AppErrorAlert } from '../components/app-error-alert'
+import { useTranslation } from '../i18n'
 import {
   editableCriteriaDetail,
   isCriteriaSetEditable,
@@ -64,8 +65,7 @@ const outcomeColor: Record<CriteriaReviewOutcome, string> = {
 }
 
 type EditorState =
-  | { readonly mode: 'add' }
-  | { readonly mode: 'edit'; readonly criterion: AcceptanceCriterion }
+  { readonly mode: 'add' } | { readonly mode: 'edit'; readonly criterion: AcceptanceCriterion }
 
 interface CriteriaPanelProps {
   readonly taskId: string
@@ -85,6 +85,7 @@ export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
   const clearError = useCriteriaStore((state) => state.clearError)
   const scores = useReviewStore((state) => state.scores)
   const startScoreSynchronization = useReviewStore((state) => state.startScoreSynchronization)
+  const { t } = useTranslation()
 
   const [selectedSetId, setSelectedSetId] = useState<string>()
   const [editor, setEditor] = useState<EditorState>()
@@ -138,10 +139,9 @@ export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
 
   const handleConfirm = (setId: string): void => {
     Modal.confirm({
-      title: 'Confirm this criteria version?',
-      content:
-        'A confirmed version is immutable. Any further change will require creating a new version, and the previously confirmed version will be superseded.',
-      okText: 'Confirm',
+      title: t('criteria.confirmVersion.title'),
+      content: t('criteria.confirmVersion.body'),
+      okText: t('criteria.confirmVersion.ok'),
       onOk: () => confirmSet(setId),
     })
   }
@@ -149,7 +149,7 @@ export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
   return (
     <Card
       className="task-detail-card"
-      title="Acceptance Criteria"
+      title={t('criteria.title')}
       extra={
         details.length > 1 && (
           <Select
@@ -169,14 +169,14 @@ export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
       )}
       <Spin spinning={loading}>
         {selected === undefined ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No acceptance criteria yet">
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('criteria.empty')}>
             <Button
               type="primary"
               icon={<PlusOutlined />}
               loading={saving}
               onClick={() => void createDraftSet(taskId)}
             >
-              Create criteria
+              {t('criteria.create')}
             </Button>
           </Empty>
         ) : (
@@ -185,11 +185,15 @@ export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
               <Typography.Text strong>v{selected.set.version}</Typography.Text>
               <Tag color={statusColor[selected.set.status]}>{selected.set.status}</Tag>
               {overall !== undefined && (
-                <Tag color={outcomeColor[overall]}>{`review: ${overall}`}</Tag>
+                <Tag color={outcomeColor[overall]}>
+                  {t('criteria.reviewOutcome', { outcome: overall })}
+                </Tag>
               )}
               {selected.set.confirmedAt !== undefined && (
                 <Typography.Text type="secondary">
-                  confirmed {new Date(selected.set.confirmedAt).toLocaleString()}
+                  {t('criteria.confirmedAt', {
+                    time: new Date(selected.set.confirmedAt).toLocaleString(),
+                  })}
                 </Typography.Text>
               )}
               {editable ? (
@@ -200,7 +204,7 @@ export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
                     disabled={saving}
                     onClick={() => openEditor({ mode: 'add' })}
                   >
-                    Add criterion
+                    {t('criteria.add')}
                   </Button>
                   <Button
                     size="small"
@@ -209,7 +213,7 @@ export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
                     disabled={saving || selected.criteria.length === 0}
                     onClick={() => handleConfirm(selected.set.id)}
                   >
-                    Confirm version
+                    {t('criteria.confirmVersion.button')}
                   </Button>
                 </>
               ) : (
@@ -220,20 +224,20 @@ export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
                     loading={saving}
                     onClick={() => void createDraftSet(taskId, selected.set.id)}
                   >
-                    New version to edit
+                    {t('criteria.newVersion')}
                   </Button>
                 )
               )}
             </Space>
             {!editable && (
               <Typography.Paragraph type="secondary" className="criteria-readonly-note">
-                This version is immutable and shown read-only.
+                {t('criteria.readonlyNote')}
               </Typography.Paragraph>
             )}
             <List
               size="small"
               dataSource={selected.criteria}
-              locale={{ emptyText: 'No criteria in this version' }}
+              locale={{ emptyText: t('criteria.emptyVersion') }}
               renderItem={(criterion) => (
                 <List.Item
                   actions={
@@ -249,7 +253,7 @@ export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
                           />,
                           <Popconfirm
                             key="remove"
-                            title="Remove this criterion?"
+                            title={t('criteria.removeConfirm')}
                             onConfirm={() => void removeCriterion(criterion.id)}
                           >
                             <Button
@@ -269,7 +273,7 @@ export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
                       #{criterion.ordinal} {criterion.description}
                     </Typography.Text>
                     {criterion.category !== undefined && <Tag>{criterion.category}</Tag>}
-                    {criterion.required && <Tag color="red">required</Tag>}
+                    {criterion.required && <Tag color="red">{t('criteria.required')}</Tag>}
                     {latestScores.has(criterion.id) && (
                       <Tag color={scoreColor[latestScores.get(criterion.id)?.result ?? 'unknown']}>
                         {latestScores.get(criterion.id)?.result}
@@ -284,7 +288,7 @@ export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
       </Spin>
 
       <Modal
-        title={editor?.mode === 'edit' ? 'Edit criterion' : 'Add criterion'}
+        title={editor?.mode === 'edit' ? t('criteria.edit') : t('criteria.add')}
         open={editor !== undefined}
         confirmLoading={saving}
         okButtonProps={{ disabled: description.trim().length === 0 }}
@@ -293,27 +297,27 @@ export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
       >
         <Space direction="vertical" size={14} className="task-modal-fields">
           <label>
-            <Typography.Text type="secondary">Description</Typography.Text>
+            <Typography.Text type="secondary">{t('criteria.fieldDescription')}</Typography.Text>
             <Input.TextArea
               value={description}
               autoSize={{ minRows: 2, maxRows: 6 }}
               onChange={(event) => setDescription(event.target.value)}
-              placeholder="What must be true for this Task to be accepted?"
+              placeholder={t('criteria.descriptionPlaceholder')}
               autoFocus
             />
           </label>
           <label>
-            <Typography.Text type="secondary">Category</Typography.Text>
+            <Typography.Text type="secondary">{t('criteria.fieldCategory')}</Typography.Text>
             <Select<CriterionCategory>
               value={category}
               allowClear
-              placeholder="Optional"
+              placeholder={t('criteria.categoryPlaceholder')}
               options={CRITERION_CATEGORIES.map((value) => ({ value, label: value }))}
               onChange={(value) => setCategory(value)}
             />
           </label>
           <label>
-            <Typography.Text type="secondary">Required</Typography.Text>
+            <Typography.Text type="secondary">{t('criteria.fieldRequired')}</Typography.Text>
             <div>
               <Switch checked={required} onChange={setRequired} />
             </div>
