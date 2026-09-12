@@ -818,6 +818,47 @@ describe('AgentManager (TASK-028)', () => {
     await vi.waitFor(() => expect(context.adapters.codex.start).toHaveBeenCalled())
   })
 
+  it('settles an adapterless run exactly once under concurrent cancels', async () => {
+    const releases: Array<(value: IpcResult<string | null>) => void> = []
+    const identity = vi.fn(
+      () =>
+        new Promise<IpcResult<string | null>>((resolve) => {
+          releases.push(resolve)
+        }),
+    )
+    const terminate = vi.fn(async (): Promise<IpcResult<void>> => ({ ok: true, data: undefined }))
+    const context = setup(undefined, false, undefined, { identity, terminate })
+    const runDir = context.paths.runDir('run-1')
+    if (!runDir.ok) throw new Error(runDir.error.message)
+    const created = context.runs.create({
+      id: 'run-1',
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      executionMode: 'attended',
+      runDir: runDir.data,
+      status: 'running',
+    })
+    if (!created.ok) throw new Error(created.error.message)
+    const withPid = context.runs.update('run-1', { pid: 4242, pidIdentity: 'start-token-A' })
+    if (!withPid.ok) throw new Error(withPid.error.message)
+
+    const cancelled = vi.fn()
+    context.events.subscribe('agent.cancelled', cancelled)
+
+    // Both cancels pass the terminal guard and park on the identity await.
+    const first = context.manager.cancel('run-1')
+    const second = context.manager.cancel('run-1')
+    await vi.waitFor(() => expect(releases).toHaveLength(2))
+    for (const release of releases) release({ ok: true, data: 'start-token-A' })
+
+    const [firstResult, secondResult] = await Promise.all([first, second])
+    expect(firstResult).toMatchObject({ ok: true, data: { status: 'cancelled' } })
+    expect(secondResult).toMatchObject({ ok: true, data: { status: 'cancelled' } })
+    // …but the settle — event, handoff collection, log close — ran only once.
+    expect(cancelled).toHaveBeenCalledTimes(1)
+    expect(cancelled).toHaveBeenCalledWith({ runId: 'run-1' })
+  })
+
   it('cancel stops only the process — the worktree, branch and files are untouched (TASK-047)', async () => {
     const context = setup()
     const worktree = context.worktrees.create({

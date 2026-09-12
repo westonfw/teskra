@@ -1101,6 +1101,16 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
             }
           }
         }
+        // The awaits above yield the event loop for real on macOS/Windows
+        // (ps / PowerShell spawns, up to the 5s probe timeout): a second
+        // cancel() can slip in and park on the same awaits. Re-check the
+        // terminal guard so only one caller runs the settle below —
+        // otherwise the cancelled event, handoff collection, review ingest,
+        // and log close all happen twice.
+        const afterIdentity = deps.runs.getById(runId)
+        if (!afterIdentity.ok) return afterIdentity
+        if (afterIdentity.data === null) return missing('Agent run', runId)
+        if (isTerminal(afterIdentity.data)) return { ok: true, data: afterIdentity.data }
         const finishedAt = now()
         appendEvent(runId, 'agent.cancelled', {})
         const updated = deps.runs.update(runId, { status: 'cancelled', finishedAt }, finishedAt)

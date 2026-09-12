@@ -587,3 +587,14 @@ CSP + sandbox 已经挡掉了大部分利用路径，但这些是零成本的纵
    run.pidIdentity 相符才 terminate，读不出/不匹配跳过（不乱杀）；终止成败都照常
    落 cancelled（兑现用户取消意图）。测试覆盖：令牌相符 → terminate 被调；读取
    失败/令牌不匹配 → 不 terminate 但仍落 cancelled。
+
+## 13. 第八轮 Review 修复状态（2026-09-12）
+
+1. **落终态前的 await 打破分支原子性**（agent-manager）：adapterless cancel 分支
+   从 isTerminal 检查到写 cancelled 原本全程同步，两次 cancel 被事件循环天然串行
+   化；中间插入 `await identity()`（macOS/Windows spawn ps/PowerShell，上限 5s）
+   后，第二次 cancel 同样过守卫、同样 park，两边都会走完整 settle——agent.cancelled
+   durable 事件、handoff collect + review ingest（无幂等保护）、closeRunLogs、
+   emit 全部双份。修法与 launch 一致：await 之后重做一次终态检查（afterIdentity
+   守卫），只有一方进入 settle。测试：两个并发 cancel 都 park 在 identity 上，
+   释放后断言两者均返回 cancelled 但 agent.cancelled 只 emit 一次。
