@@ -107,7 +107,7 @@ describe('TaskRepository', () => {
       .run(id, taskId, criteriaSetId ?? null, `/runs/${id}`, NOW, NOW)
   }
 
-  it('keeps runs and their anchored criteria sets as orphans when deleting the task (ADR-0007)', () => {
+  it('keeps runs and their anchored criteria sets as orphans when deleting the task (ADR-0008)', () => {
     setup()
     repo.create({ id: 't-1', workspaceId: 'ws-1', title: 'A' })
     insertCriteriaSet('cs-1', 't-1')

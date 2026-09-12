@@ -44,7 +44,7 @@ export const MIGRATIONS: readonly Migration[] = [
     version: 10,
     name: '010_criteria_set_task_nullable',
     sql: criteriaSetTaskNullableSql,
-    // Table rebuild (ADR-0007), same mechanics as 007: FK must be off so
+    // Table rebuild (ADR-0008), same mechanics as 007: FK must be off so
     // DROP TABLE does not implicit-DELETE the copied rows' dependents.
     foreignKeysOff: true,
   },

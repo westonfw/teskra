@@ -1,4 +1,4 @@
--- 010_criteria_set_task_nullable — ADR-0007
+-- 010_criteria_set_task_nullable — ADR-0008
 -- plan §139.1 的自相矛盾：acceptance_criteria_sets.task_id 是 CASCADE，但
 -- agent_runs / workflow_runs 的 criteria_set_id 是 RESTRICT 且这两张表在
 -- 删 Task 时保留审计（task_id SET NULL）。只要 Task 下有任何 Run 锚定了

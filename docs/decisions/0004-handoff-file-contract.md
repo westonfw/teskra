@@ -31,6 +31,24 @@ TESKRA_ARTIFACT_DIR=<worktree>/.teskra/artifacts/<runId>/
 
 Agent 完成后写入 `TESKRA_HANDOFF_PATH`，Schema 见 plan §125。
 
+> **修订（2026-09-12）：实际落地位置为 Run 目录，不在 worktree 内。**
+> 本节原定的 `<worktree>/.teskra/…` 只是契约草案里的示例路径。实现（TASK-051 /
+> TASK-078）把它们收进了 ADR-0003 的数据根，由 `paths.runFiles(runId)` 统一解析：
+>
+> ```text
+> TESKRA_HANDOFF_PATH=<dataRoot>/runs/<runId>/handoff.json
+> TESKRA_ARTIFACT_DIR=<dataRoot>/runs/<runId>/artifacts/
+> ```
+>
+> 这样做的好处是 Agent 产物天然不落在仓库里，因此**不会污染 diff**，
+> 也不依赖下面「`.gitignore`」一节的排除规则生效。
+> **契约本身（走文件、不解析 stdout、Zod 校验、失败不阻塞 Run）完全不变**，
+> 变的只是路径解析归属：由「worktree 相对路径」改为「paths 模块」。
+>
+> 注意：`<dataRoot>` 当前取宿主侧的 `~/.teskra`，而 worktree 取
+> `WorkspaceRuntime.resolveDataRoot()`。两者在 Windows + WSL2 下并不等价，
+> 相关缺陷见 `docs/code-review-2026-09-12.md` P0-1。
+
 ### Teskra 侧处理
 
 ```text
@@ -59,6 +77,11 @@ stdout 只用于两件事：
 必须写入 `.gitignore`，否则会污染 Agent 的 diff。
 WorktreeManager 在创建 worktree 后负责确保这一点
 （写入 `.git/info/exclude`，而不是修改用户的 `.gitignore`）。
+
+> **修订（2026-09-12）：** 按上面的路径修订，这两个目录已不再产生在仓库内，
+> 所以这条排除规则现在是**纵深防御**而非必需项——它只兜住 Agent 自己
+> 在仓库里创建同名目录的情况。WorktreeManager 仍按原样写入
+> `.git/info/exclude`（`worktree-manager.ts` 的 `EXCLUDE_ENTRIES`），行为不变。
 
 ## 影响
 

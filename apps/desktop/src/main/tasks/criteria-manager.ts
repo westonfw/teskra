@@ -114,7 +114,7 @@ export function createCriteriaManager(deps: CriteriaManagerDeps): CriteriaManage
   }
 
   const touchTask = (taskId: string | undefined): void => {
-    // Orphaned sets (ADR-0007) have no task to notify.
+    // Orphaned sets (ADR-0008) have no task to notify.
     if (taskId === undefined) return
     deps.events.emit('task.updated', { taskId })
   }
@@ -218,7 +218,7 @@ export function createCriteriaManager(deps: CriteriaManagerDeps): CriteriaManage
           `criteria set id=${JSON.stringify(setId)} has no criteria`,
         )
       }
-      // Orphaned sets (ADR-0007) have no task siblings to supersede.
+      // Orphaned sets (ADR-0008) have no task siblings to supersede.
       if (set.data.taskId !== undefined) {
         const siblings = deps.criteria.listSetsByTask(set.data.taskId)
         if (!siblings.ok) return siblings

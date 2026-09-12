@@ -28,7 +28,7 @@ export type CriterionCategory = z.infer<typeof criterionCategorySchema>
 /** Fields mirror the §139.1 `acceptance_criteria_sets` table. */
 export const acceptanceCriteriaSetSchema = z.strictObject({
   id: z.string(),
-  /** Optional since ADR-0007: a set anchored by a run outlives its task. */
+  /** Optional since ADR-0008: a set anchored by a run outlives its task. */
   taskId: z.string().optional(),
   version: z.number().int().positive(),
   status: criteriaSetStatusSchema,

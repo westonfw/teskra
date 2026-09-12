@@ -1,8 +1,7 @@
-# ADR-0007: Persist Agent Run launch mode (`agent_runs.mode`)
+# ADR-0007：AgentRun 持久化启动模式（`agent_runs.mode`）
 
-## 状态
-
-已接受（2026-09-12）
+- 日期：2026-09-12
+- 状态：Accepted
 
 ## 背景
 

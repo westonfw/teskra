@@ -273,7 +273,7 @@ const SCHEMA: Record<string, TableSpec> = {
     source: '§139.1 lines 5333–5342',
     columns: [
       ['id', 'TEXT', 0, null, 1],
-      // ADR-0007: nullable like workflow_runs.task_id — 被 Run 锚定的版本随审计保留。
+      // ADR-0008: nullable like workflow_runs.task_id — 被 Run 锚定的版本随审计保留。
       ['task_id', 'TEXT', 0, null, 0],
       ['version', 'INTEGER', 1, null, 0],
       ['status', 'TEXT', 1, null, 0],

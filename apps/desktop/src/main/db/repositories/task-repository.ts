@@ -184,7 +184,7 @@ export function createTaskRepository(connection: Database.Database): TaskReposit
         return connection.transaction(() => {
           const deleted =
             connection.prepare('DELETE FROM tasks WHERE id = ?').run(id).changes > 0
-          // ADR-0007: deleting the task NULLs its criteria sets' task_id
+          // ADR-0008: deleting the task NULLs its criteria sets' task_id
           // (migration 010). Sets still anchored by audit rows (runs /
           // workflow runs / panels / findings) stay so the acceptance
           // contract a run was judged against remains traceable; everything

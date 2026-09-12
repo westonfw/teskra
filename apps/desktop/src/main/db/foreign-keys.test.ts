@@ -177,7 +177,7 @@ describe('ON DELETE CASCADE (§139.1)', () => {
     }
   })
 
-  it('deleting a task cascades to review panels and artifacts; criteria sets survive as orphans (ADR-0007)', () => {
+  it('deleting a task cascades to review panels and artifacts; criteria sets survive as orphans (ADR-0008)', () => {
     const db = migratedDb()
     insertWorkspace(db)
     insertTask(db)
@@ -188,7 +188,7 @@ describe('ON DELETE CASCADE (§139.1)', () => {
 
     db.prepare('DELETE FROM tasks WHERE id = ?').run('t1')
 
-    // ADR-0007: criteria sets get task_id SET NULL; sweeping unreferenced
+    // ADR-0008: criteria sets get task_id SET NULL; sweeping unreferenced
     // orphans is TaskRepository.delete's job, not the FK's.
     expect(count(db, 'acceptance_criteria_sets')).toBe(1)
     expect(db.prepare('SELECT task_id FROM acceptance_criteria_sets WHERE id = ?').get('cs1')).toEqual(

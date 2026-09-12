@@ -5332,7 +5332,7 @@ CREATE UNIQUE INDEX idx_agent_events_run_seq ON agent_events(run_id, seq);
 ```sql
 CREATE TABLE acceptance_criteria_sets (
   id           TEXT PRIMARY KEY,
-  task_id      TEXT REFERENCES tasks(id) ON DELETE SET NULL,  -- ADR-0007：被 Run 锚定的版本随审计保留为孤儿（原为 NOT NULL CASCADE）
+  task_id      TEXT REFERENCES tasks(id) ON DELETE SET NULL,  -- ADR-0008：被 Run 锚定的版本随审计保留为孤儿（原为 NOT NULL CASCADE）
   version      INTEGER NOT NULL,
   status       TEXT NOT NULL,           -- draft|confirmed|superseded
   confirmed_at TEXT,

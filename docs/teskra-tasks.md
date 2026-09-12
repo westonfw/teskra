@@ -15,6 +15,24 @@
 
 ---
 
+## ⚠️ 复选框状态说明（2026-09-12 追加）
+
+**本文件里的 `- [ ]` 验收复选框从未被维护过，不能当作进度信号读。**
+截至 2026-09-12，全文 484 个复选框**全部未勾选**，而 TASK-001~093 的功能主体
+其实都已实现并有测试覆盖（main 进程约 60 个模块、1100+ 单测用例）。
+
+因此：
+
+- **不要**因为某个 Task 未勾选就认为它没做——先去代码和测试里确认。
+- 判断某个 Task 是否落地，以**代码 + 测试 + git history** 为准，本文件只是
+  「TASK 编号与验收标准」的权威，不是「完成状态」的权威。
+- 已知未完成/有缺陷的部分，见 `docs/code-review-2026-09-12.md`（含 4 项阻塞级）。
+
+要么后续按 Task 逐条核验并回填勾选，要么把复选框改成纯列表——
+在此之前请按上面的方式读这份文件。
+
+---
+
 ## 文档权威性（2026-09-09 Review 后追加）
 
 ```text
@@ -34,6 +52,13 @@ docs/decisions/  = 已裁决的架构问题
 | [0003](decisions/0003-data-directory-and-paths.md) | 数据根目录统一 `~/.teskra/`，worktree 位置与命名 |
 | [0004](decisions/0004-handoff-file-contract.md) | Handoff 走文件契约，**不解析 stdout** |
 | [0005](decisions/0005-config-layers-and-runtime-facade.md) | 补齐 14 个缺失 Task（TASK-077~090） |
+| [0006](decisions/0006-workflow-run-task-optional.md) | WorkflowRun 独立于 Task（`workflow_runs.task_id` 可空） |
+| [0007](decisions/0007-persist-agent-run-mode.md) | AgentRun 持久化启动模式（`agent_runs.mode`），resume 复用原模式 |
+| [0008](decisions/0008-criteria-set-task-nullable.md) | Criteria Set 可脱离 Task（`acceptance_criteria_sets.task_id` 可空） |
+
+> ADR-0007 与 ADR-0008 曾一度都写作 0007，已按落地时间先后重排
+> （0007 对应 migration 009，0008 对应 migration 010）。旧文档里的「ADR-0007：
+> Criteria Set 可脱离 Task」指的是现在的 ADR-0008。
 
 > plan §88/§89/§90 曾有一套**撞号但含义不同**的 TASK-001~035 编号，已在 Review 中移除编号。
 > 若看到不在本文件中的 TASK 编号，以本文件为准。
@@ -50,12 +75,17 @@ CLI：teskra
 项目配置目录：.teskra/
 全局配置：~/.teskra/config.json
 工作区配置：<repo>/.teskra/config.json
-Workflow 定义：<repo>/.teskra/workflows/*.yaml
+Workflow 定义：<repo>/.teskra/workflows/*.{yaml,yml,json}
 数据库：~/.teskra/db/teskra.sqlite
 ```
 
 > 配置分两层（TASK-080），不是单个文件。
-> `config.json` 会被 Settings UI 回写故用 JSON；Workflow 定义纯手写故用 YAML。
+> `config.json` 会被 Settings UI 回写故用 JSON；Workflow 定义纯手写。
+>
+> **实现现状（2026-09-12）**：`definition-loader.ts` 接受三种扩展名，但只用
+> `JSON.parse` 解析——尚未引入 YAML 依赖，因此目前只有 JSON 语法能加载成功。
+> 内容为 JSON 的 `.yaml` 文件可用（JSON 是 YAML 1.2 子集），真正的 YAML block
+> 语法会被拒绝。引入 `yaml` 解析器是独立 Task。
 
 产品定位：
 

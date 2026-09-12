@@ -11,15 +11,25 @@ Teskra 是一个 **Windows-first、Task-first、Agent-first** 的桌面端多 Ag
 用于在同一个 GUI 内统一调度 Codex CLI、Claude Code 等 Coding Agent，并提供 Workspace、
 PTY Terminal、Git Worktree 隔离、Review、Crash Recovery 与 Workflow 编排能力。
 
-**当前仓库状态：工程骨架已建立（TASK-001 完成）。** npm workspaces monorepo
-（`apps/desktop` + `packages/contracts` + `packages/shared`），Electron + React +
-TypeScript + electron-vite 可构建可启动，ESLint / Prettier / Vitest 已配好。
-设计文档仍在 `docs/` 下：
+**当前仓库状态：TASK-001~093 的功能主体均已实现并有测试覆盖。** npm workspaces
+monorepo（`apps/desktop` + `packages/contracts` + `packages/shared`），Electron +
+React + TypeScript + electron-vite 可构建可打包；main 进程约 60 个模块（Agent /
+Process / Terminal / Workspace / Git / Workflow / Permission / Memory / Recovery /
+DB 等）齐备，Vitest 单测 1100+ 用例，Playwright E2E 已接入 CI（暂非门禁）。
+
+**不要把本仓库当成空骨架**：新增功能前先读对应模块的现有实现与测试，不要重建已有能力。
+
+已知的待修问题（含 4 项阻塞级）见 `docs/code-review-2026-09-12.md`，
+动相关模块前请先读该文档对应条目。
+
+设计文档在 `docs/` 下：
 
 ```text
 docs/
 ├─ teskra-implementation-plan-v2.md   # 总体实现方案（V2）
 ├─ teskra-tasks.md                    # TASK 编号与验收标准的唯一权威（TASK-001~093）
+├─ code-review-2026-09-12.md          # 全量 Code Review 结论与待修项清单
+├─ release.md                         # 签名与发布流程
 └─ decisions/                         # ADR（架构决策记录）
    ├─ 0001-v2-supersedes-v1-definitions.md
    ├─ 0002-permission-system-policy-and-audit.md
@@ -27,7 +37,8 @@ docs/
    ├─ 0004-handoff-file-contract.md
    ├─ 0005-config-layers-and-runtime-facade.md
    ├─ 0006-workflow-run-task-optional.md
-   └─ 0007-criteria-set-task-nullable.md
+   ├─ 0007-persist-agent-run-mode.md
+   └─ 0008-criteria-set-task-nullable.md
 ```
 
 ## 文档权威性（实现任何功能前必读）
@@ -57,7 +68,14 @@ docs/decisions/             = 已裁决的架构问题
 4. **`better-sqlite3` 与 `node-pty` 都是 native module**，均需按 Electron ABI rebuild。
 5. **`sandbox: true` 下 preload 不能 `require` 任意 npm 包**，contracts / zod 必须打进 preload bundle。
 6. **配置分两层**（ADR-0005）：`config.json`（JSON，Settings UI 回写）与
-   `<repo>/.teskra/workflows/*.yaml`（YAML，纯手写）。不存在 `teskra.yaml`。
+   `<repo>/.teskra/workflows/`（纯手写的 Workflow 定义）。不存在 `teskra.yaml`。
+   **注意实现现状**：`definition-loader.ts` 接受 `.yaml` / `.yml` / `.json` 扩展名，
+   但只用 `JSON.parse` 解析——仓库尚未引入 YAML 解析依赖，所以目前**只有 JSON
+   语法能被加载**（JSON 是 YAML 1.2 的子集，所以内容为 JSON 的 `.yaml` 文件可用，
+   真正的 YAML block 语法会报 "is not parseable"）。引入 `yaml` 依赖是独立 Task。
+7. **ADR-0007 与 ADR-0008 曾撞号**（均一度写作 0007），已按时间先后重排：
+   0007 = AgentRun 持久化启动模式（migration 009），
+   0008 = Criteria Set 可脱离 Task（migration 010）。引用时注意别沿用旧编号。
 
 ## 技术栈与工具链基线（计划，强制固定）
 
@@ -66,7 +84,7 @@ docs/decisions/             = 已裁决的架构问题
 前端       React + TypeScript + Vite/electron-vite + Ant Design + Zustand
 终端       xterm.js + node-pty
 数据库     SQLite (better-sqlite3)
-Git        simple-git（必要时直接调用 git CLI）
+Git        git CLI（经 CommandRunner 调用；未引入 simple-git）
 校验       zod
 日志       pino
 IPC        Electron contextBridge + ipcMain/ipcRenderer
@@ -82,7 +100,7 @@ IPC        Electron contextBridge + ipcMain/ipcRenderer
 
 ## 构建与测试命令
 
-> 工程骨架（TASK-001）已就绪，以下命令均已可用。开发前请切到 Node 22
+> 以下命令均已可用。开发前请切到 Node 22
 > （仓库含 `.nvmrc`，`nvm use` 即可；`engine-strict` 会拒绝其它版本）：
 
 ```bash
@@ -90,6 +108,8 @@ npm ci                # 安装（CI 与本机一致，不用 npm install）
 npm run dev           # 启动 Electron 开发模式
 npm run typecheck     # TypeScript 检查
 npm run lint          # ESLint
+npm run format        # Prettier 写入
+npm run format:check  # Prettier 检查（注意：CI 尚未执行此步，当前仓库存在未格式化文件）
 npm run test:unit     # Vitest 单元测试
 npm run test:e2e      # 构建 + Playwright Electron E2E（TASK-076，apps/desktop/e2e/）
 npm run test:security # 构建 + Electron 安全基线断言（TASK-002，scripts/assert-security-baseline.mjs）
@@ -188,7 +208,9 @@ Orchestrator / WorkflowEngine、PermissionManager、MemoryManager、EventBus、D
 - 日志必须脱敏：`sk-` / `ghp_` / `*_TOKEN` 等 secret 不得出现在输出（有单测断言）。
 - `<repo>/.teskra/config.json` 可提交，禁止出现敏感值，加载时校验并告警；
   敏感 env 走 Credential Store（TASK-088）。
-- `<repo>/.teskra/handoff/` 与 `<repo>/.teskra/artifacts/` 是运行期产物，
-  必须通过 `.git/info/exclude` 排除（不修改用户的 `.gitignore`）。
+- Handoff / Artifact 等运行期产物实际写在 `<dataRoot>/runs/<runId>/` 下
+  （由 `paths.runFiles()` 解析，见 ADR-0004 的 2026-09-12 修订），不落在仓库里。
+  WorktreeManager 仍会把 `<repo>/.teskra/handoff/` 与 `<repo>/.teskra/artifacts/`
+  写入 `.git/info/exclude` 作为纵深防御（不修改用户的 `.gitignore`）。
 - `orchestrated` 模式的 AgentRun 没有 worktree 时**必须拒绝启动**；`attended` 模式
   UI 必须有「直接修改主工作区，未做隔离」常驻横幅（ADR-0002）。

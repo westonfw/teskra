@@ -1,4 +1,4 @@
-# ADR-0007：Criteria Set 可脱离 Task（task_id 可空）
+# ADR-0008：Criteria Set 可脱离 Task（task_id 可空）
 
 - 日期：2026-09-12
 - 状态：Accepted
