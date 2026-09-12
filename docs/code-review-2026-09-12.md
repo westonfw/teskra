@@ -530,3 +530,26 @@ CSP + sandbox 已经挡掉了大部分利用路径，但这些是零成本的纵
 6. Linux identity token 用 /proc/<pid>/stat field 22（自 boot 起的时钟滴答），不含
    boot 标识，未真正覆盖「重启后 pid 复用」；macOS/Windows 用绝对时间，三平台语义
    不一致。拼上 /proc/sys/kernel/random/boot_id 即可对齐。
+
+## 10. 第五轮 Review 修复状态（2026-09-12）
+
+> 对第四轮修复的复审（含对第四轮第 2 项建议本身的纠正）。4 项全部修复并补测试。
+
+1. **identity 失败回退 probe = 恢复任意杀进程**（reconciliation，纠正第四轮的
+   错误建议）：identity() 失败在 Windows（PowerShell 被策略禁用）/macOS（启动期
+   ps 超时）上是系统性的，回退 probe 会让每个 run 都走「探活即杀」，pid 复用时
+   taskkill /T /F 端掉无关进程树。正确的第三态是「未知」：identity 读不出来时
+   run 保持 active（survivingRunIds），不杀、不标 interrupted、不会被 resume，
+   等人工处理；legacy（无 token）行继续走 probe 不变。docblock 已同步改写。
+2. **重发用全局 generation 串工作区**（git-store）：refreshGeneration 是闭包内
+   单计数器，任何工作区的 refresh 都会 bump；旧工作区在途 loadPatch 的重发会把
+   diff 写进只按 path 建键的 patches，切工作区后面板安静显示另一个工作区的
+   diff。修复：patches 一律按 `${workspaceId} ${path}` 建键（与 patchInFlight
+   一致），changes-page 三处查找同步改造。
+3. **重发无上限、不校验选中**（git-store）：refresh 节奏快过一次 fetch 时重发会
+   自我维持且离开页面也停不掉。现重发限一次（patchRetried 记录，成功后释放），
+   且仅当 `selectedPath === path` 时才重发。
+4. **失败的 patch 让错误关不掉**（changes-page/git-store）：refreshCount 依赖使
+   持续失败的 filePatch 每个 refresh 周期重试并覆盖 clearError()。现失败 path 进
+   patchFailedPaths 标记、不再自动重试；显式 selectFile（用户重新点击）或一次
+   成功 fetch 会解除标记。

@@ -387,56 +387,37 @@ describe('ReconciliationService (TASK-040)', () => {
     expect(terminate).not.toHaveBeenCalled()
   })
 
-  it('falls back to the liveness probe when the identity read fails', async () => {
-    // Probe says alive: terminate under degraded verification — leaving a
-    // live survivor unterminated while the run is marked interrupted would
-    // open the resume double-write P0-2 forbids.
-    const alive = setup()
-    alive.createRunningRun(undefined, undefined, 'start-token-A')
-    const aliveProbe = vi.fn(async (): Promise<IpcResult<boolean>> => ({ ok: true, data: true }))
-    const failingIdentity = vi.fn(async (): Promise<IpcResult<string | null>> => ({
+  it('leaves the run active when the identity read fails (unknown, not dead)', async () => {
+    const context = setup()
+    context.createRunningRun(undefined, undefined, 'start-token-A')
+    const probe = vi.fn(async (): Promise<IpcResult<boolean>> => ({ ok: true, data: true }))
+    const identity = vi.fn(async (): Promise<IpcResult<string | null>> => ({
       ok: false,
       error: { code: 'UNKNOWN' as const, message: 'stat failed', retryable: true },
     }))
-    const aliveTerminate = vi.fn(async (): Promise<IpcResult<void>> => ({
-      ok: true,
-      data: undefined,
-    }))
-    const aliveService = alive.service(
-      { list: () => [] },
-      { probe: aliveProbe, identity: failingIdentity, terminate: aliveTerminate },
-    )
-    expect(await aliveService.reconcile()).toMatchObject({
-      ok: true,
-      data: {
-        interruptedRunIds: ['run-1'],
-        terminatedSurvivorRunIds: ['run-1'],
-        survivingRunIds: [],
-      },
-    })
-    expect(aliveTerminate).toHaveBeenCalledWith(4242)
+    const terminate = vi.fn(async (): Promise<IpcResult<void>> => ({ ok: true, data: undefined }))
+    const interrupted = vi.fn()
+    context.events.subscribe('agent.interrupted', interrupted)
+    const service = context.service({ list: () => [] }, { probe, identity, terminate })
 
-    // Probe says dead: nothing to terminate.
-    const dead = setup()
-    dead.createRunningRun(undefined, undefined, 'start-token-A')
-    const deadProbe = vi.fn(async (): Promise<IpcResult<boolean>> => ({ ok: true, data: false }))
-    const deadTerminate = vi.fn(async (): Promise<IpcResult<void>> => ({
-      ok: true,
-      data: undefined,
-    }))
-    const deadService = dead.service(
-      { list: () => [] },
-      { probe: deadProbe, identity: failingIdentity, terminate: deadTerminate },
-    )
-    expect(await deadService.reconcile()).toMatchObject({
+    // A failed identity read is neither "dead" nor "verified": the run keeps
+    // its active status for manual handling. Probing and killing here would
+    // reopen the arbitrary-kill path the token exists to close.
+    expect(await service.reconcile()).toMatchObject({
       ok: true,
       data: {
-        interruptedRunIds: ['run-1'],
+        interruptedRunIds: [],
         terminatedSurvivorRunIds: [],
-        survivingRunIds: [],
+        survivingRunIds: ['run-1'],
       },
     })
-    expect(deadTerminate).not.toHaveBeenCalled()
+    expect(probe).not.toHaveBeenCalled()
+    expect(terminate).not.toHaveBeenCalled()
+    expect(context.runs.getById('run-1')).toMatchObject({
+      ok: true,
+      data: { status: 'running' },
+    })
+    expect(interrupted).not.toHaveBeenCalled()
   })
 
   it('classifies absent and non-Git worktrees without mutating them twice', async () => {

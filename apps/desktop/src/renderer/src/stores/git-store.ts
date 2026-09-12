@@ -42,7 +42,7 @@ export interface GitStoreBridge {
 interface GitState {
   readonly status?: GitStatus
   readonly changes: DiffResult
-  /** Lazy per-file patches, keyed by path; filled by loadPatch (P1-5). */
+  /** Lazy per-file patches, keyed by `${workspaceId} ${path}`; filled by loadPatch (P1-5). */
   readonly patches: Readonly<Record<string, string>>
   readonly patchLoading: boolean
   readonly selectedPath?: string | undefined
@@ -71,6 +71,15 @@ export function createGitStore(getBridge: () => GitStoreBridge) {
   const refreshInFlight = new Map<string, Promise<void>>()
   const lastFocusRefreshAt = new Map<string, number>()
   const patchInFlight = new Set<string>()
+  /** Keys that already used their one mid-flight re-issue (see loadPatch). */
+  const patchRetried = new Set<string>()
+  /**
+   * Paths whose last fetch failed. The lazy-patch effect retries uncached
+   * patches on every refresh, so without this mark a persistently failing
+   * fetch would re-set `error` every cycle and make clearError() unusable.
+   * Cleared by a successful fetch or an explicit selectFile() (user retry).
+   */
+  const patchFailedPaths = new Set<string>()
 
   return create<GitState>((set, get) => ({
     changes: { files: [] },
@@ -175,12 +184,20 @@ export function createGitStore(getBridge: () => GitStoreBridge) {
     },
 
     selectFile(path) {
+      // Explicit (re)selection is the user's manual retry after a failure.
+      if (path !== undefined) patchFailedPaths.delete(path)
       set({ selectedPath: path })
     },
 
     async loadPatch(workspaceId, path) {
       const key = `${workspaceId} ${path}`
-      if (get().patches[path] !== undefined || patchInFlight.has(key)) return
+      if (
+        get().patches[key] !== undefined ||
+        patchInFlight.has(key) ||
+        patchFailedPaths.has(path)
+      ) {
+        return
+      }
       // A refresh invalidates loaded patches; a fetch that started before it
       // must not write its (now stale) result back afterwards.
       const generation = refreshGeneration
@@ -190,20 +207,34 @@ export function createGitStore(getBridge: () => GitStoreBridge) {
         const result = await getBridge().git.filePatch({ workspaceId, path })
         if (generation !== refreshGeneration) return
         if (!result.ok) {
+          patchFailedPaths.add(path)
           set({ error: result.error })
           return
         }
-        set((state) => ({ patches: { ...state.patches, [path]: result.data.patch } }))
+        patchFailedPaths.delete(path)
+        patchRetried.delete(key)
+        set((state) => ({ patches: { ...state.patches, [key]: result.data.patch } }))
       } catch {
-        if (generation === refreshGeneration) set({ error: transportError() })
+        if (generation === refreshGeneration) {
+          patchFailedPaths.add(path)
+          set({ error: transportError() })
+        }
       } finally {
         patchInFlight.delete(key)
         set({ patchLoading: patchInFlight.size > 0 })
         // A refresh invalidated this fetch mid-flight: its result was dropped
-        // and the cache it was filling was cleared. Re-issue under the
-        // current generation or the panel stays blank (the effect's inputs
-        // did not change).
-        if (generation !== refreshGeneration) void get().loadPatch(workspaceId, path)
+        // and the cache it was filling was cleared. Re-issue ONCE, and only
+        // while the file is still selected — a refresh cadence faster than a
+        // fetch would otherwise become a self-sustaining IPC loop, and a
+        // stale re-issue must never outlive the user's navigation.
+        if (
+          generation !== refreshGeneration &&
+          !patchRetried.has(key) &&
+          get().selectedPath === path
+        ) {
+          patchRetried.add(key)
+          void get().loadPatch(workspaceId, path)
+        }
       }
     },
 

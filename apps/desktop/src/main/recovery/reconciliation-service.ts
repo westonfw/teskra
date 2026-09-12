@@ -207,51 +207,47 @@ export function createReconciliationService(
        * arbitrary kill. Runs that carry a pid identity token (migration 011)
        * are verified against a fresh start-time read; a mismatch — or a gone
        * pid — means the recorded process is dead, without touching whatever
-       * owns the pid now. Legacy rows without a token fall back to the
-       * probe-only behavior.
+       * owns the pid now. A FAILED identity read (PowerShell policy-blocked,
+       * startup ps timeout) is neither dead nor verified: the run is left
+       * active ('alive') for manual handling — interrupting it would invite
+       * the resume double-write, and probing-then-killing would reopen the
+       * arbitrary-kill path the token exists to close. Legacy rows without a
+       * token keep the probe-only behavior.
        */
       const terminateSurvivor = async (run: AgentRun): Promise<'none' | 'terminated' | 'alive'> => {
         if (deps.hostProcesses === undefined || run.pid === undefined) return 'none'
         const hostProcesses = deps.hostProcesses
         const pid = run.pid
-        // Legacy rows (pre-011) and degraded identity reads share this path.
-        const probeLiveness = async (): Promise<boolean> => {
+        if (run.pidIdentity !== undefined) {
+          const identity = await hostProcesses.identity(pid)
+          if (!identity.ok) {
+            logger.warn(
+              { runId: run.id, pid, error: identity.error },
+              'Host pid identity read failed; the run is left active rather than risking an arbitrary kill.',
+            )
+            survivingRunIds.push(run.id)
+            return 'alive'
+          }
+          if (identity.data === null) return 'none'
+          if (identity.data !== run.pidIdentity) {
+            logger.warn(
+              { runId: run.id, pid },
+              'The recorded pid now belongs to an unrelated process; treating the Agent process as dead.',
+            )
+            return 'none'
+          }
+        } else {
+          // Legacy rows (pre-011): probe-only liveness, as before tokens.
           const probe = await hostProcesses.probe(pid)
           if (!probe.ok) {
             logger.warn(
               { runId: run.id, pid, error: probe.error },
               'Host pid probe failed; treating the process as dead.',
             )
-            return false
+            return 'none'
           }
-          return probe.data
+          if (!probe.data) return 'none'
         }
-        let identityVerified = false
-        if (run.pidIdentity !== undefined) {
-          const identity = await hostProcesses.identity(pid)
-          if (identity.ok) {
-            if (identity.data === null) return 'none'
-            if (identity.data !== run.pidIdentity) {
-              logger.warn(
-                { runId: run.id, pid },
-                'The recorded pid now belongs to an unrelated process; treating the Agent process as dead.',
-              )
-              return 'none'
-            }
-            identityVerified = true
-          } else {
-            // A failed identity read (startup spawn timeout, PowerShell
-            // unavailable) says nothing about liveness: fall back to the bare
-            // probe rather than interrupting a run whose Agent may still be
-            // writing — interrupt-then-resume onto a live worktree is the
-            // double-write P0-2 exists to prevent.
-            logger.warn(
-              { runId: run.id, pid, error: identity.error },
-              'Host pid identity read failed; falling back to the liveness probe.',
-            )
-          }
-        }
-        if (!identityVerified && !(await probeLiveness())) return 'none'
         const terminated = await hostProcesses.terminate(pid)
         if (terminated.ok) {
           logger.warn(

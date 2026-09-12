@@ -104,13 +104,19 @@ export function ChangesPage() {
   const selected = changes.files.find(({ path }) => path === selectedPath)
   const visibleFiles = useMemo(() => filesForDisplay(changes.files), [changes.files])
 
-  // Patches are lazy (P1-5): only the selected file's patch crosses IPC.
+  // Patches are lazy (P1-5): only the selected file's patch crosses IPC, and
+  // the cache is keyed by `${workspaceId} ${path}` — never by path alone, so a
+  // stale fetch from a previous workspace cannot show its diff here.
   // refresh() clears the cache while selectedPath may survive, so the cached
   // entry — not the path — must gate the fetch, or a refresh leaves the panel
   // permanently blank. refreshCount re-arms the effect after every refresh:
   // a patch that never got cached (in-flight fetch voided by the refresh, or
   // an IPC failure) would otherwise never be retried.
-  const selectedPatch = selectedPath === undefined ? undefined : patches[selectedPath]
+  const selectedPatchKey =
+    workspace === undefined || selectedPath === undefined
+      ? undefined
+      : `${workspace.id} ${selectedPath}`
+  const selectedPatch = selectedPatchKey === undefined ? undefined : patches[selectedPatchKey]
   const refreshCount = useGitStore((state) => state.refreshCount)
   useEffect(() => {
     if (workspace === undefined || selectedPath === undefined) return
@@ -118,7 +124,11 @@ export function ChangesPage() {
     void loadPatch(workspace.id, selectedPath)
   }, [loadPatch, selectedPath, selectedPatch, refreshCount, workspace])
 
-  const displayPatch = patchForDisplay(selected === undefined ? '' : (patches[selected.path] ?? ''))
+  const displayPatch = patchForDisplay(
+    selected === undefined || selectedPatchKey === undefined
+      ? ''
+      : (patches[selectedPatchKey] ?? ''),
+  )
   const diffLines = useMemo(() => splitDiffLines(displayPatch.text), [displayPatch.text])
 
   if (workspace === undefined) return null
@@ -208,7 +218,9 @@ export function ChangesPage() {
               )}
               <Spin
                 spinning={
-                  patchLoading && selected !== undefined && patches[selected.path] === undefined
+                  patchLoading &&
+                  selectedPatchKey !== undefined &&
+                  patches[selectedPatchKey] === undefined
                 }
               >
                 <pre className="diff-patch" tabIndex={0}>

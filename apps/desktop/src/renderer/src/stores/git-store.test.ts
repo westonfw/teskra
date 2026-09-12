@@ -101,7 +101,7 @@ describe('Git store (TASK-037)', () => {
       workspaceId: 'workspace-1',
       path: 'src/main.ts',
     })
-    expect(store.getState().patches['src/main.ts']).toContain('+new')
+    expect(store.getState().patches['workspace-1 src/main.ts']).toContain('+new')
 
     // Cached: a repeated load does not hit IPC again.
     await store.getState().loadPatch('workspace-1', 'src/main.ts')
@@ -147,8 +147,90 @@ describe('Git store (TASK-037)', () => {
     await loading
 
     // …so the voided fetch re-issues itself under the new generation.
-    await vi.waitFor(() => expect(store.getState().patches['src/main.ts']).toContain('+new'))
+    await vi.waitFor(() =>
+      expect(store.getState().patches['workspace-1 src/main.ts']).toContain('+new'),
+    )
     expect(harness.bridge.git.filePatch).toHaveBeenCalledTimes(2)
+  })
+
+  it('re-issues a voided fetch at most once', async () => {
+    const harness = createBridge()
+    const releases: Array<(value: { ok: true; data: { patch: string } }) => void> = []
+    vi.mocked(harness.bridge.git.filePatch).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releases.push(resolve)
+        }),
+    )
+    const store = createGitStore(() => harness.bridge)
+    await store.getState().refresh('workspace-1')
+
+    void store.getState().loadPatch('workspace-1', 'src/main.ts')
+    await vi.waitFor(() => expect(releases).toHaveLength(1))
+    await store.getState().refresh('workspace-1')
+    releases[0]?.({ ok: true, data: { patch: '@@ stale-1' } })
+
+    // The one allowed re-issue…
+    await vi.waitFor(() => expect(releases).toHaveLength(2))
+    await store.getState().refresh('workspace-1')
+    releases[1]?.({ ok: true, data: { patch: '@@ stale-2' } })
+
+    // …but no second one: a refresh cadence faster than a fetch cannot become
+    // a self-sustaining IPC loop.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(releases).toHaveLength(2)
+  })
+
+  it('does not re-issue a voided fetch when the file is no longer selected', async () => {
+    const harness = createBridge()
+    let releasePatch!: (value: { ok: true; data: { patch: string } }) => void
+    vi.mocked(harness.bridge.git.filePatch).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releasePatch = resolve
+        }),
+    )
+    const store = createGitStore(() => harness.bridge)
+    await store.getState().refresh('workspace-1')
+
+    void store.getState().loadPatch('workspace-1', 'src/main.ts')
+    await vi.waitFor(() => expect(harness.bridge.git.filePatch).toHaveBeenCalledTimes(1))
+    await store.getState().refresh('workspace-1')
+    // The user moved on before the fetch settled.
+    store.getState().selectFile(undefined)
+    releasePatch({ ok: true, data: { patch: '@@ stale' } })
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    expect(harness.bridge.git.filePatch).toHaveBeenCalledTimes(1)
+    expect(store.getState().patches).toEqual({})
+  })
+
+  it('does not auto-retry a failed patch until the user re-selects the file', async () => {
+    const harness = createBridge()
+    vi.mocked(harness.bridge.git.filePatch).mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'UNKNOWN', message: 'git diff failed', retryable: true },
+    })
+    const store = createGitStore(() => harness.bridge)
+    await store.getState().refresh('workspace-1')
+    await store.getState().loadPatch('workspace-1', 'src/main.ts')
+    expect(store.getState().error?.message).toBe('git diff failed')
+
+    // The refresh-driven retry stays silent: no new fetch, no error overwrite
+    // after clearError().
+    store.getState().clearError()
+    await store.getState().refresh('workspace-1')
+    await store.getState().loadPatch('workspace-1', 'src/main.ts')
+    expect(harness.bridge.git.filePatch).toHaveBeenCalledTimes(1)
+    expect(store.getState().error).toBeUndefined()
+
+    // Explicit reselection is the manual retry.
+    store.getState().selectFile('src/main.ts')
+    await store.getState().loadPatch('workspace-1', 'src/main.ts')
+    expect(harness.bridge.git.filePatch).toHaveBeenCalledTimes(2)
+    await vi.waitFor(() =>
+      expect(store.getState().patches['workspace-1 src/main.ts']).toContain('+new'),
+    )
   })
 
   it('bumps refreshCount on every completed refresh', async () => {
