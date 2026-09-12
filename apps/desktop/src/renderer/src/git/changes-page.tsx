@@ -184,8 +184,7 @@ export function ChangesPage() {
               )}
               <pre className="diff-patch" tabIndex={0}>
                 {diffLines.map((line, index) => (
-                  // eslint-disable-next-line react/no-array-index-key -- diff lines have no stable identity; order is the identity
-                  <span key={index} className={`diff-line diff-line-${line.kind}`}>
+                  <span key={`${index}:${line.text}`} className={`diff-line diff-line-${line.kind}`}>
                     {line.text}
                     {'\n'}
                   </span>
