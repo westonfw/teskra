@@ -24,13 +24,15 @@ import { inspectRunWatchdog, type WatchdogInspection } from '@teskra/shared'
 import { useEffect, useMemo, useState } from 'react'
 
 import { AppErrorAlert } from '../components/app-error-alert'
-import { useTranslation } from '../i18n'
+import { useTranslation, type TranslationKey, type TranslationParams } from '../i18n'
 import { useSettingsStore } from '../settings/settings-store'
 import { agentRuntimeKey, useAgentStore } from '../stores/agent-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
 import { AgentPicker } from './agent-picker'
 import { AgentRunTerminal } from './agent-run-terminal'
 import { restartAgentRunRequest, shortDuration } from './agent-watchdog'
+
+type Translate = (key: TranslationKey, params?: TranslationParams) => string
 
 const ACTIVE_STATUSES = new Set<AgentRunStatus>([
   'created',
@@ -173,11 +175,9 @@ export function AgentCatalogPage() {
     <div className="workbench-page agent-catalog-page">
       <header className="page-heading">
         <div>
-          <Typography.Text className="settings-eyebrow">AGENT RUNTIME</Typography.Text>
-          <Typography.Title level={2}>Agent Runs</Typography.Title>
-          <Typography.Paragraph type="secondary">
-            Launch coding Agents and follow every run from queue to completion.
-          </Typography.Paragraph>
+          <Typography.Text className="settings-eyebrow">{t('runs.eyebrow')}</Typography.Text>
+          <Typography.Title level={2}>{t('runs.title')}</Typography.Title>
+          <Typography.Paragraph type="secondary">{t('runs.subtitle')}</Typography.Paragraph>
         </div>
         <AgentPicker
           definitions={definitions}
@@ -199,7 +199,7 @@ export function AgentCatalogPage() {
         description={t('agent.attendedWarningDetail')}
       />
 
-      <Card className="run-launch-card" title="Start an attended run">
+      <Card className="run-launch-card" title={t('runs.launch.title')}>
         {selectedDefinition?.permissionEnforcement === 'none' && (
           <Alert
             className="page-alert"
@@ -213,22 +213,22 @@ export function AgentCatalogPage() {
           <Input.TextArea
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
-            placeholder="Describe what the Agent should do…"
+            placeholder={t('runs.launch.promptPlaceholder')}
             autoSize={{ minRows: 2, maxRows: 5 }}
           />
           <Input
             value={model}
             onChange={(event) => setModel(event.target.value)}
-            placeholder="Model override (optional)"
+            placeholder={t('runs.launch.modelPlaceholder')}
           />
           <Select<ApprovalMode>
             value={approvalMode}
             onChange={setApprovalMode}
             options={[
-              { value: 'read-only', label: 'Read only' },
-              { value: 'manual', label: 'Manual approval' },
-              { value: 'safe-auto', label: 'Safe auto' },
-              { value: 'full-auto', label: 'Full auto' },
+              { value: 'read-only', label: t('runs.approval.read-only') },
+              { value: 'manual', label: t('runs.approval.manual') },
+              { value: 'safe-auto', label: t('runs.approval.safe-auto') },
+              { value: 'full-auto', label: t('runs.approval.full-auto') },
             ]}
           />
           <Button
@@ -237,7 +237,7 @@ export function AgentCatalogPage() {
             disabled={selectedId === undefined}
             onClick={() => void handleStart()}
           >
-            Start run
+            {t('runs.launch.start')}
           </Button>
         </div>
       </Card>
@@ -245,14 +245,14 @@ export function AgentCatalogPage() {
       <section className="run-section">
         <div className="section-heading">
           <div>
-            <Typography.Title level={4}>Runs</Typography.Title>
+            <Typography.Title level={4}>{t('runs.list.title')}</Typography.Title>
             <Typography.Text type="secondary">{workspace?.name}</Typography.Text>
           </div>
-          <Tag>{runs.length} total</Tag>
+          <Tag>{t('runs.list.total', { count: runs.length })}</Tag>
         </div>
-        <Spin spinning={runsLoading} tip="Loading runs…">
+        <Spin spinning={runsLoading} tip={t('runs.list.loading')}>
           {runs.length === 0 && !runsLoading ? (
-            <Empty description="No Agent runs in this workspace yet." />
+            <Empty description={t('runs.list.empty')} />
           ) : (
             <List
               className="run-list"
@@ -277,8 +277,8 @@ export function AgentCatalogPage() {
       </section>
 
       <section className="run-section">
-        <Typography.Title level={4}>Available Agents</Typography.Title>
-        <Spin spinning={loading} tip="Loading Agents…">
+        <Typography.Title level={4}>{t('runs.agents.title')}</Typography.Title>
+        <Spin spinning={loading} tip={t('runs.agents.loading')}>
           <div className="agent-card-grid">
             {definitions.map((definition) => {
               const status =
@@ -296,14 +296,14 @@ export function AgentCatalogPage() {
                   extra={
                     status !== undefined && (
                       <Tag color={status.available ? 'green' : 'red'}>
-                        {status.available ? 'Available' : 'Unavailable'}
+                        {status.available ? t('agents.available') : t('agents.unavailable')}
                       </Tag>
                     )
                   }
                   onClick={() => setSelectedId(definition.id)}
                 >
                   <Typography.Text type="secondary">
-                    {definition.routing?.useWhen ?? 'General coding Agent'}
+                    {definition.routing?.useWhen ?? t('agents.generalFallback')}
                   </Typography.Text>
                 </Card>
               )
@@ -313,7 +313,7 @@ export function AgentCatalogPage() {
       </section>
 
       <Drawer
-        title={selectedRun === undefined ? 'Run detail' : names[selectedRun.agentType]}
+        title={selectedRun === undefined ? t('runs.detail.title') : names[selectedRun.agentType]}
         width={520}
         open={selectedRun !== undefined}
         onClose={() => setSelectedRunId(undefined)}
@@ -362,27 +362,28 @@ function RunListItem({
   onRestart,
   onResume,
 }: RunListItemProps) {
+  const { t } = useTranslation()
   const active = ACTIVE_STATUSES.has(run.status)
   return (
     <List.Item
       className="run-list-item"
       actions={[
         <Button key="detail" type="link" onClick={onOpen}>
-          {active ? 'Send input / Terminal' : 'Details'}
+          {active ? t('runs.item.openTerminal') : t('runs.item.details')}
         </Button>,
         active ? (
           <Button key="cancel" danger type="link" onClick={onCancel}>
-            Interrupt
+            {t('runs.interrupt')}
           </Button>
         ) : null,
         run.status === 'interrupted' ? (
           <Button key="resume" type="link" onClick={onResume}>
-            Resume
+            {t('runs.resume')}
           </Button>
         ) : null,
         watchdog.possiblyStalled ? (
           <Button key="restart" type="link" onClick={onRestart}>
-            Restart
+            {t('runs.restart')}
           </Button>
         ) : null,
       ].filter(Boolean)}
@@ -393,21 +394,21 @@ function RunListItem({
             <Typography.Text strong>{agentName}</Typography.Text>
             <Tag color={statusColor[run.status]}>{statusLabel(run.status)}</Tag>
             {run.executionMode === 'attended' && run.worktreeId === undefined && (
-              <Tag color="orange">Unisolated</Tag>
+              <Tag color="orange">{t('runs.item.unisolated')}</Tag>
             )}
             {watchdog.possiblyStalled && (
               <Tag color="volcano">
-                Possibly stalled (no output for {shortDuration(watchdog.silentForMs)})
+                {t('runs.stalled.tag', { duration: shortDuration(watchdog.silentForMs) })}
               </Tag>
             )}
           </Space>
           <Typography.Text type="secondary" ellipsis>
-            {activity ?? defaultActivity(run.status)}
+            {activity ?? defaultActivity(run.status, t)}
           </Typography.Text>
         </div>
         <div className="run-row-meta">
           <span>{workspaceName}</span>
-          <span>{run.model ?? 'Default model'}</span>
+          <span>{run.model ?? t('tasks.runs.defaultModel')}</span>
           <span>{elapsed(run, now)}</span>
         </div>
       </div>
@@ -458,11 +459,11 @@ function RunDetail({
         <Alert
           type="info"
           showIcon
-          message="This run was interrupted and can be resumed."
-          description="Teskra restores the workspace, branch, and worktree, then resumes the provider session when supported or starts a new session with the previous context."
+          message={t('runs.interrupted.message')}
+          description={t('runs.interrupted.description')}
           action={
             <Button size="small" type="primary" onClick={onResume}>
-              Resume
+              {t('runs.resume')}
             </Button>
           }
         />
@@ -471,45 +472,47 @@ function RunDetail({
         <Alert
           type="warning"
           showIcon
-          message={`Possibly stalled (no output for ${shortDuration(watchdog.silentForMs)})`}
-          description="Teskra will not stop this process automatically. You can use the terminal below, interrupt it, or restart it."
+          message={t('runs.stalled.tag', { duration: shortDuration(watchdog.silentForMs) })}
+          description={t('runs.stalled.description')}
           action={
             <Space>
               <Button size="small" danger onClick={onCancel}>
-                Interrupt
+                {t('runs.interrupt')}
               </Button>
               <Button size="small" onClick={onRestart}>
-                Restart
+                {t('runs.restart')}
               </Button>
             </Space>
           }
         />
       )}
       <Descriptions column={1} size="small" bordered>
-        <Descriptions.Item label="Status">
+        <Descriptions.Item label={t('runs.field.status')}>
           <Tag color={statusColor[run.status]}>{statusLabel(run.status)}</Tag>
         </Descriptions.Item>
-        <Descriptions.Item label="Workspace">{workspaceName}</Descriptions.Item>
-        <Descriptions.Item label="Model">{run.model ?? 'Default'}</Descriptions.Item>
-        <Descriptions.Item label="Elapsed">{elapsed(run, now)}</Descriptions.Item>
-        <Descriptions.Item label="Current activity">
-          {activity ?? defaultActivity(run.status)}
+        <Descriptions.Item label={t('runs.field.workspace')}>{workspaceName}</Descriptions.Item>
+        <Descriptions.Item label={t('runs.field.model')}>
+          {run.model ?? t('runs.field.defaultModel')}
         </Descriptions.Item>
-        <Descriptions.Item label="Run ID">
+        <Descriptions.Item label={t('runs.field.elapsed')}>{elapsed(run, now)}</Descriptions.Item>
+        <Descriptions.Item label={t('runs.field.currentActivity')}>
+          {activity ?? defaultActivity(run.status, t)}
+        </Descriptions.Item>
+        <Descriptions.Item label={t('runs.field.runId')}>
           <Typography.Text code copyable>
             {run.id}
           </Typography.Text>
         </Descriptions.Item>
       </Descriptions>
       {run.prompt !== undefined && (
-        <Card size="small" title="Prompt">
+        <Card size="small" title={t('runs.detail.prompt')}>
           <Typography.Paragraph className="run-prompt">{run.prompt}</Typography.Paragraph>
         </Card>
       )}
       <AgentRunTerminal key={run.id} run={run} initialData={output} />
       {ACTIVE_STATUSES.has(run.status) && (
         <Button danger onClick={onCancel}>
-          Interrupt run
+          {t('runs.interruptRun')}
         </Button>
       )}
     </Space>
@@ -520,15 +523,16 @@ function statusLabel(status: AgentRunStatus): string {
   return status.replaceAll('_', ' ')
 }
 
-function defaultActivity(status: AgentRunStatus): string {
-  if (status === 'queued') return 'Waiting for an execution slot'
-  if (status === 'preparing' || status === 'created') return 'Preparing Agent process'
-  if (status === 'completed') return 'Run completed'
-  if (status === 'failed') return 'Run failed'
-  if (status === 'cancelled') return 'Run cancelled'
-  if (status === 'interrupted') return 'Run interrupted — resume to continue'
-  if (status.startsWith('waiting_')) return `Waiting for ${status.slice(12).replaceAll('_', ' ')}`
-  return 'Agent is working'
+function defaultActivity(status: AgentRunStatus, t: Translate): string {
+  if (status === 'queued') return t('runs.activity.queued')
+  if (status === 'preparing' || status === 'created') return t('runs.activity.preparing')
+  if (status === 'completed') return t('runs.activity.completed')
+  if (status === 'failed') return t('runs.activity.failed')
+  if (status === 'cancelled') return t('runs.activity.cancelled')
+  if (status === 'interrupted') return t('runs.activity.interrupted')
+  if (status.startsWith('waiting_'))
+    return t('runs.activity.waiting', { target: status.slice(12).replaceAll('_', ' ') })
+  return t('runs.activity.working')
 }
 
 function elapsed(run: AgentRun, now: number): string {

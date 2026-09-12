@@ -9,6 +9,8 @@ export interface AgentRunTerminalTransport {
 
 export interface AgentRunTerminalBindingOptions {
   readonly onError?: (message: string) => void
+  /** Localized fallback shown when the IPC send rejects without a result. */
+  readonly connectionLostMessage?: string
 }
 
 /** Binds an xterm-like surface to Agent IPC without owning or stopping the Agent process. */
@@ -28,7 +30,10 @@ export function bindAgentRunTerminal(
         if (!disposed && !result.ok) options.onError?.(result.error.message)
       })
       .catch(() => {
-        if (!disposed) options.onError?.('The Agent terminal connection was interrupted.')
+        if (!disposed)
+          options.onError?.(
+            options.connectionLostMessage ?? 'The Agent terminal connection was interrupted.',
+          )
       })
   })
   const resize = surface.onResize(() => {

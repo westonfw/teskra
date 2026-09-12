@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import type { AgentDefinition, AgentHealth } from '@teskra/contracts'
 
+import { enUS, type TranslationKey } from '../i18n/en-US'
 import { agentPickerOptions } from './agent-picker'
+
+const translate = (key: TranslationKey): string => enUS[key]
 
 function definition(id: string, priority: number): AgentDefinition {
   return {
@@ -39,7 +42,7 @@ describe('agentPickerOptions (TASK-089)', () => {
   const definitions = [definition('fake', 10), definition('codex', 100), definition('claude', 90)]
 
   it('ranks options by the routing profile', () => {
-    expect(agentPickerOptions(definitions).map(({ value }) => value)).toEqual([
+    expect(agentPickerOptions(definitions, translate).map(({ value }) => value)).toEqual([
       'codex',
       'claude',
       'fake',
@@ -48,12 +51,17 @@ describe('agentPickerOptions (TASK-089)', () => {
 
   it('prefers Agents matching the requested role', () => {
     const reviewer = { ...definition('claude', 90), defaults: { role: 'reviewer' as const } }
-    const options = agentPickerOptions([definitions[0]!, definitions[1]!, reviewer], [], 'reviewer')
+    const options = agentPickerOptions(
+      [definitions[0]!, definitions[1]!, reviewer],
+      translate,
+      [],
+      'reviewer',
+    )
     expect(options[0]?.value).toBe('claude')
   })
 
   it('greys out unavailable Agents, marks them, and suggests an available alternative', () => {
-    const options = agentPickerOptions(definitions, [
+    const options = agentPickerOptions(definitions, translate, [
       health('codex', { available: false, installed: false, error: 'codex was not found' }),
       health('claude'),
       health('fake'),
@@ -72,7 +80,7 @@ describe('agentPickerOptions (TASK-089)', () => {
   })
 
   it('flags rate-limited Agents without disabling them and suggests an alternative', () => {
-    const options = agentPickerOptions(definitions, [
+    const options = agentPickerOptions(definitions, translate, [
       health('codex', { rateLimited: true }),
       health('claude'),
     ])
@@ -85,7 +93,7 @@ describe('agentPickerOptions (TASK-089)', () => {
   })
 
   it('shows no suggestion when no probed-available alternative exists', () => {
-    const options = agentPickerOptions(definitions, [
+    const options = agentPickerOptions(definitions, translate, [
       health('codex', { available: false }),
       health('claude', { available: false }),
       health('fake', { available: false }),
@@ -94,8 +102,8 @@ describe('agentPickerOptions (TASK-089)', () => {
   })
 
   it('never switches or drops the selection: every Agent stays a selectable option as health changes', () => {
-    const before = agentPickerOptions(definitions)
-    const after = agentPickerOptions(definitions, [
+    const before = agentPickerOptions(definitions, translate)
+    const after = agentPickerOptions(definitions, translate, [
       health('codex', { available: false }),
       health('claude'),
       health('fake'),

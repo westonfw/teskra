@@ -9,7 +9,9 @@ import {
   type AgentAvailability,
 } from '@teskra/shared'
 
-import { useTranslation } from '../i18n'
+import { useTranslation, type TranslationKey } from '../i18n'
+
+type Translate = (key: TranslationKey) => string
 
 interface AgentPickerProps {
   readonly definitions: readonly AgentDefinition[]
@@ -41,6 +43,7 @@ export interface AgentPickerOption {
  */
 export function agentPickerOptions(
   definitions: readonly AgentDefinition[],
+  t: Translate,
   health: readonly AgentHealth[] = [],
   role?: AgentRole,
   formatSuggestion: (name: string) => string = (name) => `Consider ${name} instead`,
@@ -59,8 +62,10 @@ export function agentPickerOptions(
       label: (
         <span className="agent-picker-option">
           <span>{definition.name}</span>
-          {availability === 'unavailable' && <Tag color="red">Unavailable</Tag>}
-          {availability === 'rate-limited' && <Tag color="orange">Rate limited</Tag>}
+          {availability === 'unavailable' && <Tag color="red">{t('agentPicker.unavailable')}</Tag>}
+          {availability === 'rate-limited' && (
+            <Tag color="orange">{t('agentPicker.rateLimited')}</Tag>
+          )}
           {alternative !== undefined && (
             <Typography.Text type="secondary">{formatSuggestion(alternative.name)}</Typography.Text>
           )}
@@ -87,10 +92,10 @@ export function AgentPicker({
     <Select
       className="agent-picker"
       value={value}
-      options={agentPickerOptions(definitions, health, role, (name) =>
+      options={agentPickerOptions(definitions, t, health, role, (name) =>
         t('agentPicker.suggestAlternative', { name }),
       )}
-      placeholder="Select an Agent"
+      placeholder={t('agentPicker.placeholder')}
       disabled={disabled || definitions.length === 0}
       onChange={onChange}
     />

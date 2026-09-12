@@ -21,6 +21,7 @@ import type { PermissionAction, PermissionScope } from '@teskra/contracts'
 import { PERMISSION_ACTIONS, PERMISSION_SCOPES } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../../components/app-error-alert'
+import { useTranslation } from '../../i18n'
 import {
   permissionEnforcementInfo,
   riskTagColor,
@@ -68,6 +69,7 @@ export function PermissionsSettingsSection() {
   const definitions = useAgentStore((state) => state.definitions)
   const loadDefinitions = useAgentStore((state) => state.loadDefinitions)
   const workspaces = useWorkspaceStore((state) => state.recent)
+  const { t } = useTranslation()
 
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingId, setEditingId] = useState<string>()
@@ -157,7 +159,7 @@ export function PermissionsSettingsSection() {
           dataSource={[...definitions]}
           locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
           renderItem={(definition) => {
-            const info = permissionEnforcementInfo(definition.permissionEnforcement)
+            const info = permissionEnforcementInfo(definition.permissionEnforcement, t)
             return (
               <List.Item>
                 <List.Item.Meta

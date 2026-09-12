@@ -2,6 +2,7 @@ import { Alert, Tag } from 'antd'
 import type { AgentRun } from '@teskra/contracts'
 import { useEffect, useRef, useState } from 'react'
 
+import { useTranslation } from '../i18n'
 import { terminalRenderers, type TerminalInstance } from '../terminal/renderers'
 import { bindAgentRunTerminal } from './agent-run-terminal-binding'
 
@@ -19,6 +20,7 @@ const readOnlyStatuses = new Set<AgentRun['status']>([
 
 /** A Run-scoped PTY surface; it never creates, closes, or reuses normal Terminal sessions. */
 export function AgentRunTerminal({ run, initialData }: AgentRunTerminalProps) {
+  const { t } = useTranslation()
   const hostRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<TerminalInstance | null>(null)
   const initialDataRef = useRef(initialData)
@@ -43,7 +45,7 @@ export function AgentRunTerminal({ run, initialData }: AgentRunTerminalProps) {
             if (event.runId === runId) handler(event.data)
           }),
       },
-      { onError: setError },
+      { onError: setError, connectionLostMessage: t('runs.terminal.connectionLost') },
     )
     const fitNow = (): void => {
       if (host.clientWidth > 0 && host.clientHeight > 0) terminal.fit()
@@ -66,9 +68,12 @@ export function AgentRunTerminal({ run, initialData }: AgentRunTerminalProps) {
   }, [readOnly])
 
   return (
-    <section className="agent-run-terminal" aria-label={`Agent PTY — ${run.agentType} — ${run.id}`}>
+    <section
+      className="agent-run-terminal"
+      aria-label={t('runs.terminal.ariaLabel', { agentType: run.agentType, id: run.id })}
+    >
       <header className="agent-run-terminal-heading">
-        <span>Agent PTY</span>
+        <span>{t('runs.terminal.title')}</span>
         <Tag bordered={false}>{run.agentType}</Tag>
       </header>
       {error !== undefined && (

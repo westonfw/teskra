@@ -1,5 +1,9 @@
 import type { PermissionAuditEntry, PermissionEnforcement } from '@teskra/contracts'
 
+import type { TranslationKey } from '../i18n'
+
+type Translate = (key: TranslationKey) => string
+
 /**
  * TASK-066 — pure view-model for the Permission UI. Kept component-free so
  * the conditional rendering rules (who sees the approval UI, which risks are
@@ -17,39 +21,27 @@ export interface PermissionEnforcementInfo {
   readonly description: string
 }
 
-const ENFORCEMENT_INFO: Record<PermissionEnforcement, PermissionEnforcementInfo> = {
-  native: {
-    mode: 'native',
-    canPrompt: true,
-    label: 'Native approval',
-    description:
-      'The Agent CLI asks for approval itself. Teskra projects your rules into the CLI’s own permission settings before each Run and can record approval decisions.',
-  },
-  config: {
-    mode: 'config',
-    canPrompt: false,
-    label: 'Config projection only',
-    description:
-      'Teskra translates rules into this CLI’s launch configuration. The CLI cannot be prompted mid-run, so “ask” rules degrade to audit-only. Commands shown in the Commands tab were already executed when recognized.',
-  },
-  none: {
-    mode: 'none',
-    canPrompt: false,
-    label: 'No enforcement',
-    description:
-      'This Agent has no permission mechanism Teskra can target. Isolation (worktrees) and post-hoc audit are the only safeguards; nothing here constrains what the Agent runs.',
-  },
+const CAN_PROMPT: Record<PermissionEnforcement, boolean> = {
+  native: true,
+  config: false,
+  none: false,
 }
 
 export function permissionEnforcementInfo(
   mode: PermissionEnforcement,
+  t: Translate,
 ): PermissionEnforcementInfo {
-  return ENFORCEMENT_INFO[mode]
+  return {
+    mode,
+    canPrompt: CAN_PROMPT[mode],
+    label: t(`permissions.enforcement.${mode}.label`),
+    description: t(`permissions.enforcement.${mode}.description`),
+  }
 }
 
 /** Approval UI is shown only for native Agents — anything else would pretend to intercept. */
 export function canUseApprovalUi(mode: PermissionEnforcement): boolean {
-  return ENFORCEMENT_INFO[mode].canPrompt
+  return CAN_PROMPT[mode]
 }
 
 /** Risks that get a pinned warning on top of the Commands tab. */

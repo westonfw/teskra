@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import type { AgentDefinition, WorkspaceRuntimeRef } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../../components/app-error-alert'
+import { useTranslation } from '../../i18n'
 import { permissionEnforcementInfo } from '../../permissions/permission-view-model'
 import { agentRuntimeKey, useAgentStore } from '../../stores/agent-store'
 import { useWorkspaceStore } from '../../stores/workspace-store'
@@ -86,6 +87,7 @@ export function AgentsSettingsSection() {
   const loadDefinitions = useAgentStore((state) => state.loadDefinitions)
   const clearError = useAgentStore((state) => state.clearError)
   const workspaceRuntime = useWorkspaceStore((state) => state.current?.runtime)
+  const { t } = useTranslation()
   const wslRuntime: WorkspaceRuntimeRef = {
     kind: 'wsl',
     ...(workspaceRuntime?.kind === 'wsl' && workspaceRuntime.distro !== undefined
@@ -122,9 +124,9 @@ export function AgentsSettingsSection() {
                   </Typography.Text>
                   <Typography.Text type="secondary">
                     Permission enforcement:{' '}
-                    {permissionEnforcementInfo(definition.permissionEnforcement).label} (
+                    {permissionEnforcementInfo(definition.permissionEnforcement, t).label} (
                     {definition.permissionEnforcement}) —{' '}
-                    {permissionEnforcementInfo(definition.permissionEnforcement).description}
+                    {permissionEnforcementInfo(definition.permissionEnforcement, t).description}
                   </Typography.Text>
                   <Space size={[6, 6]} wrap>
                     {definition.routing?.strengths?.map((strength) => (

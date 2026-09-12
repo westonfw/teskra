@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 
 import type { AgentDefinition, AgentRun, PermissionDecision } from '@teskra/contracts'
 
+import { useTranslation } from '../i18n'
 import { usePermissionStore } from '../stores/permission-store'
 import {
   canUseApprovalUi,
@@ -11,12 +12,12 @@ import {
   riskTagColor,
 } from './permission-view-model'
 
-const DECISION_LABELS: Record<PermissionDecision, string> = {
-  'allow-once': 'Allow Once',
-  'allow-session': 'Allow Session',
-  'always-allow': 'Always Allow',
-  deny: 'Deny',
-}
+const DECISIONS: readonly PermissionDecision[] = [
+  'allow-once',
+  'allow-session',
+  'always-allow',
+  'deny',
+]
 
 interface DecisionPanelProps {
   readonly run: AgentRun
@@ -30,10 +31,17 @@ interface DecisionPanelProps {
  * executed, and the in-terminal prompt of the CLI stays the live control.
  */
 function PermissionDecisionPanel({ run, definition }: DecisionPanelProps) {
+  const { t } = useTranslation()
   const resolveDecision = usePermissionStore((state) => state.resolveDecision)
   const [command, setCommand] = useState('')
   const [pending, setPending] = useState<PermissionDecision>()
   const [lastDecision, setLastDecision] = useState<string>()
+  const decisionLabels: Record<PermissionDecision, string> = {
+    'allow-once': t('permissions.decision.allowOnce'),
+    'allow-session': t('permissions.decision.allowSession'),
+    'always-allow': t('permissions.decision.alwaysAllow'),
+    deny: t('permissions.decision.deny'),
+  }
 
   const decide = async (decision: PermissionDecision): Promise<void> => {
     const pattern = command.trim()
@@ -50,27 +58,30 @@ function PermissionDecisionPanel({ run, definition }: DecisionPanelProps) {
     if (result !== undefined) {
       setLastDecision(
         result.persistedAs === 'rule'
-          ? `Saved as a persistent ${result.decision === 'deny' ? 'deny' : 'allow'} rule — it applies to the next ${definition.name} run in this workspace.`
-          : 'Held for this app session — it applies to the next policy projection.',
+          ? t(
+              result.decision === 'deny'
+                ? 'permissions.decision.savedDenyRule'
+                : 'permissions.decision.savedAllowRule',
+              { agent: definition.name },
+            )
+          : t('permissions.decision.heldSession'),
       )
     }
   }
 
   return (
     <Space direction="vertical" size={10} className="permission-decision-panel">
-      <Typography.Text strong>Approval decisions</Typography.Text>
+      <Typography.Text strong>{t('permissions.decision.title')}</Typography.Text>
       <Typography.Text type="secondary">
-        {definition.name} asks for approval in its own terminal prompt. Decisions made here
-        update the rules projected into the CLI before the next Run — they do not affect a
-        command that is already executing.
+        {t('permissions.decision.description', { agent: definition.name })}
       </Typography.Text>
       <Input
         value={command}
         onChange={(event) => setCommand(event.target.value)}
-        placeholder="Command pattern, e.g. Bash(npm test)"
+        placeholder={t('permissions.decision.commandPlaceholder')}
       />
       <Space wrap>
-        {(Object.keys(DECISION_LABELS) as PermissionDecision[]).map((decision) => (
+        {DECISIONS.map((decision) => (
           <Button
             key={decision}
             size="small"
@@ -79,7 +90,7 @@ function PermissionDecisionPanel({ run, definition }: DecisionPanelProps) {
             disabled={command.trim().length === 0}
             onClick={() => void decide(decision)}
           >
-            {DECISION_LABELS[decision]}
+            {decisionLabels[decision]}
           </Button>
         ))}
       </Space>
@@ -105,11 +116,12 @@ export function RunCommandsPanel({
   const entries = usePermissionStore((state) => state.audit)
   const loading = usePermissionStore((state) => state.loading)
   const startAuditSynchronization = usePermissionStore((state) => state.startAuditSynchronization)
+  const { t } = useTranslation()
 
   useEffect(() => startAuditSynchronization(run.id), [run.id, startAuditSynchronization])
 
   const enforcement = definition?.permissionEnforcement ?? 'none'
-  const info = permissionEnforcementInfo(enforcement)
+  const info = permissionEnforcementInfo(enforcement, t)
   const elevated = elevatedEntries(entries)
 
   return (
@@ -117,14 +129,19 @@ export function RunCommandsPanel({
       <Alert
         type="info"
         showIcon
-        message={`${info.label} — commands listed here were recognized after they ran`}
+        message={t('permissions.audit.recognizedNotice', { label: info.label })}
         description={info.description}
       />
       {elevated.length > 0 && (
         <Alert
           type="error"
           showIcon
-          message={`This Run executed ${elevated.length} high-risk command${elevated.length === 1 ? '' : 's'}`}
+          message={t(
+            elevated.length === 1
+              ? 'permissions.audit.elevatedOne'
+              : 'permissions.audit.elevatedMany',
+            { count: elevated.length },
+          )}
           description={elevated.map((entry) => entry.command).join(' · ')}
         />
       )}
@@ -135,7 +152,7 @@ export function RunCommandsPanel({
         {entries.length === 0 && !loading ? (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="No commands recognized in this Run’s output yet"
+            description={t('permissions.audit.empty')}
           />
         ) : (
           <List
@@ -149,11 +166,13 @@ export function RunCommandsPanel({
                     <Typography.Text code>{entry.command}</Typography.Text>
                   </Space>
                   <Typography.Text type="secondary">
-                    Recognized at {new Date(entry.detectedAt).toLocaleString()}
-                    {entry.cwd === undefined ? '' : ` · cwd ${entry.cwd}`}
+                    {t('permissions.audit.recognizedAt', {
+                      time: new Date(entry.detectedAt).toLocaleString(),
+                    })}
+                    {entry.cwd === undefined ? '' : t('permissions.audit.cwd', { cwd: entry.cwd })}
                     {entry.matchedRuleId === undefined
                       ? ''
-                      : ` · matched rule ${entry.matchedRuleId}`}
+                      : t('permissions.audit.matchedRule', { id: entry.matchedRuleId })}
                   </Typography.Text>
                 </Space>
               </List.Item>

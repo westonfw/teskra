@@ -1,6 +1,7 @@
 import type { PermissionAuditEntry, PermissionRule, PublicAppError } from '@teskra/contracts'
 import { describe, expect, it, vi } from 'vitest'
 
+import { enUS, type TranslationKey } from '../i18n/en-US'
 import {
   canUseApprovalUi,
   elevatedEntries,
@@ -12,6 +13,8 @@ import {
   createPermissionStore,
   type PermissionStoreBridge,
 } from './permission-store'
+
+const translate = (key: TranslationKey): string => enUS[key]
 
 const AT = '2026-09-10T00:00:00.000Z'
 
@@ -93,10 +96,12 @@ describe('permission view model (TASK-066)', () => {
   })
 
   it('explains each enforcement mode without claiming interception', () => {
-    expect(permissionEnforcementInfo('native').description).toContain('asks for approval itself')
-    expect(permissionEnforcementInfo('config').description).toContain('audit-only')
-    expect(permissionEnforcementInfo('none').label).toBe('No enforcement')
-    expect(permissionEnforcementInfo('none').description).toContain('post-hoc audit')
+    expect(permissionEnforcementInfo('native', translate).description).toContain(
+      'asks for approval itself',
+    )
+    expect(permissionEnforcementInfo('config', translate).description).toContain('audit-only')
+    expect(permissionEnforcementInfo('none', translate).label).toBe('No enforcement')
+    expect(permissionEnforcementInfo('none', translate).description).toContain('post-hoc audit')
   })
 
   it('marks DESTRUCTIVE / NETWORK_WRITE as elevated with distinct colors', () => {
