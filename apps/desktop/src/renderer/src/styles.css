@@ -747,6 +747,14 @@ body {
   width: 100%;
 }
 
+.permission-rule-form {
+  width: 100%;
+}
+
+.permission-rule-form .ant-select {
+  width: 100%;
+}
+
 .run-prompt {
   margin: 0 !important;
   white-space: pre-wrap;
