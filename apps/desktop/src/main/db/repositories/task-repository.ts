@@ -181,7 +181,40 @@ export function createTaskRepository(connection: Database.Database): TaskReposit
 
     delete(id) {
       return execute(ENTITY, 'delete', () => {
-        return connection.prepare('DELETE FROM tasks WHERE id = ?').run(id).changes > 0
+        return connection.transaction(() => {
+          const deleted =
+            connection.prepare('DELETE FROM tasks WHERE id = ?').run(id).changes > 0
+          // ADR-0007: deleting the task NULLs its criteria sets' task_id
+          // (migration 010). Sets still anchored by audit rows (runs /
+          // workflow runs / panels / findings) stay so the acceptance
+          // contract a run was judged against remains traceable; everything
+          // else orphaned by the delete is swept here.
+          connection
+            .prepare(
+              `DELETE FROM acceptance_criteria_sets
+               WHERE task_id IS NULL
+                 AND NOT EXISTS (
+                   SELECT 1 FROM agent_runs
+                   WHERE agent_runs.criteria_set_id = acceptance_criteria_sets.id
+                 )
+                 AND NOT EXISTS (
+                   SELECT 1 FROM workflow_runs
+                   WHERE workflow_runs.criteria_set_id = acceptance_criteria_sets.id
+                 )
+                 AND NOT EXISTS (
+                   SELECT 1 FROM review_panels
+                   WHERE review_panels.criteria_set_id = acceptance_criteria_sets.id
+                 )
+                 AND NOT EXISTS (
+                   SELECT 1 FROM review_findings
+                   JOIN acceptance_criteria
+                     ON acceptance_criteria.id = review_findings.criterion_id
+                   WHERE acceptance_criteria.criteria_set_id = acceptance_criteria_sets.id
+                 )`,
+            )
+            .run()
+          return deleted
+        })()
       })
     },
   }

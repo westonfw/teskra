@@ -26,7 +26,8 @@ docs/
    ├─ 0003-data-directory-and-paths.md
    ├─ 0004-handoff-file-contract.md
    ├─ 0005-config-layers-and-runtime-facade.md
-   └─ 0006-workflow-run-task-optional.md
+   ├─ 0006-workflow-run-task-optional.md
+   └─ 0007-criteria-set-task-nullable.md
 ```
 
 ## 文档权威性（实现任何功能前必读）
@@ -99,6 +100,13 @@ npm run release       # 发布编排（TASK-073，scripts/release.mjs）：build
                       # CSC_KEY_PASSWORD，缺失则警告并产出未签名产物）→ package → checksum →
                       # release notes；完整流程见 docs/release.md，CI 见 .github/workflows/release.yml
 ```
+
+E2E 一律以软件渲染启动 Electron（`apps/desktop/e2e/fixtures.ts` 的 `launchApp` /
+`launchSwitches`，即 `--disable-gpu` 等开关）：整套 E2E 会连续启动并强杀二十多个
+Electron 实例，开硬件加速时每个实例都要经 ANGLE 建/拆 D3D11 设备，强杀进程树又会在
+GPU 进程仍持有设备资源时把它干掉——在 Windows 上曾把显卡驱动打到 DXGKRNL 看门狗
+转储 + 0x7E 蓝屏，整台机器随测试一起挂掉。E2E 只断言 DOM，不需要 GPU；`npm run dev`
+和发布产物不受影响。确需验证 GPU 行为时用 `TESKRA_E2E_GPU=1` 单独开启。
 
 CI（GitHub Actions，`.github/workflows/ci.yml`，TASK-091）：matrix 为
 `windows-latest`（必过门禁，失败阻塞合并）+ `ubuntu-latest`（快速反馈，允许失败），

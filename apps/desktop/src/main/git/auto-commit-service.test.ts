@@ -40,7 +40,8 @@ const directories: string[] = []
 
 afterEach(() => {
   for (const database of databases.splice(0)) database.close()
-  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  for (const directory of directories.splice(0))
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 interface Fixture {
@@ -68,11 +69,17 @@ async function setup(commands?: CommandRunner): Promise<Fixture> {
   const repoDir = join(directory, 'repo')
   const dataRoot = join(directory, 'data-root')
   mkdirSync(repoDir)
-  const real = createCommandRunner({ hostPlatform: 'linux' })
+  const real = createCommandRunner()
   const git = async (...args: string[]) => {
     const result = await real.run({ command: 'git', args, cwd: repoDir, timeoutMs: 15_000 })
     if (!result.ok || result.data.exitCode !== 0) {
-      throw new Error(`git ${args.join(' ')} failed: ${result.ok ? result.data.stderr : 'ipc'}`)
+      throw new Error(
+        `git ${args.join(' ')} failed: ${
+          result.ok
+            ? `exit=${String(result.data.exitCode)} stderr=${JSON.stringify(result.data.stderr)} stdout=${JSON.stringify(result.data.stdout)}`
+            : `${result.error.code}: ${result.error.message}`
+        }`,
+      )
     }
     return result.data.stdout
   }
@@ -349,7 +356,7 @@ describe('AutoCommitService (TASK-087)', () => {
   })
 
   it('keeps the run completed and the changes uncommitted when the commit fails', async () => {
-    const real = createCommandRunner({ hostPlatform: 'linux' })
+    const real = createCommandRunner()
     const failingCommit: CommandRunner = {
       async run(request) {
         if (request.args?.[0] === 'commit') {

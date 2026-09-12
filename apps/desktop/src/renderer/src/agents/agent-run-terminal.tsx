@@ -40,6 +40,7 @@ export function AgentRunTerminal({ run, initialData }: AgentRunTerminalProps) {
       terminal,
       {
         send: (runId, data) => window.teskra.agent.send({ runId, data }),
+        resize: (runId, cols, rows) => window.teskra.agent.resize({ runId, cols, rows }),
         subscribeOutput: (runId, handler) =>
           window.teskra.events.subscribe('agent.output', (event) => {
             if (event.runId === runId) handler(event.data)

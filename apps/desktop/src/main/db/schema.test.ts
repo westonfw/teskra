@@ -273,13 +273,14 @@ const SCHEMA: Record<string, TableSpec> = {
     source: '§139.1 lines 5333–5342',
     columns: [
       ['id', 'TEXT', 0, null, 1],
-      ['task_id', 'TEXT', 1, null, 0],
+      // ADR-0007: nullable like workflow_runs.task_id — 被 Run 锚定的版本随审计保留。
+      ['task_id', 'TEXT', 0, null, 0],
       ['version', 'INTEGER', 1, null, 0],
       ['status', 'TEXT', 1, null, 0],
       ['confirmed_at', 'TEXT', 0, null, 0],
       ['created_at', 'TEXT', 1, null, 0],
     ],
-    foreignKeys: [{ from: 'task_id', table: 'tasks', to: 'id', onDelete: 'CASCADE' }],
+    foreignKeys: [{ from: 'task_id', table: 'tasks', to: 'id', onDelete: 'SET NULL' }],
     indexes: [
       {
         name: 'idx_criteria_sets_task_version',

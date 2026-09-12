@@ -25,7 +25,7 @@ describe('DiffService (TASK-036)', () => {
   it('recognizes added, modified, deleted, and renamed files with line stats and patches', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'teskra-diff-'))
     directories.push(directory)
-    const commands = createCommandRunner({ hostPlatform: 'linux' })
+    const commands = createCommandRunner()
     for (const args of [
       ['init', '--initial-branch=main'],
       ['config', 'user.name', 'Teskra Test'],

@@ -211,6 +211,7 @@ describe('CodexAdapter process integration (TASK-026)', () => {
     const processes = {
       start: vi.fn(),
       write: vi.fn(),
+      resize: vi.fn(),
       stop: vi.fn(),
     }
     const adapter = createCodexAdapter({

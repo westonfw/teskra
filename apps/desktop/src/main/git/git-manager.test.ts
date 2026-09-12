@@ -35,7 +35,7 @@ describe('GitManager (TASK-035)', () => {
   it('supports status, branch, diff, log, and commit in a WSL/native repository', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'teskra-git-'))
     directories.push(directory)
-    const commands = createCommandRunner({ hostPlatform: 'linux' })
+    const commands = createCommandRunner()
     const initialized = await commands.run({
       command: 'git',
       args: ['init', '--initial-branch=main'],
@@ -122,7 +122,7 @@ describe('GitManager (TASK-035)', () => {
   it('reports a detached HEAD as detached, not as a pseudo-branch', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'teskra-git-detached-'))
     directories.push(directory)
-    const commands = createCommandRunner({ hostPlatform: 'linux' })
+    const commands = createCommandRunner()
     for (const args of [
       ['init', '--initial-branch=main'],
       ['config', 'user.name', 'Teskra Test'],

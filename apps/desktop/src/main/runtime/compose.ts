@@ -789,6 +789,7 @@ export async function composeTeskraRuntime(
       startReview: (request) => reviewerService.startReview(request),
       resume: (request) => resumeService.resume(request),
       send: (request) => agentManager.send(request),
+      resize: (request) => agentManager.resize(request),
       cancel: ({ runId }) => agentManager.cancel(runId),
       get: ({ runId }) => agentManager.get(runId),
       list: (request = {}) => agentManager.list(request),

@@ -36,7 +36,7 @@ const request: AgentStartRequest = {
 }
 
 function dependencies() {
-  const processes: Pick<ProcessManager, 'start' | 'write' | 'stop'> = {
+  const processes: Pick<ProcessManager, 'start' | 'write' | 'resize' | 'stop'> = {
     start: vi.fn(() => ({
       ok: true as const,
       data: {
@@ -48,6 +48,7 @@ function dependencies() {
       },
     })),
     write: vi.fn(() => ({ ok: true as const, data: undefined })),
+    resize: vi.fn(() => ({ ok: true as const, data: undefined })),
     stop: vi.fn(async () => ({
       ok: true as const,
       data: {

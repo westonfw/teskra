@@ -45,7 +45,7 @@ export const acceptanceCriterionRecordSchema = acceptanceCriterionSchema.extend(
 
 interface CriteriaSetRow {
   id: string
-  task_id: string
+  task_id: string | null
   version: number
   status: string
   confirmed_at: string | null
@@ -110,7 +110,7 @@ const CRITERION_ENTITY = 'criterion'
 function setToDomain(row: CriteriaSetRow): IpcResult<AcceptanceCriteriaSet> {
   return validateRow(acceptanceCriteriaSetRecordSchema, SET_ENTITY, {
     id: row.id,
-    taskId: row.task_id,
+    taskId: row.task_id ?? undefined,
     version: row.version,
     status: row.status,
     confirmedAt: row.confirmed_at ?? undefined,

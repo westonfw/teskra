@@ -2,30 +2,19 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { _electron as electron, type ElectronApplication } from '@playwright/test'
+import type { ElectronApplication } from '@playwright/test'
 
 import {
-  APP_DIR,
-  REPO_ROOT,
   createGitRepo,
   ensureProcessGone,
   hardKillElectron,
+  launchApp,
+  relaunchApp,
   openWorkspaceViaBridge,
   removeDir,
   test,
   expect,
 } from '../fixtures'
-
-function launchEnv(teskraHome: string): Record<string, string> {
-  const env: Record<string, string> = {}
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined) env[key] = value
-  }
-  delete env['ELECTRON_RUN_AS_NODE']
-  env['TESKRA_HOME'] = teskraHome
-  if (env['DISPLAY'] === undefined && process.platform === 'linux') env['DISPLAY'] = ':0'
-  return env
-}
 
 test.describe('Task Runs card resume', () => {
   test('an interrupted run can be resumed from the task page, same as the Runs page', async () => {
@@ -34,7 +23,7 @@ test.describe('Task Runs card resume', () => {
     const repoDir = createGitRepo()
     let app: ElectronApplication | undefined
     try {
-      app = await electron.launch({ args: [APP_DIR], cwd: REPO_ROOT, env: launchEnv(teskraHome) })
+      app = await launchApp(teskraHome)
       let page = await app.firstWindow()
       const workspace = await openWorkspaceViaBridge(page, repoDir, 'Task Resume Repo')
       await page.evaluate(
@@ -66,7 +55,7 @@ test.describe('Task Runs card resume', () => {
 
       await hardKillElectron(app)
 
-      app = await electron.launch({ args: [APP_DIR], cwd: REPO_ROOT, env: launchEnv(teskraHome) })
+      app = await relaunchApp(teskraHome)
       page = await app.firstWindow()
 
       // The task's Runs card exposes Resume for the interrupted run.

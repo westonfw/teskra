@@ -20,6 +20,10 @@ export class XtermTerminalRenderer implements TerminalRenderer {
       fontSize: 13,
       lineHeight: 1.18,
       scrollback: 10_000,
+      // Agent TUIs emit white/bright-white text even under a light theme;
+      // let xterm pull any low-contrast foreground up to WCAG AA instead of
+      // rendering invisible glyphs.
+      minimumContrastRatio: 4.5,
       allowProposedApi: false,
       disableStdin: options.readOnly ?? false,
       theme: xtermThemes[useThemeStore.getState().theme],

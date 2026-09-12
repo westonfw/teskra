@@ -177,7 +177,7 @@ describe('ON DELETE CASCADE (§139.1)', () => {
     }
   })
 
-  it('deleting a task cascades to criteria sets, review panels, artifacts (ADR-0006: workflow_runs 不再级联)', () => {
+  it('deleting a task cascades to review panels and artifacts; criteria sets survive as orphans (ADR-0007)', () => {
     const db = migratedDb()
     insertWorkspace(db)
     insertTask(db)
@@ -188,7 +188,13 @@ describe('ON DELETE CASCADE (§139.1)', () => {
 
     db.prepare('DELETE FROM tasks WHERE id = ?').run('t1')
 
-    for (const table of ['acceptance_criteria_sets', 'review_panels', 'artifacts']) {
+    // ADR-0007: criteria sets get task_id SET NULL; sweeping unreferenced
+    // orphans is TaskRepository.delete's job, not the FK's.
+    expect(count(db, 'acceptance_criteria_sets')).toBe(1)
+    expect(db.prepare('SELECT task_id FROM acceptance_criteria_sets WHERE id = ?').get('cs1')).toEqual(
+      { task_id: null },
+    )
+    for (const table of ['review_panels', 'artifacts']) {
       expect(count(db, table), table).toBe(0)
     }
     // ADR-0006 (TASK-056): WorkflowRun 独立于 Task —— 删除 Task 后保留运行记录。

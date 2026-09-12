@@ -27,6 +27,8 @@ export interface CodingAgentAdapter {
   detect(request: AgentAdapterDetectionRequest): Promise<IpcResult<AgentDetectionResult>>
   start(request: AgentStartRequest): Promise<IpcResult<AgentProcessHandle>>
   send(runId: string, input: string): Promise<IpcResult<void>>
+  /** Best-effort PTY resize; adapters without a live PTY may omit it. */
+  resize?(runId: string, cols: number, rows: number): IpcResult<void>
   cancel(runId: string): Promise<IpcResult<void>>
   resume?(request: AgentResumeRequest): Promise<IpcResult<AgentProcessHandle>>
 }

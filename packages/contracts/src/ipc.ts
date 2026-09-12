@@ -11,6 +11,7 @@ import {
   listAgentDetectionsRequestSchema,
   listAgentRunsRequestSchema,
   resumeAgentRunRequestSchema,
+  resizeAgentRunRequestSchema,
   reviewRunStartResultSchema,
   sendAgentRunInputRequestSchema,
   setAgentExecutableOverrideRequestSchema,
@@ -25,6 +26,7 @@ import {
   type AgentExecutableOverrideRequest,
   type ListAgentDetectionsRequest,
   type ListAgentRunsRequest,
+  type ResizeAgentRunRequest,
   type ResumeAgentRunRequest,
   type ReviewRunStartResult,
   type SendAgentRunInputRequest,
@@ -379,6 +381,7 @@ export const IPC_CHANNELS = {
   agentRunStart: 'teskra:agent-run:start',
   agentRunReviewStart: 'teskra:agent-run:review-start',
   agentRunSend: 'teskra:agent-run:send',
+  agentRunResize: 'teskra:agent-run:resize',
   agentRunCancel: 'teskra:agent-run:cancel',
   agentRunGet: 'teskra:agent-run:get',
   agentRunList: 'teskra:agent-run:list',
@@ -704,6 +707,11 @@ export const agentRunReviewStartChannel = channel(
 export const agentRunSendChannel = channel(
   IPC_CHANNELS.agentRunSend,
   sendAgentRunInputRequestSchema,
+  voidResponseSchema,
+)
+export const agentRunResizeChannel = channel(
+  IPC_CHANNELS.agentRunResize,
+  resizeAgentRunRequestSchema,
   voidResponseSchema,
 )
 export const agentRunCancelChannel = channel(
@@ -1086,6 +1094,7 @@ export const ipcChannelDefinitions = {
   agentRunStart: agentRunStartChannel,
   agentRunReviewStart: agentRunReviewStartChannel,
   agentRunSend: agentRunSendChannel,
+  agentRunResize: agentRunResizeChannel,
   agentRunCancel: agentRunCancelChannel,
   agentRunGet: agentRunGetChannel,
   agentRunList: agentRunListChannel,
@@ -1238,6 +1247,7 @@ export interface TeskraBridge {
     start(request: StartAgentRunRequest): Promise<IpcResult<AgentRun>>
     startReview(request: StartReviewRunRequest): Promise<IpcResult<ReviewRunStartResult>>
     send(request: SendAgentRunInputRequest): Promise<IpcResult<void>>
+    resize(request: ResizeAgentRunRequest): Promise<IpcResult<void>>
     cancel(request: AgentRunIdRequest): Promise<IpcResult<AgentRun>>
     get(request: AgentRunIdRequest): Promise<IpcResult<AgentRun | null>>
     list(request?: ListAgentRunsRequest): Promise<IpcResult<AgentRun[]>>

@@ -81,6 +81,7 @@ import type {
   ResolvedConfig,
   ResolvedPermissionProfile,
   ResumeAgentRunRequest,
+  ResizeAgentRunRequest,
   RetentionPlan,
   RetentionPlanRequest,
   RetentionReport,
@@ -309,6 +310,7 @@ export interface AgentCatalogPort {
   startReview(request: StartReviewRunRequest): Promise<IpcResult<ReviewRunStartResult>>
   resume(request: ResumeAgentRunRequest): Promise<IpcResult<AgentRun>>
   send(request: SendAgentRunInputRequest): Promise<IpcResult<void>>
+  resize(request: ResizeAgentRunRequest): IpcResult<void>
   cancel(request: AgentRunIdRequest): Promise<IpcResult<AgentRun>>
   get(request: AgentRunIdRequest): IpcResult<AgentRun | null>
   list(request?: ListAgentRunsRequest): IpcResult<readonly AgentRun[]>

@@ -13,6 +13,7 @@ import {
   type ListAgentRunsRequest,
   type ProviderSessionRef,
   type PublicAppError,
+  type ResizeAgentRunRequest,
   type ResumeAgentRunRequest,
   type SendAgentRunInputRequest,
   type StartAgentRunRequest,
@@ -49,6 +50,7 @@ export interface AgentManager {
   start(request: StartAgentRunRequest): Promise<IpcResult<AgentRun>>
   resume(request: ResumeAgentRunRequest): Promise<IpcResult<AgentRun>>
   send(request: SendAgentRunInputRequest): Promise<IpcResult<void>>
+  resize(request: ResizeAgentRunRequest): IpcResult<void>
   cancel(runId: string): Promise<IpcResult<AgentRun>>
   get(runId: string): IpcResult<AgentRun | null>
   list(request?: ListAgentRunsRequest): IpcResult<AgentRun[]>
@@ -933,6 +935,20 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       if (!updated.ok) return updated
       if (updated.data !== null) persistRunManifest(updated.data)
       return { ok: true, data: undefined }
+    },
+
+    resize({ runId, cols, rows }) {
+      const adapter = activeAdapters.get(runId)
+      if (adapter === undefined) {
+        return fail({
+          code: 'PROCESS_NOT_FOUND',
+          message: `Agent run "${runId}" is not active.`,
+          retryable: false,
+          detail: 'No active Adapter binding exists for run resize.',
+        })
+      }
+      // Adapters without a live PTY (e.g. test doubles) accept resize as a no-op.
+      return adapter.resize?.(runId, cols, rows) ?? { ok: true, data: undefined }
     },
 
     async cancel(runId) {

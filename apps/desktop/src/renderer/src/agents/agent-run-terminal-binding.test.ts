@@ -7,6 +7,7 @@ import { bindAgentRunTerminal, type AgentRunTerminalTransport } from './agent-ru
 function setup() {
   let input: ((data: string) => void) | undefined
   let output: ((data: string) => void) | undefined
+  let resizeHandler: ((size: { cols: number; rows: number }) => void) | undefined
   const inputDispose = vi.fn()
   const resizeDispose = vi.fn()
   const stopOutput = vi.fn()
@@ -16,10 +17,14 @@ function setup() {
       input = handler
       return { dispose: inputDispose }
     }),
-    onResize: vi.fn(() => ({ dispose: resizeDispose })),
+    onResize: vi.fn((handler) => {
+      resizeHandler = handler
+      return { dispose: resizeDispose }
+    }),
   }
   const transport: AgentRunTerminalTransport = {
     send: vi.fn(async (): Promise<IpcResult<void>> => ({ ok: true, data: undefined })),
+    resize: vi.fn(async (): Promise<IpcResult<void>> => ({ ok: true, data: undefined })),
     subscribeOutput: vi.fn((_runId, handler) => {
       output = handler
       return stopOutput
@@ -30,6 +35,7 @@ function setup() {
     transport,
     input: (data: string) => input?.(data),
     output: (data: string) => output?.(data),
+    resize: (cols: number, rows: number) => resizeHandler?.({ cols, rows }),
     inputDispose,
     resizeDispose,
     stopOutput,
@@ -48,6 +54,20 @@ describe('Agent Run terminal binding', () => {
 
     expect(context.surface.write).toHaveBeenCalledWith(raw)
     expect(context.transport.send).toHaveBeenCalledWith('run-1', 'continue\r')
+    dispose()
+  })
+
+  it('forwards surface size changes to the Agent PTY, deduped', () => {
+    const context = setup()
+    const dispose = bindAgentRunTerminal('run-1', context.surface, context.transport)
+
+    context.resize(96, 28)
+    context.resize(96, 28)
+    context.resize(120, 30)
+
+    expect(context.transport.resize).toHaveBeenCalledTimes(2)
+    expect(context.transport.resize).toHaveBeenNthCalledWith(1, 'run-1', 96, 28)
+    expect(context.transport.resize).toHaveBeenNthCalledWith(2, 'run-1', 120, 30)
     dispose()
   })
 

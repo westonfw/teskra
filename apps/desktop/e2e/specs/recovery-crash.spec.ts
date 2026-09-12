@@ -2,14 +2,14 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { _electron as electron, type ElectronApplication } from '@playwright/test'
+import type { ElectronApplication } from '@playwright/test'
 
 import {
-  APP_DIR,
-  REPO_ROOT,
   createGitRepo,
   ensureProcessGone,
   hardKillElectron,
+  launchApp,
+  relaunchApp,
   openWorkspaceViaBridge,
   removeDir,
   test,
@@ -23,17 +23,6 @@ import {
  * exercised implicitly — the relaunched instance must boot normally after a
  * hard kill.
  */
-function launchEnv(teskraHome: string): Record<string, string> {
-  const env: Record<string, string> = {}
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined) env[key] = value
-  }
-  delete env['ELECTRON_RUN_AS_NODE']
-  env['TESKRA_HOME'] = teskraHome
-  if (env['DISPLAY'] === undefined && process.platform === 'linux') env['DISPLAY'] = ':0'
-  return env
-}
-
 test.describe('Crash recovery', () => {
   test('relaunches after SIGKILL and resumes the interrupted run from the Recovery Center', async () => {
     test.setTimeout(180_000)
@@ -41,7 +30,7 @@ test.describe('Crash recovery', () => {
     const repoDir = createGitRepo()
     let app: ElectronApplication | undefined
     try {
-      app = await electron.launch({ args: [APP_DIR], cwd: REPO_ROOT, env: launchEnv(teskraHome) })
+      app = await launchApp(teskraHome)
       let page = await app.firstWindow()
       const workspace = await openWorkspaceViaBridge(page, repoDir, 'Recovery Repo')
       await page.evaluate(
@@ -70,7 +59,7 @@ test.describe('Crash recovery', () => {
 
       await hardKillElectron(app)
 
-      app = await electron.launch({ args: [APP_DIR], cwd: REPO_ROOT, env: launchEnv(teskraHome) })
+      app = await relaunchApp(teskraHome)
       page = await app.firstWindow()
       await page.getByRole('menuitem', { name: 'Recovery' }).click()
       await expect(page.getByText('Recovery Center')).toBeVisible()

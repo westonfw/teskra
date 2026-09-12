@@ -47,6 +47,85 @@ function launchEnv(teskraHome: string): Record<string, string> {
   return env
 }
 
+/**
+ * Chromium switches every E2E launch gets.
+ *
+ * The suite starts — and repeatedly hard-kills — roughly two dozen Electron
+ * instances back to back. With hardware acceleration on, each one creates a
+ * D3D11 device through ANGLE and tears it down again, and a tree-kill
+ * (hardKillElectron / ensureProcessGone) drops the GPU process while it still
+ * holds device resources. On Windows that hammers the display driver: the
+ * failure mode observed on a dev host was a DXGKRNL watchdog live dump
+ * followed by a 0x7E bugcheck — the whole machine went down mid-suite, not
+ * just the test run.
+ *
+ * Nothing under test needs the GPU (the specs assert DOM state, and
+ * page.screenshot() renders fine from the software surface), so E2E renders in
+ * software and the display driver stays out of the loop. Only these launches
+ * are affected — `npm run dev` and the shipped app keep hardware
+ * acceleration. Set TESKRA_E2E_GPU=1 to opt back in when deliberately
+ * exercising GPU behaviour.
+ */
+export function launchSwitches(): string[] {
+  const switches: string[] = []
+  // Chromium's setuid sandbox is unavailable on some headless Linux CI
+  // containers; opt out there explicitly (renderer sandbox stays enabled).
+  if (process.env['TESKRA_E2E_NO_SANDBOX'] === '1') switches.push('--no-sandbox')
+  if (process.env['TESKRA_E2E_GPU'] !== '1') {
+    switches.push('--disable-gpu', '--disable-gpu-compositing', '--disable-software-rasterizer')
+  }
+  return switches
+}
+
+/**
+ * The single way E2E starts the app: isolated TESKRA_HOME + the switches
+ * above. Specs that relaunch the app mid-test (crash recovery) use it too, so
+ * there is exactly one launch configuration in the suite.
+ */
+export async function launchApp(teskraHome: string): Promise<ElectronApplication> {
+  return await electron.launch({
+    args: [APP_DIR, ...launchSwitches()],
+    cwd: REPO_ROOT,
+    env: launchEnv(teskraHome),
+  })
+}
+
+/**
+ * Relaunch after hardKillElectron, retried until the killed instance is really
+ * gone.
+ *
+ * The app takes a single-instance lock keyed on its data root (main/index.ts:
+ * a second instance would share the single-writer SQLite database), and a
+ * relaunch landing before Windows has released the killed instance's lock sees
+ * it still held, calls app.quit() and exits 0 — correct product behaviour that
+ * Playwright can only report as "the app closed during launch". Waiting on the
+ * root PID (hardKillElectron) is not enough: the lock outlives it briefly.
+ * Observed once in ~20 full-suite runs, never standalone, so the window is
+ * short and load-dependent.
+ *
+ * A relaunch that is broken rather than racing still fails the test: every
+ * attempt inside the deadline has to fail, and the last error is rethrown.
+ */
+export async function relaunchApp(teskraHome: string): Promise<ElectronApplication> {
+  const deadline = Date.now() + 30_000
+  for (;;) {
+    let app: ElectronApplication | undefined
+    try {
+      app = await launchApp(teskraHome)
+      // The instance that loses the lock quits before it opens a window, so
+      // waiting for one is what separates a live app from a lock collision.
+      await app.firstWindow({ timeout: 15_000 })
+      return app
+    } catch (cause) {
+      if (app !== undefined) await app.close().catch(() => undefined)
+      if (Date.now() >= deadline) {
+        throw new Error('relaunch never acquired the single-instance lock within 30s', { cause })
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    }
+  }
+}
+
 /** A throwaway git repository used as the workspace path. Caller removes it. */
 export function createGitRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), 'teskra-e2e-repo-'))
@@ -209,14 +288,7 @@ export const test = base.extend<TeskraE2EFixtures>({
     removeDir(home)
   },
   electronApp: async ({ teskraHome }, use) => {
-    // Chromium's setuid sandbox is unavailable on some headless Linux CI
-    // containers; opt out there explicitly (renderer sandbox stays enabled).
-    const noSandbox = process.env['TESKRA_E2E_NO_SANDBOX'] === '1'
-    const app = await electron.launch({
-      args: noSandbox ? [APP_DIR, '--no-sandbox'] : [APP_DIR],
-      cwd: REPO_ROOT,
-      env: launchEnv(teskraHome),
-    })
+    const app = await launchApp(teskraHome)
     await use(app)
     await app.close().catch(() => undefined)
     await ensureProcessGone(app)

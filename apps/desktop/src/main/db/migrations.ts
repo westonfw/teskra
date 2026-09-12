@@ -12,6 +12,7 @@ import worktreeArchiveSql from './migrations/006_worktree_archive.sql?raw'
 import workflowRunTaskOptionalSql from './migrations/007_workflow_run_task_optional.sql?raw'
 import workflowRunCriteriaIterationSql from './migrations/008_workflow_run_criteria_iteration.sql?raw'
 import agentRunModeSql from './migrations/009_agent_run_mode.sql?raw'
+import criteriaSetTaskNullableSql from './migrations/010_criteria_set_task_nullable.sql?raw'
 
 /**
  * The canonical migration chain (TASK-006). The .sql files under
@@ -39,6 +40,14 @@ export const MIGRATIONS: readonly Migration[] = [
   },
   { version: 8, name: '008_workflow_run_criteria_iteration', sql: workflowRunCriteriaIterationSql },
   { version: 9, name: '009_agent_run_mode', sql: agentRunModeSql },
+  {
+    version: 10,
+    name: '010_criteria_set_task_nullable',
+    sql: criteriaSetTaskNullableSql,
+    // Table rebuild (ADR-0007), same mechanics as 007: FK must be off so
+    // DROP TABLE does not implicit-DELETE the copied rows' dependents.
+    foreignKeysOff: true,
+  },
 ]
 
 /** Brings the database schema up to the latest known version. */

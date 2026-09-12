@@ -27,7 +27,7 @@ export interface CliAgentLaunch {
 
 export interface CliAgentAdapterOptions {
   readonly definition: AgentDefinition
-  readonly processes: Pick<ProcessManager, 'start' | 'write' | 'stop'>
+  readonly processes: Pick<ProcessManager, 'start' | 'write' | 'resize' | 'stop'>
   readonly detector: Pick<AgentDetector, 'detect' | 'getExecutableOverride'>
   readonly resolveRuntime: (ref: WorkspaceRuntimeRef) => IpcResult<WorkspaceRuntime>
   readonly baseArgs?: readonly string[]
@@ -137,6 +137,10 @@ export function createCliAgentAdapter(options: CliAgentAdapterOptions): CodingAg
 
     async send(runId, input) {
       return options.processes.write(agentProcessId(runId), input)
+    },
+
+    resize(runId, cols, rows) {
+      return options.processes.resize(agentProcessId(runId), cols, rows)
     },
 
     async cancel(runId) {

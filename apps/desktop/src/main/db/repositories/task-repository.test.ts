@@ -76,6 +76,94 @@ describe('TaskRepository', () => {
     expect(repo.delete('t-1')).toEqual({ ok: true, data: false })
   })
 
+  const NOW = '2026-09-09T00:00:00.000Z'
+
+  function insertCriteriaSet(id: string, taskId: string) {
+    connection
+      .prepare(
+        `INSERT INTO acceptance_criteria_sets (id, task_id, version, status, created_at)
+         VALUES (?, ?, 1, 'confirmed', ?)`,
+      )
+      .run(id, taskId, NOW)
+  }
+
+  function insertCriterion(id: string, setId: string) {
+    connection
+      .prepare(
+        `INSERT INTO acceptance_criteria (id, criteria_set_id, ordinal, description, required, created_at)
+         VALUES (?, ?, 1, 'it works', 1, ?)`,
+      )
+      .run(id, setId, NOW)
+  }
+
+  function insertRun(id: string, taskId: string, criteriaSetId?: string) {
+    connection
+      .prepare(
+        `INSERT INTO agent_runs
+           (id, task_id, workspace_id, agent_type, status, execution_mode, criteria_set_id,
+            run_dir, created_at, updated_at)
+         VALUES (?, ?, 'ws-1', 'claude', 'completed', 'orchestrated', ?, ?, ?, ?)`,
+      )
+      .run(id, taskId, criteriaSetId ?? null, `/runs/${id}`, NOW, NOW)
+  }
+
+  it('keeps runs and their anchored criteria sets as orphans when deleting the task (ADR-0007)', () => {
+    setup()
+    repo.create({ id: 't-1', workspaceId: 'ws-1', title: 'A' })
+    insertCriteriaSet('cs-1', 't-1')
+    insertCriterion('c-1', 'cs-1')
+    insertRun('run-1', 't-1', 'cs-1')
+
+    expect(repo.delete('t-1')).toEqual({ ok: true, data: true })
+
+    const run = connection
+      .prepare('SELECT task_id, criteria_set_id FROM agent_runs WHERE id = ?')
+      .get('run-1') as { task_id: string | null; criteria_set_id: string | null }
+    expect(run.task_id).toBeNull()
+    expect(run.criteria_set_id).toBe('cs-1')
+
+    const set = connection
+      .prepare('SELECT task_id FROM acceptance_criteria_sets WHERE id = ?')
+      .get('cs-1') as { task_id: string | null } | undefined
+    expect(set?.task_id).toBeNull()
+  })
+
+  it('sweeps criteria sets no audit row references when deleting the task', () => {
+    setup()
+    repo.create({ id: 't-1', workspaceId: 'ws-1', title: 'A' })
+    insertCriteriaSet('cs-1', 't-1')
+    insertCriterion('c-1', 'cs-1')
+
+    expect(repo.delete('t-1')).toEqual({ ok: true, data: true })
+    expect(
+      connection
+        .prepare('SELECT COUNT(*) AS n FROM acceptance_criteria_sets WHERE id = ?')
+        .get('cs-1'),
+    ).toEqual({ n: 0 })
+    expect(
+      connection.prepare('SELECT COUNT(*) AS n FROM acceptance_criteria WHERE id = ?').get('c-1'),
+    ).toEqual({ n: 0 })
+  })
+
+  it('keeps a set whose criterion a review finding cites, even with no run anchoring it', () => {
+    setup()
+    repo.create({ id: 't-1', workspaceId: 'ws-1', title: 'A' })
+    insertCriteriaSet('cs-1', 't-1')
+    insertCriterion('c-1', 'cs-1')
+    insertRun('run-1', 't-1')
+    connection
+      .prepare(
+        `INSERT INTO review_findings (id, run_id, severity, title, criterion_id, created_at)
+         VALUES ('rf-1', 'run-1', 'low', 'note', 'c-1', ?)`,
+      )
+      .run(NOW)
+
+    expect(repo.delete('t-1')).toEqual({ ok: true, data: true })
+    expect(
+      connection.prepare('SELECT task_id FROM acceptance_criteria_sets WHERE id = ?').get('cs-1'),
+    ).toEqual({ task_id: null })
+  })
+
   it('rejects a stored status outside the contracts TaskStatus enum', () => {
     setup()
     repo.create({ id: 't-1', workspaceId: 'ws-1', title: 'A' })

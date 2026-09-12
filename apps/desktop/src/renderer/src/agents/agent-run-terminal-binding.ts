@@ -4,6 +4,7 @@ import type { TerminalSurface } from '../terminal/terminal-session-binding'
 
 export interface AgentRunTerminalTransport {
   send(runId: string, data: string): Promise<IpcResult<void>>
+  resize(runId: string, cols: number, rows: number): Promise<IpcResult<void>>
   subscribeOutput(runId: string, handler: (data: string) => void): () => void
 }
 
@@ -21,6 +22,7 @@ export function bindAgentRunTerminal(
   options: AgentRunTerminalBindingOptions = {},
 ): () => void {
   let disposed = false
+  let previousSize = ''
 
   const input = surface.onData((data) => {
     if (disposed) return
@@ -36,9 +38,16 @@ export function bindAgentRunTerminal(
           )
       })
   })
-  const resize = surface.onResize(() => {
-    // Agent PTYs currently use ProcessManager's launch dimensions. This listener
-    // is retained so renderer implementations can dispose all subscriptions.
+  const resize = surface.onResize(({ cols, rows }) => {
+    if (disposed || cols <= 0 || rows <= 0) return
+    const size = `${cols}x${rows}`
+    if (size === previousSize) return
+    previousSize = size
+    // Best-effort: ended runs have no live PTY, and a rejected resize must not
+    // surface as an error on an otherwise healthy read-only view.
+    void transport
+      .resize(runId, cols, rows)
+      .catch(() => {})
   })
   const stopOutput = transport.subscribeOutput(runId, (data) => {
     if (!disposed) surface.write(data)

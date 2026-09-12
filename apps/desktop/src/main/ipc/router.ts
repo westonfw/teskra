@@ -303,6 +303,10 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.agent.send(request)),
   )
   register(
+    ipcChannelDefinitions.agentRunResize,
+    withRuntime((runtime, request) => runtime.agent.resize(request)),
+  )
+  register(
     ipcChannelDefinitions.agentRunCancel,
     withRuntime((runtime, request) => runtime.agent.cancel(request)),
   )

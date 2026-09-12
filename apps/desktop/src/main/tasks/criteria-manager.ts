@@ -113,7 +113,9 @@ export function createCriteriaManager(deps: CriteriaManagerDeps): CriteriaManage
     return { ok: true, data: { set, criteria: criteria.data } }
   }
 
-  const touchTask = (taskId: string): void => {
+  const touchTask = (taskId: string | undefined): void => {
+    // Orphaned sets (ADR-0007) have no task to notify.
+    if (taskId === undefined) return
     deps.events.emit('task.updated', { taskId })
   }
 
@@ -216,12 +218,15 @@ export function createCriteriaManager(deps: CriteriaManagerDeps): CriteriaManage
           `criteria set id=${JSON.stringify(setId)} has no criteria`,
         )
       }
-      const siblings = deps.criteria.listSetsByTask(set.data.taskId)
-      if (!siblings.ok) return siblings
-      for (const sibling of siblings.data) {
-        if (sibling.id !== setId && sibling.status === 'confirmed') {
-          const superseded = deps.criteria.supersedeSet(sibling.id)
-          if (!superseded.ok) return superseded
+      // Orphaned sets (ADR-0007) have no task siblings to supersede.
+      if (set.data.taskId !== undefined) {
+        const siblings = deps.criteria.listSetsByTask(set.data.taskId)
+        if (!siblings.ok) return siblings
+        for (const sibling of siblings.data) {
+          if (sibling.id !== setId && sibling.status === 'confirmed') {
+            const superseded = deps.criteria.supersedeSet(sibling.id)
+            if (!superseded.ok) return superseded
+          }
         }
       }
       const confirmed = deps.criteria.confirmSet(setId, now())

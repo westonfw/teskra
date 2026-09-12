@@ -112,14 +112,19 @@ export function WorkspaceDialog({ open, onClose, onOpened }: WorkspaceDialogProp
               ? t('workspace.dialog.windowsFolder')
               : t('workspace.dialog.linuxPath')
           }
-          name="path"
-          rules={[
-            { required: true, whitespace: true, message: t('workspace.dialog.pathRequired') },
-          ]}
+          required
           extra={kind === 'wsl' ? t('workspace.dialog.wslPathHint') : undefined}
         >
           <Space.Compact block>
-            <Input placeholder={kind === 'windows' ? 'C:\\src\\project' : '/home/me/project'} />
+            <Form.Item
+              name="path"
+              noStyle
+              rules={[
+                { required: true, whitespace: true, message: t('workspace.dialog.pathRequired') },
+              ]}
+            >
+              <Input placeholder={kind === 'windows' ? 'C:\\src\\project' : '/home/me/project'} />
+            </Form.Item>
             {kind === 'windows' && (
               <Button
                 icon={<FolderOpenOutlined />}

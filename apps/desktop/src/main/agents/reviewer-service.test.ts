@@ -35,7 +35,8 @@ const directories: string[] = []
 
 afterEach(() => {
   for (const database of databases.splice(0)) database.close()
-  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  for (const directory of directories.splice(0))
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 function mockAdapter(definition: typeof CODEX_AGENT | typeof FAKE_AGENT): CodingAgentAdapter {
@@ -87,11 +88,17 @@ async function setup(): Promise<Fixture> {
   const repoDir = join(directory, 'repo')
   const dataRoot = join(directory, 'data-root')
   mkdirSync(repoDir)
-  const commands = createCommandRunner({ hostPlatform: 'linux' })
+  const commands = createCommandRunner()
   const git = async (...args: string[]) => {
     const result = await commands.run({ command: 'git', args, cwd: repoDir, timeoutMs: 15_000 })
     if (!result.ok || result.data.exitCode !== 0) {
-      throw new Error(`git ${args.join(' ')} failed: ${result.ok ? result.data.stderr : 'ipc'}`)
+      throw new Error(
+        `git ${args.join(' ')} failed: ${
+          result.ok
+            ? `exit=${String(result.data.exitCode)} stderr=${JSON.stringify(result.data.stderr)} stdout=${JSON.stringify(result.data.stdout)}`
+            : `${result.error.code}: ${result.error.message}`
+        }`,
+      )
     }
   }
   await git('init', '--initial-branch=main')

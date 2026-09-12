@@ -353,6 +353,12 @@ export const sendAgentRunInputRequestSchema = agentRunIdRequestSchema.extend({
 })
 export type SendAgentRunInputRequest = z.infer<typeof sendAgentRunInputRequestSchema>
 
+export const resizeAgentRunRequestSchema = agentRunIdRequestSchema.extend({
+  cols: z.number().int().positive(),
+  rows: z.number().int().positive(),
+})
+export type ResizeAgentRunRequest = z.infer<typeof resizeAgentRunRequestSchema>
+
 export const listAgentRunsRequestSchema = z.strictObject({
   workspaceId: z.string().min(1).optional(),
   taskId: z.string().min(1).optional(),

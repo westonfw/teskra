@@ -48,6 +48,28 @@ function createStore(maxFileBytes?: number): ArtifactStore {
   })
 }
 
+let symlinksChecked = false
+let symlinksAvailable = false
+
+// Windows blocks symlink creation without Developer Mode or elevation (EPERM).
+function symlinksSupported(): boolean {
+  if (!symlinksChecked) {
+    symlinksChecked = true
+    const probe = mkdtempSync(join(tmpdir(), 'teskra-symlink-probe-'))
+    try {
+      writeFileSync(join(probe, 'target.txt'), 'x')
+      symlinkSync(join(probe, 'target.txt'), join(probe, 'link.txt'))
+      symlinkSync(probe, join(probe, 'link-dir'))
+      symlinksAvailable = true
+    } catch {
+      symlinksAvailable = false
+    } finally {
+      rmSync(probe, { recursive: true, force: true })
+    }
+  }
+  return symlinksAvailable
+}
+
 function createRun(id: string, taskId?: string): void {
   const created = createAgentRunRepository(connection).create({
     id,
@@ -258,7 +280,8 @@ describe('ArtifactStore.get (TASK-050)', () => {
     })
   })
 
-  it('rejects file payloads behind a symlink escaping the artifact directory', () => {
+  it('rejects file payloads behind a symlink escaping the artifact directory', (ctx) => {
+    if (!symlinksSupported()) ctx.skip()
     const files = createTeskraPaths({ TESKRA_HOME: home }).runFiles('run-1')
     if (!files.ok) throw new Error(files.error.message)
     const outside = join(home, 'outside')
