@@ -15,7 +15,7 @@ test.describe('Theme switching', () => {
       await page.locator('.theme-switcher').click()
       await page.locator('.ant-select-item-option', { hasText: 'Dark' }).click()
       await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
-      await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(11, 15, 23)')
+      await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(13, 17, 23)')
 
       // The persistent ADR-0002 attended warning must stay visible in dark mode.
       await page.getByRole('menuitem', { name: 'Runs' }).click()
@@ -33,7 +33,7 @@ test.describe('Theme switching', () => {
       await page.reload()
       await page.waitForLoadState('domcontentloaded')
       await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
-      await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(11, 15, 23)')
+      await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(13, 17, 23)')
 
       // Switch back to light.
       await page.locator('.theme-switcher').click()

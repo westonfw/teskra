@@ -4,7 +4,7 @@
  * must provide a value for every key (enforced by the type of zh-CN).
  */
 export const enUS = {
-  'app.tagline': 'Orchestrate your coding agents.',
+  'app.tagline': 'Orchestrate your coding agents',
   'app.language': 'Language',
   'app.language.en-US': 'English',
   'app.language.zh-CN': '中文',

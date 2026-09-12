@@ -1,0 +1,4 @@
+# Normalize all text files to LF in the repo and in working trees (including
+# Windows), so Prettier's endOfLine:lf and CI's format:check never fight
+# core.autocrlf. Binary files (screenshots, icons) are detected and untouched.
+* text=auto eol=lf

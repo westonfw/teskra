@@ -44,13 +44,6 @@ export function SettingsPage({ registry, workspaceId: selectedWorkspaceId }: Set
   return (
     <Layout className="settings-layout">
       <Layout.Sider width={260} className="settings-sidebar">
-        <div className="settings-brand">
-          <span className="settings-brand-mark">T</span>
-          <div>
-            <Typography.Title level={4}>Teskra</Typography.Title>
-            <Typography.Text type="secondary">{t('nav.settings')}</Typography.Text>
-          </div>
-        </div>
         <Menu
           mode="inline"
           selectedKeys={[activeId]}

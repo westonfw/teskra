@@ -1,7 +1,6 @@
 import {
   BranchesOutlined,
   CodeOutlined,
-  ControlOutlined,
   FolderOutlined,
   GitlabOutlined,
   GlobalOutlined,
@@ -125,7 +124,6 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
           onSelect={({ key }) => navigate(key as WorkbenchPage)}
         />
         <div className="workbench-nav-footer">
-          <ControlOutlined />
           <span>{t('app.tagline')}</span>
         </div>
       </Layout.Sider>
@@ -148,7 +146,7 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
               </Typography.Text>
             </Space>
             {workspace !== undefined && (
-              <Tag bordered={false} color="cyan">
+              <Tag className="runtime-tag">
                 {runtimeLabel(workspace.runtime.kind, workspace.runtime.distro)}
               </Tag>
             )}

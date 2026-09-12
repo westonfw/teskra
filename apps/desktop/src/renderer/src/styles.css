@@ -1,43 +1,46 @@
 :root {
   color-scheme: dark;
-  --bg-base: #0b0f17;
-  --bg-glow: rgba(48, 122, 170, 0.15);
+  --bg-base: #0d1117;
   --text: #e8edf5;
-  --surface-card: rgba(20, 27, 40, 0.86);
-  --surface-card-border: rgba(255, 255, 255, 0.065);
-  --border-subtle: rgba(255, 255, 255, 0.07);
-  --border-strong: rgba(255, 255, 255, 0.08);
-  --surface-sidebar: rgba(13, 18, 28, 0.93);
-  --surface-nav: rgba(12, 17, 26, 0.97);
-  --surface-topbar: rgba(15, 21, 32, 0.9);
+  --text-secondary: rgba(232, 237, 245, 0.64);
+  --text-tertiary: rgba(232, 237, 245, 0.44);
+  --surface-card: #161c26;
+  --surface-card-border: rgba(255, 255, 255, 0.06);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.1);
+  --surface-sidebar: #10151d;
+  --surface-nav: #10151d;
+  --surface-topbar: rgba(13, 17, 23, 0.82);
   --surface-sunken: #090d14;
-  --surface-raised: #101722;
+  --surface-raised: #1b2330;
   --text-on-sunken: #d9e2ef;
-  --tint-subtle: rgba(255, 255, 255, 0.035);
-  --code-block-bg: rgba(0, 0, 0, 0.06);
-  --workflow-diff-bg: rgba(0, 0, 0, 0.18);
-  --card-shadow: rgba(0, 0, 0, 0.16);
-  --text-topbar: rgba(255, 255, 255, 0.62);
-  --text-terminal-heading: rgba(255, 255, 255, 0.68);
-  --text-notice: rgba(255, 255, 255, 0.58);
-  --text-run-meta: rgba(255, 255, 255, 0.52);
-  --text-task-meta: rgba(255, 255, 255, 0.48);
-  --text-nav-footer: rgba(255, 255, 255, 0.38);
+  --tint-subtle: rgba(255, 255, 255, 0.04);
+  --code-block-bg: rgba(255, 255, 255, 0.05);
+  --workflow-diff-bg: rgba(0, 0, 0, 0.22);
+  --card-shadow: rgba(0, 0, 0, 0.2);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.14);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.22);
+  --text-topbar: var(--text-secondary);
+  --text-terminal-heading: var(--text-tertiary);
+  --text-notice: var(--text-secondary);
+  --text-run-meta: var(--text-tertiary);
+  --text-task-meta: var(--text-tertiary);
+  --text-nav-footer: var(--text-tertiary);
   --accent: #65cfc5;
-  --accent-eyebrow: #79d6cf;
+  --accent-eyebrow: var(--text-tertiary);
   --accent-tint-055: rgba(101, 207, 197, 0.055);
   --accent-tint-07: rgba(101, 207, 197, 0.07);
-  --accent-tint-08: rgba(101, 207, 197, 0.08);
-  --accent-border-strong: rgba(101, 207, 197, 0.72);
-  --accent-glow: rgba(36, 130, 128, 0.14);
-  --terminal-border: rgba(112, 221, 209, 0.18);
-  --diff-text: #c9d4e2;
+  --accent-tint-08: rgba(101, 207, 197, 0.1);
+  --accent-border-strong: rgba(101, 207, 197, 0.6);
+  --accent-glow: rgba(101, 207, 197, 0.12);
+  --terminal-border: rgba(255, 255, 255, 0.08);
+  --diff-text: #d3dce8;
   --diff-add-text: #95de64;
   --diff-add-bg: rgba(73, 170, 25, 0.14);
   --diff-del-text: #ffa39e;
   --diff-del-bg: rgba(207, 19, 34, 0.13);
   --diff-hunk-text: #69c0ff;
-  --diff-meta-text: rgba(201, 212, 226, 0.45);
+  --diff-meta-text: rgba(201, 212, 226, 0.6);
   --diff-stat-add: #73d13d;
   --diff-stat-del: #ff7875;
   --warning-text: #ffd666;
@@ -46,7 +49,7 @@
   --warning-border-strong: rgba(250, 173, 20, 0.28);
   --brand-mark-text: #07121a;
   --brand-gradient: linear-gradient(135deg, #7be0d6, #6aa9ff);
-  --brand-shadow: rgba(93, 194, 213, 0.22);
+  --brand-shadow: rgba(93, 194, 213, 0.16);
   color: var(--text);
   background: var(--bg-base);
   font-family:
@@ -64,43 +67,46 @@
 :root[data-theme='light'] {
   color-scheme: light;
   --bg-base: #f5f7fa;
-  --bg-glow: rgba(48, 122, 170, 0.1);
   --text: #1f2733;
+  --text-secondary: rgba(31, 39, 51, 0.62);
+  --text-tertiary: rgba(31, 39, 51, 0.42);
   --surface-card: #ffffff;
-  --surface-card-border: rgba(15, 23, 42, 0.1);
-  --border-subtle: rgba(15, 23, 42, 0.09);
+  --surface-card-border: rgba(15, 23, 42, 0.08);
+  --border-subtle: rgba(15, 23, 42, 0.07);
   --border-strong: rgba(15, 23, 42, 0.12);
-  --surface-sidebar: rgba(255, 255, 255, 0.94);
-  --surface-nav: rgba(250, 251, 253, 0.97);
-  --surface-topbar: rgba(255, 255, 255, 0.88);
+  --surface-sidebar: #eef1f5;
+  --surface-nav: #eef1f5;
+  --surface-topbar: rgba(255, 255, 255, 0.85);
   --surface-sunken: #f6f8fa;
-  --surface-raised: #eef1f5;
+  --surface-raised: #e9edf2;
   --text-on-sunken: #1f2937;
   --tint-subtle: rgba(15, 23, 42, 0.04);
   --code-block-bg: rgba(15, 23, 42, 0.05);
   --workflow-diff-bg: rgba(15, 23, 42, 0.06);
-  --card-shadow: rgba(15, 23, 42, 0.08);
-  --text-topbar: rgba(15, 23, 42, 0.62);
-  --text-terminal-heading: rgba(15, 23, 42, 0.68);
-  --text-notice: rgba(15, 23, 42, 0.58);
-  --text-run-meta: rgba(15, 23, 42, 0.52);
-  --text-task-meta: rgba(15, 23, 42, 0.48);
-  --text-nav-footer: rgba(15, 23, 42, 0.45);
+  --card-shadow: rgba(15, 23, 42, 0.06);
+  --scrollbar-thumb: rgba(15, 23, 42, 0.16);
+  --scrollbar-thumb-hover: rgba(15, 23, 42, 0.26);
+  --text-topbar: var(--text-secondary);
+  --text-terminal-heading: var(--text-secondary);
+  --text-notice: var(--text-secondary);
+  --text-run-meta: var(--text-tertiary);
+  --text-task-meta: var(--text-tertiary);
+  --text-nav-footer: var(--text-tertiary);
   --accent: #0f9b8e;
-  --accent-eyebrow: #0f9b8e;
+  --accent-eyebrow: var(--text-tertiary);
   --accent-tint-055: rgba(15, 155, 142, 0.07);
   --accent-tint-07: rgba(15, 155, 142, 0.09);
-  --accent-tint-08: rgba(15, 155, 142, 0.1);
-  --accent-border-strong: rgba(15, 155, 142, 0.6);
-  --accent-glow: rgba(15, 155, 142, 0.16);
-  --terminal-border: rgba(15, 155, 142, 0.28);
+  --accent-tint-08: rgba(15, 155, 142, 0.12);
+  --accent-border-strong: rgba(15, 155, 142, 0.55);
+  --accent-glow: rgba(15, 155, 142, 0.12);
+  --terminal-border: rgba(15, 23, 42, 0.12);
   --diff-text: #334155;
   --diff-add-text: #237804;
   --diff-add-bg: rgba(82, 196, 26, 0.12);
   --diff-del-text: #a8071a;
   --diff-del-bg: rgba(207, 19, 34, 0.08);
   --diff-hunk-text: #0958d9;
-  --diff-meta-text: rgba(51, 65, 85, 0.55);
+  --diff-meta-text: rgba(51, 65, 85, 0.65);
   --diff-stat-add: #389e0d;
   --diff-stat-del: #cf1322;
   --warning-text: #ad6800;
@@ -132,7 +138,30 @@ body,
 
 body {
   min-height: 100vh;
-  background: radial-gradient(circle at 82% 8%, var(--bg-glow), transparent 30rem), var(--bg-base);
+  background: var(--bg-base);
+}
+
+/* Thin, unobtrusive scrollbars that match the surface palette. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+  border: 2px solid transparent;
 }
 
 .settings-layout {
@@ -147,14 +176,6 @@ body {
   border-right: 1px solid var(--border-subtle);
 }
 
-.settings-brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 12px 28px;
-}
-
-.settings-brand h4,
 .settings-section-stack h3 {
   margin: 0 !important;
 }
@@ -168,8 +189,8 @@ body {
   font-size: 18px;
   font-weight: 800;
   background: var(--brand-gradient);
-  border-radius: 11px;
-  box-shadow: 0 8px 28px var(--brand-shadow);
+  border-radius: 10px;
+  box-shadow: 0 4px 14px var(--brand-shadow);
 }
 
 .settings-sidebar .ant-menu {
@@ -231,7 +252,7 @@ body {
 .settings-section-stack .ant-card {
   background: var(--surface-card);
   border: 1px solid var(--surface-card-border);
-  box-shadow: 0 14px 40px var(--card-shadow);
+  box-shadow: none;
 }
 
 .settings-field {
@@ -378,7 +399,7 @@ body {
 .workbench-nav {
   display: flex;
   flex-direction: column;
-  padding: 22px 12px 16px;
+  padding: 18px 10px 14px;
   background: var(--surface-nav) !important;
   border-right: 1px solid var(--border-subtle);
 }
@@ -393,24 +414,33 @@ body {
   display: flex;
   gap: 11px;
   align-items: center;
-  padding: 4px 10px 24px;
+  padding: 4px 10px 20px;
 }
 
 .workbench-logo h4 {
   margin: 0 !important;
+  letter-spacing: 0.01em;
+}
+
+.workbench-logo .ant-typography-secondary {
+  font-size: 12px;
 }
 
 .workbench-nav .ant-menu {
   flex: 1;
   background: transparent;
   border: 0;
+  /* antd v6 injects .ant-menu-light.ant-menu-inline { border-inline-end }
+     after this stylesheet at equal specificity, so a plain border:0 loses —
+     the !important matches the settings-sidebar override below. */
+  border-inline-end: 0 !important;
 }
 
 .workbench-nav-footer {
   display: flex;
   gap: 8px;
   align-items: flex-start;
-  padding: 14px 10px 0;
+  padding: 14px 12px 0;
   color: var(--text-nav-footer);
   font-size: 11px;
   line-height: 1.45;
@@ -426,23 +456,38 @@ body {
 .workbench-topbar {
   z-index: 3;
   display: flex;
-  min-height: 58px;
+  height: 54px;
+  min-height: 54px;
   align-items: center;
   justify-content: space-between;
-  padding: 9px 22px;
+  padding: 0 20px;
   background: var(--surface-topbar);
   border-bottom: 1px solid var(--border-subtle);
   backdrop-filter: blur(18px);
 }
 
 .workspace-switcher {
-  width: min(320px, 38vw);
+  width: min(300px, 36vw);
 }
 
 .topbar-context {
   display: flex;
-  gap: 18px;
+  gap: 16px;
   align-items: center;
+  color: var(--text-topbar);
+  font-size: 13px;
+}
+
+.runtime-tag {
+  margin-inline-end: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  background: var(--tint-subtle);
+  border-color: var(--border-subtle);
+}
+
+.topbar-context .theme-switcher,
+.topbar-context .locale-switcher {
   color: var(--text-topbar);
 }
 
@@ -467,7 +512,7 @@ body {
   width: min(1600px, 100%);
   min-height: 100%;
   margin: 0 auto;
-  padding: 42px clamp(28px, 5vw, 72px) 64px;
+  padding: 36px clamp(28px, 5vw, 72px) 56px;
 }
 
 .page-heading {
@@ -475,7 +520,7 @@ body {
   gap: 28px;
   align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 28px;
+  margin-bottom: 24px;
 }
 
 .page-heading h2 {
@@ -769,7 +814,7 @@ body {
 
 .run-list {
   padding: 0 18px;
-  border-radius: 8px;
+  border-radius: 10px;
 }
 
 .run-list-item {
@@ -791,11 +836,18 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
   gap: 16px;
+  align-items: start;
 }
 
 .dashboard-card {
   background: var(--surface-card);
   border-color: var(--surface-card-border);
+  box-shadow: none;
+}
+
+/* Empty states inside cards stay compact instead of inflating the card. */
+.ant-card .ant-empty {
+  margin: 20px 0;
 }
 
 .dashboard-card .ant-list-item {
@@ -863,6 +915,18 @@ body {
   color: var(--text-run-meta);
   font-size: 12px;
   text-align: right;
+}
+
+.run-row-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Long identifiers (Run IDs) must wrap instead of clipping against the
+   drawer's copy button. */
+.run-detail .ant-descriptions-item-content .ant-typography code {
+  word-break: break-all;
 }
 
 /* Run drawers: the whole vertical chain is flex so the Agent PTY grows to
@@ -946,7 +1010,7 @@ body {
   overflow: hidden;
   background: var(--surface-sunken);
   border: 1px solid var(--terminal-border);
-  border-radius: 8px;
+  border-radius: 10px;
 }
 
 .agent-run-terminal-heading {

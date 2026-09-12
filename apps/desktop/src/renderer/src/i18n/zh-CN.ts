@@ -2,7 +2,7 @@ import type { TranslationKey } from './en-US'
 
 /** 中文字典：必须为 en-US 的每个键提供译文（类型层面强制）。 */
 export const zhCN: Record<TranslationKey, string> = {
-  'app.tagline': '统一调度你的 Coding Agent。',
+  'app.tagline': '统一调度你的 Coding Agent',
   'app.language': '语言',
   'app.language.en-US': 'English',
   'app.language.zh-CN': '中文',

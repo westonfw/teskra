@@ -284,6 +284,7 @@ export function PermissionsSettingsSection() {
           loading={loading}
           dataSource={[...audit]}
           pagination={{ pageSize: 20, hideOnSinglePage: true }}
+          tableLayout="fixed"
           locale={{
             emptyText: (
               <Empty
@@ -296,7 +297,7 @@ export function PermissionsSettingsSection() {
             {
               title: t('settings.permissions.audit.column.risk'),
               dataIndex: 'riskLevel',
-              width: 150,
+              width: 120,
               render: (risk: string) => (
                 <Tag color={riskTagColor(risk)}>
                   {t(`settings.permissions.risk.${risk}` as TranslationKey)}
@@ -304,20 +305,27 @@ export function PermissionsSettingsSection() {
               ),
             },
             {
+              // No width: under the fixed layout this column takes whatever
+              // the other three leave, and long commands truncate with a
+              // tooltip instead of wrapping one character per line.
               title: t('settings.permissions.audit.column.command'),
               dataIndex: 'command',
-              render: (command: string) => <Typography.Text code>{command}</Typography.Text>,
+              render: (command: string) => (
+                <Typography.Text code ellipsis={{ tooltip: command }}>
+                  {command}
+                </Typography.Text>
+              ),
             },
             {
               title: t('settings.permissions.audit.column.run'),
               dataIndex: 'runId',
-              width: 220,
+              width: 200,
               ellipsis: true,
             },
             {
               title: t('settings.permissions.audit.column.recognizedAt'),
               dataIndex: 'detectedAt',
-              width: 180,
+              width: 170,
               render: (at: string) => new Date(at).toLocaleString(),
             },
           ]}

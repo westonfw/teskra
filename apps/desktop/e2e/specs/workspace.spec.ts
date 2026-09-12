@@ -3,7 +3,7 @@ import { createGitRepo, openAndSwitchWorkspace, removeDir, test, expect } from '
 test.describe('Open Workspace', () => {
   test('launches into the workbench shell', async ({ page }) => {
     await expect(page.getByRole('heading', { name: 'Teskra' })).toBeVisible()
-    await expect(page.getByText('Orchestrate your coding agents.')).toBeVisible()
+    await expect(page.getByText('Orchestrate your coding agents')).toBeVisible()
     await expect(page.getByRole('menuitem', { name: 'Workspace' })).toBeVisible()
     // Home is the default page (TASK-071); the Workspace page keeps the
     // no-workspace empty state behind its menu entry.
