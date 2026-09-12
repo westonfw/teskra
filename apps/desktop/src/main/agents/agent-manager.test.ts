@@ -845,16 +845,20 @@ describe('AgentManager (TASK-028)', () => {
     const cancelled = vi.fn()
     context.events.subscribe('agent.cancelled', cancelled)
 
-    // Both cancels pass the terminal guard and park on the identity await.
+    // The first cancel claims the settle; the second awaits the SAME
+    // execution — it never reaches its own identity read.
     const first = context.manager.cancel('run-1')
     const second = context.manager.cancel('run-1')
-    await vi.waitFor(() => expect(releases).toHaveLength(2))
+    await vi.waitFor(() => expect(releases).toHaveLength(1))
     for (const release of releases) release({ ok: true, data: 'start-token-A' })
 
     const [firstResult, secondResult] = await Promise.all([first, second])
     expect(firstResult).toMatchObject({ ok: true, data: { status: 'cancelled' } })
     expect(secondResult).toMatchObject({ ok: true, data: { status: 'cancelled' } })
-    // …but the settle — event, handoff collection, log close — ran only once.
+    // One execution total: one identity read, one verified terminate, one
+    // settle (event, handoff collection, log close).
+    expect(identity).toHaveBeenCalledTimes(1)
+    expect(terminate).toHaveBeenCalledTimes(1)
     expect(cancelled).toHaveBeenCalledTimes(1)
     expect(cancelled).toHaveBeenCalledWith({ runId: 'run-1' })
   })

@@ -201,6 +201,12 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
   const activeAdapters = new Map<string, CodingAgentAdapter>()
   const pendingRuns = new Map<string, PendingRun>()
   const cancelRequested = new Set<string>()
+  /**
+   * In-flight adapterless cancels, claimed BEFORE the first await: a second
+   * cancel() of the same run awaits the same execution instead of running
+   * its own identity read and terminate against the same pid.
+   */
+  const adapterlessCancels = new Map<string, Promise<IpcResult<AgentRun>>>()
   const createRunId = deps.createRunId ?? randomUUID
   const now = deps.now ?? (() => new Date().toISOString())
   const resolveConcurrency =
@@ -595,6 +601,52 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     }
     scheduleQueueAdvance()
   })
+
+  /**
+   * Explicit user cancel of a run this instance does not own. Its process is
+   * either already gone or belongs to a previous instance (e.g. a run
+   * reconciliation deliberately left active because its pid identity was
+   * unreadable, or one whose survivor could not be terminated). Such a run
+   * otherwise has no way out: resume() only accepts interrupted, and it holds
+   * a concurrency slot (plus the attended-write conflict) forever. Settling
+   * it to 'cancelled' — terminal, hence non-resumable — cannot invite the
+   * double-write reconciliation was avoiding, and releases everything it
+   * held.
+   *
+   * Before settling, best-effort stop the previous-instance process — but
+   * ONLY with identity verification: terminate when the fresh read matches
+   * the recorded token, skip when it is unreadable or does not match (never
+   * kill an unverified pid). Either way the settle proceeds; the user's
+   * cancel intent must be honored. Concurrency is handled by the caller via
+   * the adapterlessCancels claim — this body must run at most once per run.
+   */
+  const settleAdapterlessCancel = async (run: AgentRun): Promise<IpcResult<AgentRun>> => {
+    if (deps.hostProcesses !== undefined && run.pid !== undefined) {
+      const identity = await deps.hostProcesses.identity(run.pid)
+      if (identity.ok && identity.data !== null && identity.data === run.pidIdentity) {
+        const terminated = await deps.hostProcesses.terminate(run.pid)
+        if (!terminated.ok) {
+          logger.warn(
+            { runId: run.id, pid: run.pid, error: terminated.error },
+            'Best-effort termination of the previous-instance process failed during cancel.',
+          )
+        }
+      }
+    }
+    const finishedAt = now()
+    appendEvent(run.id, 'agent.cancelled', {})
+    const updated = deps.runs.update(run.id, { status: 'cancelled', finishedAt }, finishedAt)
+    if (updated.ok && updated.data !== null) persistRunManifest(updated.data)
+    closeRunLogs(run.id)
+    collectHandoff(run.id)
+    deps.events.emit('agent.cancelled', { runId: run.id })
+    if (updated.ok && updated.data !== null) synchronizeTaskStatus(updated.data)
+    // This run may have been the zombie blocking the queue: with no process
+    // left, no process.exited will ever advance it.
+    scheduleQueueAdvance()
+    if (!updated.ok) return updated
+    return updated.data === null ? missing('Agent run', run.id) : { ok: true, data: updated.data }
+  }
 
   const manager: AgentManager = {
     async start(request) {
@@ -1074,58 +1126,21 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       }
       const adapter = activeAdapters.get(runId)
       if (adapter === undefined) {
-        // Explicit user cancel of a run this instance does not own. Its
-        // process is either already gone or belongs to a previous instance
-        // (e.g. a run reconciliation deliberately left active because its
-        // pid identity was unreadable, or one whose survivor could not be
-        // terminated). Such a run otherwise has no way out: resume() only
-        // accepts interrupted, and it holds a concurrency slot (plus the
-        // attended-write conflict) forever. Settling it to 'cancelled' —
-        // terminal, hence non-resumable — cannot invite the double-write
-        // reconciliation was avoiding, and releases everything it held.
-        //
-        // Before settling, best-effort stop the previous-instance process —
-        // but ONLY with identity verification: terminate when the fresh read
-        // matches the recorded token, skip when it is unreadable or does not
-        // match (never kill an unverified pid). Either way the settle
-        // proceeds; the user's cancel intent must be honored.
-        if (deps.hostProcesses !== undefined && current.data.pid !== undefined) {
-          const identity = await deps.hostProcesses.identity(current.data.pid)
-          if (identity.ok && identity.data !== null && identity.data === current.data.pidIdentity) {
-            const terminated = await deps.hostProcesses.terminate(current.data.pid)
-            if (!terminated.ok) {
-              logger.warn(
-                { runId, pid: current.data.pid, error: terminated.error },
-                'Best-effort termination of the previous-instance process failed during cancel.',
-              )
-            }
-          }
+        // Claim the settle BEFORE any await: a concurrent cancel() awaits the
+        // same execution instead of running its own identity read and
+        // terminate against the same pid (the first terminate's success lets
+        // the OS recycle the pid, and a second terminate could land on an
+        // unrelated new process — exactly what this whole chain guards
+        // against).
+        const inFlight = adapterlessCancels.get(runId)
+        if (inFlight !== undefined) return inFlight
+        const pending = settleAdapterlessCancel(current.data)
+        adapterlessCancels.set(runId, pending)
+        try {
+          return await pending
+        } finally {
+          adapterlessCancels.delete(runId)
         }
-        // The awaits above yield the event loop for real on macOS/Windows
-        // (ps / PowerShell spawns, up to the 5s probe timeout): a second
-        // cancel() can slip in and park on the same awaits. Re-check the
-        // terminal guard so only one caller runs the settle below —
-        // otherwise the cancelled event, handoff collection, review ingest,
-        // and log close all happen twice.
-        const afterIdentity = deps.runs.getById(runId)
-        if (!afterIdentity.ok) return afterIdentity
-        if (afterIdentity.data === null) return missing('Agent run', runId)
-        if (isTerminal(afterIdentity.data)) return { ok: true, data: afterIdentity.data }
-        const finishedAt = now()
-        appendEvent(runId, 'agent.cancelled', {})
-        const updated = deps.runs.update(runId, { status: 'cancelled', finishedAt }, finishedAt)
-        if (updated.ok && updated.data !== null) persistRunManifest(updated.data)
-        closeRunLogs(runId)
-        collectHandoff(runId)
-        deps.events.emit('agent.cancelled', { runId })
-        if (updated.ok && updated.data !== null) synchronizeTaskStatus(updated.data)
-        // This run may have been the zombie blocking the queue: with no
-        // process left, no process.exited will ever advance it.
-        scheduleQueueAdvance()
-        if (!updated.ok) return updated
-        return updated.data === null
-          ? missing('Agent run', runId)
-          : { ok: true, data: updated.data }
       }
 
       outputBatcher.flush(runId)

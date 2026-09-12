@@ -598,3 +598,15 @@ CSP + sandbox 已经挡掉了大部分利用路径，但这些是零成本的纵
    emit 全部双份。修法与 launch 一致：await 之后重做一次终态检查（afterIdentity
    守卫），只有一方进入 settle。测试：两个并发 cancel 都 park 在 identity 上，
    释放后断言两者均返回 cancelled 但 agent.cancelled 只 emit 一次。
+
+## 14. 第九轮 Review 修复状态（2026-09-12）
+
+1. **重复的 terminate() 没被消掉**（agent-manager）：第八轮的事后守卫放在
+   identity/terminate 块之后，并发的两个 cancel 仍会各调一次 terminate(pid)——
+   第一次 terminate 成功让 OS 回收 pid 后，第二次可能落在刚复用该 pid 的无关新
+   进程上（Windows 复用更激进）。改为**在 await 之前认领**：新增
+   `adapterlessCancels` in-flight map，第二个调用者直接 await 第一个的同一个
+   Promise；settle 主体抽成 `settleAdapterlessCancel`（每 run 至多执行一次），
+   第八轮加的事后终态守卫随之撤掉。测试更新为认领语义：并发两个 cancel 共享
+   一次执行——identity / terminate / agent.cancelled 各恰好一次，两者拿到同一
+   cancelled 结果。
