@@ -443,7 +443,7 @@ function RunDetail({
 }: RunDetailProps) {
   const { t } = useTranslation()
   return (
-    <Space direction="vertical" size={20} className="run-detail">
+    <div className="run-detail">
       {run.executionMode === 'attended' && run.worktreeId === undefined && (
         <Alert type="warning" showIcon message={t('agent.attendedWarning')} />
       )}
@@ -515,7 +515,7 @@ function RunDetail({
           {t('runs.interruptRun')}
         </Button>
       )}
-    </Space>
+    </div>
   )
 }
 

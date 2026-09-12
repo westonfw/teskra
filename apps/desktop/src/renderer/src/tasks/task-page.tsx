@@ -440,18 +440,19 @@ export function TaskPage() {
         onClose={() => setOpenRunId(undefined)}
       >
         {openRun !== undefined && (
-          <Space direction="vertical" size={16} className="run-detail">
+          <div className="run-detail">
             <Space>
               <Tag>{label(openRun.status)}</Tag>
               <Typography.Text code>{openRun.id}</Typography.Text>
             </Space>
             <Tabs
+              className="run-detail-tabs"
               items={[
                 {
                   key: 'output',
                   label: t('tasks.drawer.tabOutput'),
                   children: (
-                    <Space direction="vertical" size={16} className="run-detail-tab">
+                    <div className="run-detail-tab">
                       <RunWorktreePanel run={openRun} workspace={workspace} />
                       <FindingsPanel runId={openRun.id} />
                       <AgentRunTerminal
@@ -459,7 +460,7 @@ export function TaskPage() {
                         run={openRun}
                         initialData={output[openRun.id]}
                       />
-                    </Space>
+                    </div>
                   ),
                 },
                 {
@@ -474,7 +475,7 @@ export function TaskPage() {
                 },
               ]}
             />
-          </Space>
+          </div>
         )}
       </Drawer>
     </div>
