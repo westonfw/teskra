@@ -223,11 +223,14 @@ export function createReviewerService(deps: ReviewerServiceDeps): ReviewerServic
           agentType: definition.id,
           role: 'reviewer',
           approvalMode: 'read-only',
+          // Reviewers are unattended workers: default to headless so the CLI
+          // exits after producing its review instead of returning to a prompt
+          // the panel waits on forever.
+          mode: request.mode ?? 'exec',
           ...(request.runId === undefined ? {} : { runId: request.runId }),
           ...(request.taskId === undefined ? {} : { taskId: request.taskId }),
           ...(worktree === null ? {} : { worktreeId: worktree.id }),
           ...(request.model === undefined ? {} : { model: request.model }),
-          ...(request.mode === undefined ? {} : { mode: request.mode }),
           ...(request.executionMode === undefined ? {} : { executionMode: request.executionMode }),
           ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
           ...environmentField,
@@ -256,9 +259,9 @@ export function createReviewerService(deps: ReviewerServiceDeps): ReviewerServic
         agentType: definition.id,
         role: 'reviewer',
         worktreeId: snapshot.data.id,
+        mode: request.mode ?? 'exec',
         ...(request.taskId === undefined ? {} : { taskId: request.taskId }),
         ...(request.model === undefined ? {} : { model: request.model }),
-        ...(request.mode === undefined ? {} : { mode: request.mode }),
         ...(request.executionMode === undefined ? {} : { executionMode: request.executionMode }),
         ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
         ...environmentField,

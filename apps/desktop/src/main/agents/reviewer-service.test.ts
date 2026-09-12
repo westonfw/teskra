@@ -253,6 +253,9 @@ describe('ReviewerService (TASK-052)', () => {
     const start = vi.mocked(fixture.adapters.codex.start).mock.calls.at(-1)?.[0]
     expect(start).toMatchObject({
       approvalMode: 'read-only',
+      // Reviewers are unattended workers: headless by default so the CLI
+      // exits after its turn instead of idling at an interactive prompt.
+      mode: 'exec',
       worktreePath: implement.worktree.path,
       prompt: 'Review the change.',
     })
@@ -403,7 +406,7 @@ describe('ReviewerService (TASK-052)', () => {
     // The fake CLI cannot enforce read-only, so no read-only approvalMode is
     // projected — the snapshot itself is the write boundary (plan §126).
     const start = vi.mocked(fixture.adapters.fake.start).mock.calls.at(-1)?.[0]
-    expect(start).toMatchObject({ worktreePath: snapshot.path })
+    expect(start).toMatchObject({ worktreePath: snapshot.path, mode: 'exec' })
     expect(start?.approvalMode).not.toBe('read-only')
 
     // The reviewer may trash the snapshot however it likes.
