@@ -3,11 +3,13 @@ import { Button, Card, Empty, List, Popconfirm, Space, Tag, Typography } from 'a
 import { useState } from 'react'
 
 import { AppErrorAlert } from '../components/app-error-alert'
+import { useTranslation } from '../i18n'
 import { useNavigationStore } from '../stores/navigation-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
 import { WorkspaceDialog } from './workspace-dialog'
 
 export function WorkspacePage() {
+  const { t } = useTranslation()
   const [dialogOpen, setDialogOpen] = useState(false)
   const recent = useWorkspaceStore((state) => state.recent)
   const current = useWorkspaceStore((state) => state.current)
@@ -22,14 +24,12 @@ export function WorkspacePage() {
     <div className="workbench-page workspace-page">
       <div className="page-heading">
         <div>
-          <Typography.Text className="settings-eyebrow">WORKSPACES</Typography.Text>
-          <Typography.Title level={2}>Choose where Agents work</Typography.Title>
-          <Typography.Paragraph type="secondary">
-            Windows and WSL projects stay isolated by an explicit runtime boundary.
-          </Typography.Paragraph>
+          <Typography.Text className="settings-eyebrow">{t('workspace.eyebrow')}</Typography.Text>
+          <Typography.Title level={2}>{t('workspace.title')}</Typography.Title>
+          <Typography.Paragraph type="secondary">{t('workspace.subtitle')}</Typography.Paragraph>
         </div>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => setDialogOpen(true)}>
-          Open folder
+          {t('workspace.openFolder')}
         </Button>
       </div>
 
@@ -43,10 +43,8 @@ export function WorkspacePage() {
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             description={
               <Space direction="vertical" size={4}>
-                <Typography.Text strong>No workspace is open</Typography.Text>
-                <Typography.Text type="secondary">
-                  Open a Windows folder or connect a path inside WSL to begin.
-                </Typography.Text>
+                <Typography.Text strong>{t('workspace.empty.title')}</Typography.Text>
+                <Typography.Text type="secondary">{t('workspace.empty.body')}</Typography.Text>
               </Space>
             }
           >
@@ -56,12 +54,12 @@ export function WorkspacePage() {
               loading={loading}
               onClick={() => setDialogOpen(true)}
             >
-              Open your first workspace
+              {t('workspace.empty.action')}
             </Button>
           </Empty>
         </Card>
       ) : (
-        <Card title="Recent workspaces" variant="borderless">
+        <Card title={t('workspace.recent')} variant="borderless">
           <List
             dataSource={[...recent]}
             renderItem={(workspace) => (
@@ -76,19 +74,21 @@ export function WorkspacePage() {
                       navigate('terminal')
                     }}
                   >
-                    {workspace.id === current?.id ? 'Open terminal' : 'Switch'}
+                    {workspace.id === current?.id
+                      ? t('workspace.openTerminal')
+                      : t('workspace.switch')}
                   </Button>,
                   <Popconfirm
                     key="remove"
-                    title="Remove this workspace from Teskra?"
-                    description="The project files will not be deleted."
+                    title={t('workspace.removeConfirm.title')}
+                    description={t('workspace.removeConfirm.body')}
                     onConfirm={() => void removeWorkspace(workspace.id)}
                   >
                     <Button
                       danger
                       type="text"
                       icon={<DeleteOutlined />}
-                      aria-label="Remove workspace"
+                      aria-label={t('workspace.remove')}
                     />
                   </Popconfirm>,
                 ]}

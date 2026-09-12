@@ -5,6 +5,7 @@ import { useEffect } from 'react'
 import type { AgentHealth, AgentRun, Task, WorkflowRun, Worktree } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../components/app-error-alert'
+import { useTranslation } from '../i18n'
 import { useDashboardStore, type DashboardBlock } from '../stores/dashboard-store'
 import { useNavigationStore, type WorkbenchPage } from '../stores/navigation-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
@@ -18,7 +19,15 @@ interface DashboardSectionProps {
   readonly children: React.ReactNode
 }
 
-function DashboardSection({ title, count, target, block, onRetry, children }: DashboardSectionProps) {
+function DashboardSection({
+  title,
+  count,
+  target,
+  block,
+  onRetry,
+  children,
+}: DashboardSectionProps) {
+  const { t } = useTranslation()
   const navigate = useNavigationStore((state) => state.navigate)
   const loading = block.status === 'idle' || block.status === 'loading'
   return (
@@ -36,14 +45,14 @@ function DashboardSection({ title, count, target, block, onRetry, children }: Da
           <Button
             size="small"
             type="text"
-            aria-label={`Refresh ${title}`}
+            aria-label={t('home.section.refresh', { title })}
             icon={<ReloadOutlined />}
             onClick={onRetry}
           />
           <Button
             size="small"
             type="text"
-            aria-label={`Open ${title}`}
+            aria-label={t('home.section.open', { title })}
             icon={<RightOutlined />}
             onClick={() => navigate(target)}
           />
@@ -113,6 +122,7 @@ function RunList({
 }
 
 export function HomePage() {
+  const { t } = useTranslation()
   const workspace = useWorkspaceStore((state) => state.current)
   const navigate = useNavigationStore((state) => state.navigate)
   const activeTasks = useDashboardStore((state) => state.activeTasks)
@@ -133,12 +143,9 @@ export function HomePage() {
   if (workspace === undefined) {
     return (
       <div className="workbench-page centered-empty">
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="Open a workspace to see its dashboard."
-        >
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('home.noWorkspace.body')}>
           <Button type="primary" onClick={() => navigate('workspace')}>
-            Choose workspace
+            {t('workspaceRequired.action')}
           </Button>
         </Empty>
       </div>
@@ -153,30 +160,30 @@ export function HomePage() {
     <div className="workbench-page home-page">
       <header className="page-heading">
         <div>
-          <Typography.Text className="settings-eyebrow">HOME</Typography.Text>
-          <Typography.Title level={2}>Dashboard</Typography.Title>
+          <Typography.Text className="settings-eyebrow">{t('home.eyebrow')}</Typography.Text>
+          <Typography.Title level={2}>{t('home.title')}</Typography.Title>
           <Typography.Paragraph type="secondary">
-            {workspace.name} at a glance — active work, anything waiting on you, and agent health.
+            {t('home.subtitle', { name: workspace.name })}
           </Typography.Paragraph>
         </div>
         <Button icon={<ReloadOutlined />} onClick={() => load(workspace)}>
-          Refresh
+          {t('home.refresh')}
         </Button>
       </header>
 
       <div className="dashboard-grid">
         <DashboardSection
-          title="Active Tasks"
+          title={t('home.section.activeTasks')}
           count={activeTasks.data?.total}
           target="tasks"
           block={activeTasks}
           onRetry={() => reloadBlock(workspace, 'activeTasks')}
         >
-          <TaskList tasks={activeTasks.data?.items ?? []} empty="No tasks running right now." />
+          <TaskList tasks={activeTasks.data?.items ?? []} empty={t('home.empty.activeTasks')} />
         </DashboardSection>
 
         <DashboardSection
-          title="Waiting For You"
+          title={t('home.section.waitingForYou')}
           count={waitingForYou.data?.total}
           target="tasks"
           block={waitingForYou}
@@ -191,14 +198,14 @@ export function HomePage() {
                 waitingTasks.length === 0 ? (
                   <Empty
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description="Nothing is waiting on you."
+                    description={t('home.empty.waitingForYou')}
                   />
                 ) : null,
             }}
             renderItem={(item: WorkflowRun) => (
               <List.Item className="dashboard-item" onClick={() => navigate('tasks')}>
                 <Typography.Text ellipsis className="dashboard-item-label">
-                  Workflow {item.definition.id} · {item.id}
+                  {t('home.workflow')} {item.definition.id} · {item.id}
                 </Typography.Text>
                 <Tag bordered={false} color="gold">
                   {item.status}
@@ -209,7 +216,7 @@ export function HomePage() {
         </DashboardSection>
 
         <DashboardSection
-          title="Interrupted Runs"
+          title={t('home.section.interruptedRuns')}
           count={interruptedRuns.data?.total}
           target="runs"
           block={interruptedRuns}
@@ -217,13 +224,13 @@ export function HomePage() {
         >
           <RunList
             runs={interruptedRuns.data?.items ?? []}
-            statusTag={() => ({ color: 'orange', label: 'interrupted' })}
-            empty="No interrupted runs."
+            statusTag={() => ({ color: 'orange', label: t('home.run.interrupted') })}
+            empty={t('home.empty.interruptedRuns')}
           />
         </DashboardSection>
 
         <DashboardSection
-          title="Merge Ready"
+          title={t('home.section.mergeReady')}
           count={mergeReady.data?.total}
           target="git"
           block={mergeReady}
@@ -234,7 +241,10 @@ export function HomePage() {
             dataSource={[...(mergeReady.data?.items ?? [])]}
             locale={{
               emptyText: (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No worktrees ready to merge." />
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={t('home.empty.mergeReady')}
+                />
               ),
             }}
             renderItem={(item: Worktree) => (
@@ -251,7 +261,7 @@ export function HomePage() {
         </DashboardSection>
 
         <DashboardSection
-          title="Agent Availability"
+          title={t('home.section.agentAvailability')}
           count={availability.length === 0 ? undefined : availability.length}
           target="runs"
           block={agentAvailability}
@@ -262,7 +272,10 @@ export function HomePage() {
             dataSource={[...availability]}
             locale={{
               emptyText: (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No agents registered." />
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={t('home.empty.agentAvailability')}
+                />
               ),
             }}
             renderItem={(item: AgentHealth) => (
@@ -273,14 +286,18 @@ export function HomePage() {
                 <Space size={4}>
                   {item.rateLimited === true && (
                     <Tag bordered={false} color="gold">
-                      rate limited
+                      {t('home.availability.rateLimited')}
                     </Tag>
                   )}
                   <Tag
                     bordered={false}
                     color={item.available ? 'green' : item.installed ? 'gold' : 'red'}
                   >
-                    {item.available ? 'available' : item.installed ? 'unavailable' : 'not installed'}
+                    {item.available
+                      ? t('home.availability.available')
+                      : item.installed
+                        ? t('home.availability.unavailable')
+                        : t('home.availability.notInstalled')}
                   </Tag>
                 </Space>
               </List.Item>
@@ -289,7 +306,7 @@ export function HomePage() {
         </DashboardSection>
 
         <DashboardSection
-          title="Recent Failures"
+          title={t('home.section.recentFailures')}
           count={recentFailures.data?.total}
           target="runs"
           block={recentFailures}
@@ -297,8 +314,8 @@ export function HomePage() {
         >
           <RunList
             runs={recentFailures.data?.items ?? []}
-            statusTag={() => ({ color: 'red', label: 'failed' })}
-            empty="No recent failures."
+            statusTag={() => ({ color: 'red', label: t('home.run.failed') })}
+            empty={t('home.empty.recentFailures')}
           />
         </DashboardSection>
       </div>

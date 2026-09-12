@@ -2,8 +2,15 @@ import type { PublicAppError, WslDistribution } from '@teskra/contracts'
 import { describe, expect, it, vi } from 'vitest'
 
 import { detectWslDistributions, type WslDetectionBridge } from './wsl-distributions'
+import { enUS, type TranslationKey } from '../i18n/en-US'
 
-const UBUNTU: WslDistribution = { name: 'Ubuntu', isSystemDefault: true, isConfiguredDefault: false }
+const translate = (key: TranslationKey): string => enUS[key]
+
+const UBUNTU: WslDistribution = {
+  name: 'Ubuntu',
+  isSystemDefault: true,
+  isConfiguredDefault: false,
+}
 
 const failure: PublicAppError = {
   code: 'WSL_NOT_AVAILABLE',
@@ -20,7 +27,7 @@ function bridge(overrides: Partial<WslDetectionBridge> = {}): WslDetectionBridge
 
 describe('detectWslDistributions', () => {
   it('returns the detected distributions', async () => {
-    const outcome = await detectWslDistributions(bridge())
+    const outcome = await detectWslDistributions(bridge(), translate)
     expect(outcome).toEqual({ ok: true, distributions: [UBUNTU] })
   })
 
@@ -31,6 +38,7 @@ describe('detectWslDistributions', () => {
       bridge({
         listWslDistributions: vi.fn(async () => ({ ok: false as const, error: failure })),
       }),
+      translate,
     )
     expect(outcome).toEqual({ ok: false, message: failure.message })
   })
@@ -40,6 +48,7 @@ describe('detectWslDistributions', () => {
     // invoke became an unhandled rejection.
     const outcome = await detectWslDistributions(
       bridge({ listWslDistributions: vi.fn(() => Promise.reject(new Error('ipc down'))) }),
+      translate,
     )
     expect(outcome.ok).toBe(false)
     expect(outcome.ok === false && outcome.message.length > 0).toBe(true)

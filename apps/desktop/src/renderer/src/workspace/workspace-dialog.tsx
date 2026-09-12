@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 
 import type { RuntimeKind, WorkspaceRuntimeRef, WslDistribution } from '@teskra/contracts'
 
+import { useTranslation } from '../i18n'
 import { useWorkspaceStore } from '../stores/workspace-store'
 import { detectWslDistributions } from './wsl-distributions'
 
@@ -21,6 +22,7 @@ interface WorkspaceDialogProps {
 }
 
 export function WorkspaceDialog({ open, onClose, onOpened }: WorkspaceDialogProps) {
+  const { t } = useTranslation()
   const [form] = Form.useForm<WorkspaceFormValues>()
   const [distributions, setDistributions] = useState<readonly WslDistribution[]>([])
   const [detecting, setDetecting] = useState(false)
@@ -35,7 +37,7 @@ export function WorkspaceDialog({ open, onClose, onOpened }: WorkspaceDialogProp
     let cancelled = false
     setDetecting(true)
     setDetectionError(undefined)
-    void detectWslDistributions(window.teskra.runtime).then((outcome) => {
+    void detectWslDistributions(window.teskra.runtime, t).then((outcome) => {
       if (cancelled) return
       if (outcome.ok) setDistributions(outcome.distributions)
       else setDetectionError(outcome.message)
@@ -65,38 +67,38 @@ export function WorkspaceDialog({ open, onClose, onOpened }: WorkspaceDialogProp
 
   return (
     <Modal
-      title="Open workspace"
+      title={t('workspace.dialog.title')}
       open={open}
-      okText="Open workspace"
+      okText={t('workspace.dialog.title')}
       confirmLoading={loading}
       onOk={() => void submit()}
       onCancel={onClose}
       destroyOnHidden
     >
       <Form<WorkspaceFormValues> form={form} layout="vertical" initialValues={{ kind: 'windows' }}>
-        <Form.Item label="Environment" name="kind">
+        <Form.Item label={t('workspace.dialog.environment')} name="kind">
           <Radio.Group optionType="button" buttonStyle="solid">
-            <Radio.Button value="windows">Windows</Radio.Button>
-            <Radio.Button value="wsl">WSL</Radio.Button>
+            <Radio.Button value="windows">{t('workspace.dialog.windows')}</Radio.Button>
+            <Radio.Button value="wsl">{t('workspace.dialog.wsl')}</Radio.Button>
           </Radio.Group>
         </Form.Item>
         {kind === 'wsl' && detectionError !== undefined && (
           <Alert
             type="warning"
             showIcon
-            message="WSL distributions could not be detected"
+            message={t('workspace.dialog.wslDetectFailed')}
             description={detectionError}
           />
         )}
         {kind === 'wsl' && (
           <Form.Item
-            label="WSL distribution"
+            label={t('workspace.dialog.distro')}
             name="distro"
-            rules={[{ required: true, message: 'Choose a WSL distribution.' }]}
+            rules={[{ required: true, message: t('workspace.dialog.distroRequired') }]}
           >
             <Select
               loading={detecting}
-              placeholder="Select a distribution"
+              placeholder={t('workspace.dialog.distroPlaceholder')}
               options={distributions.map((distribution) => ({
                 value: distribution.name,
                 label: distribution.name,
@@ -105,14 +107,16 @@ export function WorkspaceDialog({ open, onClose, onOpened }: WorkspaceDialogProp
           </Form.Item>
         )}
         <Form.Item
-          label={kind === 'windows' ? 'Windows folder' : 'Linux path'}
-          name="path"
-          rules={[{ required: true, whitespace: true, message: 'Enter a workspace path.' }]}
-          extra={
-            kind === 'wsl'
-              ? 'Use a path inside the selected distribution, for example /home/me/project.'
-              : undefined
+          label={
+            kind === 'windows'
+              ? t('workspace.dialog.windowsFolder')
+              : t('workspace.dialog.linuxPath')
           }
+          name="path"
+          rules={[
+            { required: true, whitespace: true, message: t('workspace.dialog.pathRequired') },
+          ]}
+          extra={kind === 'wsl' ? t('workspace.dialog.wslPathHint') : undefined}
         >
           <Space.Compact block>
             <Input placeholder={kind === 'windows' ? 'C:\\src\\project' : '/home/me/project'} />
@@ -124,13 +128,17 @@ export function WorkspaceDialog({ open, onClose, onOpened }: WorkspaceDialogProp
                   if (path !== null) form.setFieldValue('path', path)
                 }}
               >
-                Browse
+                {t('workspace.dialog.browse')}
               </Button>
             )}
           </Space.Compact>
         </Form.Item>
-        <Form.Item label="Display name" name="name" extra="Optional; defaults to the folder name.">
-          <Input placeholder="My project" />
+        <Form.Item
+          label={t('workspace.dialog.displayName')}
+          name="name"
+          extra={t('workspace.dialog.displayNameHint')}
+        >
+          <Input placeholder={t('workspace.dialog.displayNamePlaceholder')} />
         </Form.Item>
       </Form>
     </Modal>
