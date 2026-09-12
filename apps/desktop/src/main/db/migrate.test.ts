@@ -214,8 +214,8 @@ describe('runMigrations (TASK-006)', () => {
 })
 
 describe('MIGRATIONS registry (TASK-006)', () => {
-  it('is the ordered 001–010 chain', () => {
-    expect(MIGRATIONS.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+  it('is the ordered 001–011 chain', () => {
+    expect(MIGRATIONS.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
     expect(MIGRATIONS.map((m) => m.name)).toEqual([
       '001_init',
       '002_runs',
@@ -227,6 +227,7 @@ describe('MIGRATIONS registry (TASK-006)', () => {
       '008_workflow_run_criteria_iteration',
       '009_agent_run_mode',
       '010_criteria_set_task_nullable',
+      '011_agent_run_pid_identity',
     ])
   })
 
@@ -235,12 +236,12 @@ describe('MIGRATIONS registry (TASK-006)', () => {
     const result = migrateDatabase(db)
     expect(result).toEqual({
       ok: true,
-      data: { fromVersion: 0, toVersion: 10, applied: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] },
+      data: { fromVersion: 0, toVersion: 11, applied: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] },
     })
-    expect(appliedVersions(db)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    expect(appliedVersions(db)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
 
     const second = migrateDatabase(db)
-    expect(second).toEqual({ ok: true, data: { fromVersion: 10, toVersion: 10, applied: [] } })
+    expect(second).toEqual({ ok: true, data: { fromVersion: 11, toVersion: 11, applied: [] } })
   })
 
   it('007/008 upgrade a populated v6 database without losing workflow runs or steps (TASK-056/062)', () => {
@@ -270,7 +271,7 @@ describe('MIGRATIONS registry (TASK-006)', () => {
     const upgraded = migrateDatabase(db)
     expect(upgraded).toEqual({
       ok: true,
-      data: { fromVersion: 6, toVersion: 10, applied: [7, 8, 9, 10] },
+      data: { fromVersion: 6, toVersion: 11, applied: [7, 8, 9, 10, 11] },
     })
 
     // Rows survived the table rebuild (DROP TABLE would have cascaded with FK on).

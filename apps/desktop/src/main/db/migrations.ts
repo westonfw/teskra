@@ -13,6 +13,7 @@ import workflowRunTaskOptionalSql from './migrations/007_workflow_run_task_optio
 import workflowRunCriteriaIterationSql from './migrations/008_workflow_run_criteria_iteration.sql?raw'
 import agentRunModeSql from './migrations/009_agent_run_mode.sql?raw'
 import criteriaSetTaskNullableSql from './migrations/010_criteria_set_task_nullable.sql?raw'
+import agentRunPidIdentitySql from './migrations/011_agent_run_pid_identity.sql?raw'
 
 /**
  * The canonical migration chain (TASK-006). The .sql files under
@@ -48,6 +49,7 @@ export const MIGRATIONS: readonly Migration[] = [
     // DROP TABLE does not implicit-DELETE the copied rows' dependents.
     foreignKeysOff: true,
   },
+  { version: 11, name: '011_agent_run_pid_identity', sql: agentRunPidIdentitySql },
 ]
 
 /** Brings the database schema up to the latest known version. */

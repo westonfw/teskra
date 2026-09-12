@@ -14,7 +14,7 @@ import {
   type CommandRunner,
 } from '../process/command-runner'
 import { createWorkspaceRuntime } from '../workspace/runtime'
-import { createDiffService, type DiffService } from './diff-service'
+import { createDiffService, UNTRACKED_STAT_CONCURRENCY, type DiffService } from './diff-service'
 import { createGitManager, type GitManager } from './git-manager'
 
 const databases: Database.Database[] = []
@@ -206,5 +206,48 @@ describe('DiffService (TASK-036)', () => {
     const patch = await fixture.service.getFilePatch('workspace-1', 'added-dir/nested.txt')
     if (!patch.ok) throw new Error(patch.error.message)
     expect(patch.data.patch).toContain('+nested new')
+  })
+})
+
+describe('DiffService untracked fan-out', () => {
+  it('bounds concurrent untracked stat probes instead of forking one git per file', async () => {
+    const paths = Array.from({ length: 40 }, (_, index) => `untracked-${String(index)}.txt`)
+    let inFlight = 0
+    let maxInFlight = 0
+    const service = createDiffService({
+      git: {
+        status: () =>
+          Promise.resolve({
+            ok: true,
+            data: {
+              ahead: 0,
+              behind: 0,
+              clean: false,
+              entries: paths.map((path) => ({ path, code: '??' })),
+            },
+          }),
+        diffNumstat: () => Promise.resolve({ ok: true, data: [] }),
+        untrackedNumstat: (_workspaceId, path) => {
+          inFlight += 1
+          maxInFlight = Math.max(maxInFlight, inFlight)
+          return new Promise((resolve) => {
+            setTimeout(() => {
+              inFlight -= 1
+              resolve({ ok: true, data: { path, additions: 1, deletions: 0 } })
+            }, 5)
+          })
+        },
+        diff: () => Promise.resolve({ ok: true, data: { patch: '' } }),
+        untrackedDiff: () => Promise.resolve({ ok: true, data: { patch: '' } }),
+      },
+    })
+
+    const result = await service.get('workspace-1')
+    if (!result.ok) throw new Error(result.error.message)
+    expect(result.data.files).toHaveLength(paths.length)
+    expect(result.data.files.every((file) => file.additions === 1)).toBe(true)
+    // Parallel, but never one process per file.
+    expect(maxInFlight).toBeGreaterThan(1)
+    expect(maxInFlight).toBeLessThanOrEqual(UNTRACKED_STAT_CONCURRENCY)
   })
 })

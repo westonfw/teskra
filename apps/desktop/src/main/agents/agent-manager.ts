@@ -32,6 +32,7 @@ import type { EventBus } from '../events/event-bus'
 import { type InternalAppError, toPublicError } from '../errors'
 import { getLogger } from '../logger'
 import type { TeskraPaths } from '../paths'
+import type { HostProcessControl } from '../process/host-processes'
 import { buildHandoffContext } from '@teskra/shared'
 import { resolveEnvReferences, type CredentialStore } from '../security/credential-store'
 import type { AgentRegistry } from './agent-registry'
@@ -95,6 +96,14 @@ export interface AgentManagerDeps {
    * fails explicitly instead of launching without it.
    */
   readonly credentials?: CredentialStore
+  /**
+   * Captures the process-start identity token when a run's host pid is recorded
+   * (migration 011 `pid_identity`), so reconciliation can tell "the Agent
+   * process survived" apart from "the pid was reused by an unrelated process"
+   * before terminating anything. Without it, runs fall back to probe-only
+   * survivor handling.
+   */
+  readonly hostProcesses?: Pick<HostProcessControl, 'identity'>
 }
 
 function fail<T>(error: InternalAppError): IpcResult<T> {
@@ -375,12 +384,27 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       processId: started.data.processId,
       ...(pending.resumed ? { nativeSession: pending.resumeSession !== undefined } : {}),
     })
+    // Best-effort: without the token the run keeps the probe-only survivor
+    // path at reconciliation; a failed capture must not fail the launch.
+    let pidIdentity: string | null = null
+    if (deps.hostProcesses !== undefined) {
+      const identity = await deps.hostProcesses.identity(started.data.pid)
+      if (identity.ok) {
+        pidIdentity = identity.data
+      } else {
+        logger.warn(
+          { runId: request.runId, pid: started.data.pid, error: identity.error },
+          'Process identity capture failed; the run keeps probe-only survivor handling.',
+        )
+      }
+    }
     const running = deps.runs.update(
       request.runId,
       {
         status: 'running',
         processId: started.data.processId,
         pid: started.data.pid,
+        pidIdentity,
         startedAt: started.data.startedAt,
         ...(pending.resumed
           ? {
@@ -953,6 +977,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           status: shouldQueue ? 'queued' : 'preparing',
           processId: null,
           pid: null,
+          pidIdentity: null,
           finishedAt: null,
           exitCode: null,
           error: null,
@@ -1113,7 +1138,6 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     },
 
     async dispose() {
-      outputBatcher.flushAll()
       // P0-2: quitting must not leak Agent processes. Cancel every run with a
       // live Adapter binding; the process.exited path settles each run's
       // terminal status (cancelled) and collects its handoff while the event
@@ -1136,6 +1160,10 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       activeAdapters.clear()
       pendingRuns.clear()
       cancelRequested.clear()
+      // Drain the output the cancels produced only AFTER unsubscribing: the
+      // subscription is the batcher's only push source, so from here no 32ms
+      // batch timer can fire past the log close below.
+      outputBatcher.flushAll()
       // P1-1: final durability checkpoint — fsync anything the throttle left
       // dirty and release every log handle before the data root is touched.
       const closed = deps.runLogs.disposeAll()

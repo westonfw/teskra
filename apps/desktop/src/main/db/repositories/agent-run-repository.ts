@@ -51,6 +51,7 @@ interface AgentRunRow {
   status: string
   process_id: string | null
   pid: number | null
+  pid_identity: string | null
   worktree_id: string | null
   execution_mode: string
   criteria_set_id: string | null
@@ -100,6 +101,7 @@ export interface UpdateAgentRunInput {
   readonly status?: AgentRunStatus
   readonly processId?: string | null
   readonly pid?: number | null
+  readonly pidIdentity?: string | null
   readonly worktreeId?: string | null
   readonly criteriaSetId?: string | null
   readonly providerSession?: JsonRecord | null
@@ -154,6 +156,7 @@ function toDomain(row: AgentRunRow): IpcResult<AgentRun> {
     status: row.status,
     processId: row.process_id ?? undefined,
     pid: row.pid ?? undefined,
+    pidIdentity: row.pid_identity ?? undefined,
     worktreeId: row.worktree_id ?? undefined,
     executionMode: row.execution_mode,
     criteriaSetId: row.criteria_set_id ?? undefined,
@@ -244,6 +247,7 @@ export function createAgentRunRepository(connection: Database.Database): AgentRu
         status: 'status',
         processId: 'process_id',
         pid: 'pid',
+        pidIdentity: 'pid_identity',
         worktreeId: 'worktree_id',
         criteriaSetId: 'criteria_set_id',
         prompt: 'prompt',

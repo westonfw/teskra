@@ -93,9 +93,12 @@ interface Fixture {
   readonly workflowRuns: ReturnType<typeof createWorkflowRunRepository>
   readonly paths: ReturnType<typeof createTeskraPaths>
   readonly repoDir: string
+  /** With gateWorktreeCreation: calls made, and the release for the gate. */
+  readonly worktreeCreateCalls: () => number
+  readonly releaseWorktreeCreation: () => void
 }
 
-async function setup(): Promise<Fixture> {
+async function setup(gateWorktreeCreation = false): Promise<Fixture> {
   const directory = mkdtempSync(join(tmpdir(), 'teskra-dispatch-'))
   directories.push(directory)
   const repoDir = join(directory, 'repo')
@@ -180,6 +183,24 @@ async function setup(): Promise<Fixture> {
     events,
     resolveRuntime,
   })
+  // Optionally park worktree creation behind a manual gate so a test can
+  // dispose() while a dispatch is still in preparation.
+  let createCalls = 0
+  let releaseGate: (() => void) | undefined
+  const gatedWorktreeManager: Pick<typeof worktreeManager, 'create' | 'discard'> =
+    gateWorktreeCreation
+      ? {
+          create: (request) => {
+            createCalls += 1
+            return new Promise((resolve) => {
+              releaseGate = () => {
+                void worktreeManager.create(request).then(resolve)
+              }
+            })
+          },
+          discard: (request) => worktreeManager.discard(request),
+        }
+      : worktreeManager
   const registry = createDefaultAgentRegistry(true)
   if (!registry.ok) throw new Error(registry.error.message)
   const codex = mockAdapter(CODEX_AGENT)
@@ -209,7 +230,7 @@ async function setup(): Promise<Fixture> {
     tasks,
     criteria,
     workspaces,
-    worktreeManager,
+    worktreeManager: gatedWorktreeManager,
     agents,
     handoffs,
     promptTemplates,
@@ -228,6 +249,8 @@ async function setup(): Promise<Fixture> {
     workflowRuns,
     paths,
     repoDir,
+    worktreeCreateCalls: () => createCalls,
+    releaseWorktreeCreation: () => releaseGate?.(),
   }
 }
 
@@ -436,6 +459,38 @@ describe('DispatchService (TASK-059)', () => {
 
     // Idempotent: nothing in flight anymore.
     await fixture.service.dispose()
+  })
+
+  it('aborts a dispatch still in preparation when dispose() runs, without an engine pass', async () => {
+    const fixture = await setup(true)
+
+    const dispatched = fixture.service.dispatch({
+      workspaceId: 'workspace-1',
+      taskId: 'task-1',
+      agent: 'codex',
+    })
+    await vi.waitFor(() => expect(fixture.worktreeCreateCalls()).toBe(1))
+
+    // The dispatch is parked in worktree creation — not yet in the cancel set.
+    // dispose() must flag it to abort rather than wait out a fresh engine
+    // pass it never cancelled.
+    const disposed = fixture.service.dispose()
+    fixture.releaseWorktreeCreation()
+    await disposed
+
+    const result = await dispatched
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.message).toContain('shutting down')
+    expect(fixture.adapters.codex.start).not.toHaveBeenCalled()
+    expect(fixture.workflowRuns.listRuns()).toMatchObject({ ok: true, data: [] })
+    // Failure hygiene still holds: the parked worktree is discarded (the
+    // compensating discard is fire-and-forget, so wait it out).
+    await vi.waitFor(() => {
+      expect(fixture.worktrees.listByWorkspace('workspace-1')).toMatchObject({
+        ok: true,
+        data: [{ state: 'discarded' }],
+      })
+    })
   })
 
   it('refuses unknown agents and tasks from another workspace without creating a worktree', async () => {

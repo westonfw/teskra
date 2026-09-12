@@ -143,6 +143,15 @@ function invalid<T>(message: string, detail: string): IpcResult<T> {
   return fail({ code: 'VALIDATION_FAILED', message, retryable: false, detail })
 }
 
+function shuttingDown<T>(detail: string): IpcResult<T> {
+  return fail({
+    code: 'UNKNOWN',
+    message: 'Teskra is shutting down; the workflow run was not started.',
+    retryable: false,
+    detail,
+  })
+}
+
 function buildIterateDefinition(agent: string, reviewers: readonly string[]): WorkflowDefinition {
   return {
     id: ITERATE_DEFINITION_ID,
@@ -175,6 +184,12 @@ export function createIterationController(deps: IterationControllerDeps): Iterat
   const activeLoops = new Set<string>()
   /** In-flight iterate() promises, so dispose() can wait them out (P2-1). */
   const inFlightLoops = new Set<Promise<IpcResult<WorkflowIterateResult>>>()
+  /**
+   * Set synchronously by dispose() before the cancel snapshot: new iterate()
+   * calls are refused outright, so the set dispose() cancels and the set it
+   * waits on can never diverge into a before-quit stall.
+   */
+  let disposing = false
 
   const emitRunStatus = (runId: string, status: WorkflowRun['status']): void => {
     deps.events.emit('workflow.run_updated', { runId, status })
@@ -269,6 +284,9 @@ export function createIterationController(deps: IterationControllerDeps): Iterat
 
   return {
     async iterate(request) {
+      if (disposing) {
+        return shuttingDown('IterationController is disposing; iterate refused.')
+      }
       const policy: IterationPolicy = {
         maxRoundsPerCriteriaVersion:
           request.policy?.maxRoundsPerCriteriaVersion ??
@@ -354,6 +372,9 @@ export function createIterationController(deps: IterationControllerDeps): Iterat
     },
 
     async dispose() {
+      // Flag first: no new loop may register past this point, so the cancel
+      // snapshot below and the in-flight set being waited on stay consistent.
+      disposing = true
       // Cancel first so a loop parked in engine.start settles promptly, then
       // wait out the trailing cap/finalization writes.
       await Promise.allSettled([...activeLoops].map((runId) => deps.engine.cancel(runId)))

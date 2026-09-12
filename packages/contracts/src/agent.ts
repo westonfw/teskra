@@ -299,6 +299,12 @@ export const agentRunSchema = z.strictObject({
   status: agentRunStatusSchema,
   processId: z.string().optional(),
   pid: z.number().int().optional(),
+  /**
+   * Process-start token captured alongside `pid` (migration 011): compared
+   * against a fresh probe before reconciliation terminates a surviving pid, so
+   * a reused pid belonging to an unrelated process is never killed.
+   */
+  pidIdentity: z.string().optional(),
   worktreeId: z.string().optional(),
   executionMode: executionModeSchema,
   criteriaSetId: z.string().optional(),

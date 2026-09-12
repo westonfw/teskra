@@ -508,4 +508,19 @@ describe('IterationController (TASK-062)', () => {
     // Idempotent: no loop is in flight anymore.
     await fixture.controller.dispose()
   })
+
+  it('refuses a new iterate once dispose() has run', async () => {
+    const fixture = setup()
+    await fixture.controller.dispose()
+
+    const result = await fixture.controller.iterate({
+      workspaceId: 'workspace-1',
+      taskId: 'task-1',
+      agent: 'codex',
+      reviewers: ['claude'],
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.message).toContain('shutting down')
+    expect(fixture.store.listRuns()).toMatchObject({ ok: true, data: [] })
+  })
 })

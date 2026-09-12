@@ -19,6 +19,7 @@ import {
 import { createEventBus } from '../events/event-bus'
 import { createTeskraPaths } from '../paths'
 import type { CommandRunner } from '../process/command-runner'
+import type { HostProcessControl } from '../process/host-processes'
 import { createWorkspaceRuntime } from '../workspace/runtime'
 import { createReconciliationService } from './reconciliation-service'
 
@@ -71,10 +72,7 @@ function setup(workspaceExists = true) {
         startedAt: string
       }[]
     } = { list: () => [] },
-    hostProcesses?: {
-      probe(pid: number): Promise<IpcResult<boolean>>
-      terminate(pid: number): Promise<IpcResult<void>>
-    },
+    hostProcesses?: HostProcessControl,
   ) =>
     createReconciliationService({
       runs,
@@ -92,7 +90,7 @@ function setup(workspaceExists = true) {
       now: () => '2026-09-10T01:00:00.000Z',
     })
 
-  const createRunningRun = (worktreeId?: string, taskId?: string) => {
+  const createRunningRun = (worktreeId?: string, taskId?: string, pidIdentity?: string) => {
     const runDir = paths.runDir('run-1')
     if (!runDir.ok) throw new Error(runDir.error.message)
     const run = runs.create({
@@ -106,7 +104,11 @@ function setup(workspaceExists = true) {
       ...(taskId === undefined ? {} : { taskId }),
     })
     if (!run.ok) throw new Error(run.error.message)
-    const updated = runs.update('run-1', { processId: 'process-1', pid: 4242 })
+    const updated = runs.update('run-1', {
+      processId: 'process-1',
+      pid: 4242,
+      ...(pidIdentity === undefined ? {} : { pidIdentity }),
+    })
     if (!updated.ok || updated.data === null) throw new Error('could not update fixture Run')
     return updated.data
   }
@@ -234,8 +236,12 @@ describe('ReconciliationService (TASK-040)', () => {
     const context = setup()
     context.createRunningRun()
     const probe = vi.fn(async (): Promise<IpcResult<boolean>> => ({ ok: true, data: true }))
+    const identity = vi.fn(async (): Promise<IpcResult<string | null>> => ({
+      ok: true,
+      data: null,
+    }))
     const terminate = vi.fn(async (): Promise<IpcResult<void>> => ({ ok: true, data: undefined }))
-    const service = context.service({ list: () => [] }, { probe, terminate })
+    const service = context.service({ list: () => [] }, { probe, identity, terminate })
 
     expect(await service.reconcile()).toMatchObject({
       ok: true,
@@ -258,8 +264,12 @@ describe('ReconciliationService (TASK-040)', () => {
     const context = setup()
     context.createRunningRun()
     const probe = vi.fn(async (): Promise<IpcResult<boolean>> => ({ ok: true, data: false }))
+    const identity = vi.fn(async (): Promise<IpcResult<string | null>> => ({
+      ok: true,
+      data: null,
+    }))
     const terminate = vi.fn(async (): Promise<IpcResult<void>> => ({ ok: true, data: undefined }))
-    const service = context.service({ list: () => [] }, { probe, terminate })
+    const service = context.service({ list: () => [] }, { probe, identity, terminate })
 
     expect(await service.reconcile()).toMatchObject({
       ok: true,
@@ -277,13 +287,17 @@ describe('ReconciliationService (TASK-040)', () => {
     const context = setup()
     context.createRunningRun()
     const probe = vi.fn(async (): Promise<IpcResult<boolean>> => ({ ok: true, data: true }))
+    const identity = vi.fn(async (): Promise<IpcResult<string | null>> => ({
+      ok: true,
+      data: null,
+    }))
     const terminate = vi.fn(async (): Promise<IpcResult<void>> => ({
       ok: false,
       error: { code: 'UNKNOWN', message: 'access denied', retryable: true },
     }))
     const interrupted = vi.fn()
     context.events.subscribe('agent.interrupted', interrupted)
-    const service = context.service({ list: () => [] }, { probe, terminate })
+    const service = context.service({ list: () => [] }, { probe, identity, terminate })
 
     expect(await service.reconcile()).toMatchObject({
       ok: true,
@@ -296,6 +310,85 @@ describe('ReconciliationService (TASK-040)', () => {
     // No silent status flip while the Agent process is still writing.
     expect(context.runs.getById('run-1')).toMatchObject({ ok: true, data: { status: 'running' } })
     expect(interrupted).not.toHaveBeenCalled()
+  })
+
+  it('terminates a survivor whose identity token matches the recorded one', async () => {
+    const context = setup()
+    context.createRunningRun(undefined, undefined, 'start-token-A')
+    const probe = vi.fn(async (): Promise<IpcResult<boolean>> => ({ ok: true, data: true }))
+    const identity = vi.fn(async (): Promise<IpcResult<string | null>> => ({
+      ok: true,
+      data: 'start-token-A',
+    }))
+    const terminate = vi.fn(async (): Promise<IpcResult<void>> => ({ ok: true, data: undefined }))
+    const service = context.service({ list: () => [] }, { probe, identity, terminate })
+
+    expect(await service.reconcile()).toMatchObject({
+      ok: true,
+      data: {
+        interruptedRunIds: ['run-1'],
+        terminatedSurvivorRunIds: ['run-1'],
+        survivingRunIds: [],
+      },
+    })
+    // The identity check replaces the bare probe when a token is on record.
+    expect(probe).not.toHaveBeenCalled()
+    expect(identity).toHaveBeenCalledWith(4242)
+    expect(terminate).toHaveBeenCalledWith(4242)
+  })
+
+  it('never terminates a reused pid whose identity token does not match', async () => {
+    const context = setup()
+    context.createRunningRun(undefined, undefined, 'start-token-A')
+    const probe = vi.fn(async (): Promise<IpcResult<boolean>> => ({ ok: true, data: true }))
+    const identity = vi.fn(async (): Promise<IpcResult<string | null>> => ({
+      ok: true,
+      data: 'start-token-B',
+    }))
+    const terminate = vi.fn(async (): Promise<IpcResult<void>> => ({ ok: true, data: undefined }))
+    const service = context.service({ list: () => [] }, { probe, identity, terminate })
+
+    // The recorded Agent is gone and pid 4242 now belongs to an unrelated
+    // process: the run is interrupted, but that process is left alone.
+    expect(await service.reconcile()).toMatchObject({
+      ok: true,
+      data: {
+        interruptedRunIds: ['run-1'],
+        terminatedSurvivorRunIds: [],
+        survivingRunIds: [],
+      },
+    })
+    expect(terminate).not.toHaveBeenCalled()
+    expect(context.runs.getById('run-1')).toMatchObject({
+      ok: true,
+      data: { status: 'interrupted' },
+    })
+  })
+
+  it('treats a run as dead when its pid is gone or its identity cannot be read', async () => {
+    for (const identity of [
+      vi.fn(async (): Promise<IpcResult<string | null>> => ({ ok: true, data: null })),
+      vi.fn(async (): Promise<IpcResult<string | null>> => ({
+        ok: false,
+        error: { code: 'UNKNOWN' as const, message: 'stat failed', retryable: true },
+      })),
+    ]) {
+      const context = setup()
+      context.createRunningRun(undefined, undefined, 'start-token-A')
+      const probe = vi.fn(async (): Promise<IpcResult<boolean>> => ({ ok: true, data: true }))
+      const terminate = vi.fn(async (): Promise<IpcResult<void>> => ({ ok: true, data: undefined }))
+      const service = context.service({ list: () => [] }, { probe, identity, terminate })
+
+      expect(await service.reconcile()).toMatchObject({
+        ok: true,
+        data: {
+          interruptedRunIds: ['run-1'],
+          terminatedSurvivorRunIds: [],
+          survivingRunIds: [],
+        },
+      })
+      expect(terminate).not.toHaveBeenCalled()
+    }
   })
 
   it('classifies absent and non-Git worktrees without mutating them twice', async () => {

@@ -33,6 +33,42 @@ describe('HostProcessControl (P0-2)', () => {
     it('treats an already-gone terminate target as success', async () => {
       expect(await control.terminate(DEAD_PID)).toEqual({ ok: true, data: undefined })
     })
+
+    it('reads a stable start-time token from /proc for a live pid, null for a dead one', async () => {
+      const first = await control.identity(process.pid)
+      expect(first.ok).toBe(true)
+      if (first.ok) expect(typeof first.data).toBe('string')
+      const second = await control.identity(process.pid)
+      expect(second).toEqual(first)
+      expect(await control.identity(DEAD_PID)).toEqual({ ok: true, data: null })
+    })
+  })
+
+  describe('POSIX non-Linux (ps via CommandRunner)', () => {
+    it('uses ps lstart as the identity token and maps empty output to null', async () => {
+      const commands = stubCommands(async () => ({
+        ok: true as const,
+        data: { stdout: 'Sat Sep 12 10:00:00 2026\n', stderr: '', exitCode: 0 },
+      }))
+      const control = createHostProcessControl({ commands, hostPlatform: 'darwin' })
+
+      expect(await control.identity(4242)).toEqual({
+        ok: true,
+        data: 'Sat Sep 12 10:00:00 2026',
+      })
+      expect(commands.run).toHaveBeenCalledWith({
+        command: 'ps',
+        args: ['-o', 'lstart=', '-p', '4242'],
+        timeoutMs: 5_000,
+      })
+
+      const gone = stubCommands(async () => ({
+        ok: true as const,
+        data: { stdout: '', stderr: '', exitCode: 1 },
+      }))
+      const goneControl = createHostProcessControl({ commands: gone, hostPlatform: 'darwin' })
+      expect(await goneControl.identity(4242)).toEqual({ ok: true, data: null })
+    })
   })
 
   describe('Windows (tasklist/taskkill via CommandRunner)', () => {
@@ -124,6 +160,29 @@ describe('HostProcessControl (P0-2)', () => {
 
       const terminated = await control.terminate(4242)
       expect(terminated.ok).toBe(false)
+    })
+
+    it('identifies a process via its PowerShell start time, null when gone', async () => {
+      const commands = stubCommands(async () => ({
+        ok: true as const,
+        data: { stdout: '2026-09-12T10:00:00.0000000Z\r\n', stderr: '', exitCode: 0 },
+      }))
+      const control = createHostProcessControl({ commands, hostPlatform: 'win32' })
+
+      expect(await control.identity(4242)).toEqual({
+        ok: true,
+        data: '2026-09-12T10:00:00.0000000Z',
+      })
+      const request = vi.mocked(commands.run).mock.calls[0]?.[0]
+      expect(request?.command).toBe('powershell')
+      expect(request?.args).toContain('-NoProfile')
+
+      const gone = stubCommands(async () => ({
+        ok: true as const,
+        data: { stdout: '', stderr: '', exitCode: 0 },
+      }))
+      const goneControl = createHostProcessControl({ commands: gone, hostPlatform: 'win32' })
+      expect(await goneControl.identity(4242)).toEqual({ ok: true, data: null })
     })
   })
 })

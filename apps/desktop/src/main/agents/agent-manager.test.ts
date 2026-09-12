@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   AgentDefinition,
   ConcurrencyConfig,
+  IpcResult,
   ProviderSessionRef,
   WorkbenchEvents,
 } from '@teskra/contracts'
@@ -25,6 +26,7 @@ import {
 } from '../db/repositories'
 import { createEventBus, type EventBus } from '../events/event-bus'
 import { createTeskraPaths, type TeskraPaths } from '../paths'
+import type { HostProcessControl } from '../process/host-processes'
 import {
   createCredentialStore,
   workspaceEnvCredentialKey,
@@ -109,6 +111,7 @@ function setup(
   concurrency?: ConcurrencyConfig,
   failAgentEventWrites = false,
   credentials?: CredentialStore,
+  hostProcesses?: Pick<HostProcessControl, 'identity'>,
 ): TestContext {
   const connection = new Database(':memory:')
   connection.pragma('foreign_keys = ON')
@@ -180,6 +183,7 @@ function setup(
     createRunId: () => `run-${String(nextRun++)}`,
     now: () => '2026-09-10T00:00:02.000Z',
     ...(credentials === undefined ? {} : { credentials }),
+    ...(hostProcesses === undefined ? {} : { hostProcesses }),
     ...(concurrency === undefined
       ? {}
       : { resolveConcurrency: () => ({ ok: true as const, data: concurrency }) }),
@@ -250,6 +254,48 @@ describe('AgentManager (TASK-028)', () => {
     })
   })
 
+  it('records the host process identity token at launch for survivor verification', async () => {
+    const identity = vi.fn(async (): Promise<IpcResult<string | null>> => ({
+      ok: true,
+      data: 'start-token-1001',
+    }))
+    const context = setup(undefined, false, undefined, { identity })
+    const started = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      prompt: 'Implement',
+    })
+
+    expect(started).toMatchObject({
+      ok: true,
+      data: { pid: 1001, pidIdentity: 'start-token-1001' },
+    })
+    expect(identity).toHaveBeenCalledWith(1001)
+    expect(context.runs.getById('run-1')).toMatchObject({
+      ok: true,
+      data: { pidIdentity: 'start-token-1001' },
+    })
+  })
+
+  it('launches without an identity token when the capture fails', async () => {
+    const identity = vi.fn(async (): Promise<IpcResult<string | null>> => ({
+      ok: false,
+      error: { code: 'UNKNOWN', message: 'stat failed', retryable: true },
+    }))
+    const context = setup(undefined, false, undefined, { identity })
+    const started = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      prompt: 'Implement',
+    })
+
+    expect(started).toMatchObject({
+      ok: true,
+      data: { status: 'running', pid: 1001 },
+    })
+    expect(started.ok ? started.data.pidIdentity : 'unexpected').toBeUndefined()
+  })
+
   it('rejects orchestrated execution without a worktree before creating a run', async () => {
     const context = setup()
     const result = await context.manager.start({
@@ -281,6 +327,26 @@ describe('AgentManager (TASK-028)', () => {
     // A second dispose is a harmless no-op: nothing is cancelled twice.
     await context.manager.dispose()
     expect(context.adapters.codex.cancel).toHaveBeenCalledOnce()
+  })
+
+  it('flushes output the shutdown cancels produce before closing the run logs', async () => {
+    const context = setup()
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    context.adapters.codex.cancel = vi.fn(async () => {
+      // A dying Agent still writes: this chunk lands in the 32ms batcher
+      // mid-dispose and must survive into the durable log.
+      context.events.emit('process.output', {
+        processId: 'codex:run-1',
+        agentRunId: 'run-1',
+        data: 'dying words',
+      })
+      return { ok: true as const, data: undefined }
+    })
+
+    await context.manager.dispose()
+
+    const output = context.manager.getOutput('run-1')
+    expect(output.ok && output.data.includes('dying words')).toBe(true)
   })
 
   it('translates output/input events and saves a non-zero crash exit', async () => {

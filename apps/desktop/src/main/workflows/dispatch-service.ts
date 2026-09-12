@@ -123,6 +123,15 @@ function invalid<T>(message: string, detail: string): IpcResult<T> {
   return fail({ code: 'VALIDATION_FAILED', message, retryable: false, detail })
 }
 
+function shuttingDown<T>(detail: string): IpcResult<T> {
+  return fail({
+    code: 'UNKNOWN',
+    message: 'Teskra is shutting down; the workflow run was not started.',
+    retryable: false,
+    detail,
+  })
+}
+
 export function createDispatchService(deps: DispatchServiceDeps): DispatchService {
   const logger = getLogger('runtime')
   const createAgentRunId = deps.createAgentRunId ?? randomUUID
@@ -130,6 +139,14 @@ export function createDispatchService(deps: DispatchServiceDeps): DispatchServic
   const inFlight = new Set<Promise<IpcResult<WorkflowDispatchResult>>>()
   /** WorkflowRun ids of in-flight dispatches, for dispose()'s cancel pass. */
   const activeRunIds = new Set<string>()
+  /**
+   * Set synchronously by dispose() before the cancel snapshot. A dispatch
+   * still in preparation (parked in worktree creation, not yet in
+   * activeRunIds) observes it and aborts before the WorkflowRun exists — so
+   * the set dispose() cancels and the set dispose() waits on can never
+   * diverge into a before-quit stall.
+   */
+  let disposing = false
 
   const emitRunStatus = (runId: string, status: WorkflowRunStatus): void => {
     deps.events.emit('workflow.run_updated', { runId, status })
@@ -264,6 +281,14 @@ export function createDispatchService(deps: DispatchServiceDeps): DispatchServic
       prompt = rendered.data.content
     }
 
+    // A dispose() that raced the preparation cannot cancel this dispatch via
+    // activeRunIds (nothing to cancel yet); abort before the WorkflowRun
+    // exists so dispose()'s wait settles instead of a fresh engine pass
+    // starting underneath it.
+    if (disposing) {
+      discardWorktree()
+      return shuttingDown('DispatchService is disposing; dispatch aborted before run creation.')
+    }
     const created = deps.runs.createRun({
       definition: {
         id: DISPATCH_DEFINITION_ID,
@@ -356,6 +381,9 @@ export function createDispatchService(deps: DispatchServiceDeps): DispatchServic
     },
 
     async dispose() {
+      // Flag first: any dispatch still short of activeRunIds.add() aborts at
+      // its pre-creation check instead of slipping past the cancel snapshot.
+      disposing = true
       // Cancel first so a dispatch parked in engine.start settles promptly,
       // then wait out the trailing finalization writes.
       await Promise.allSettled([...activeRunIds].map((runId) => deps.engine.cancel(runId)))

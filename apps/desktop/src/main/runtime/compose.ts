@@ -367,6 +367,12 @@ export async function composeTeskraRuntime(
     runs: repositories.agentRuns,
     criteria: repositories.criteria,
   })
+  // P0-2: host-side pid probe/identity/terminate, shared by AgentManager
+  // (identity capture at launch) and Reconciliation (survivor verification).
+  const hostProcesses = createHostProcessControl({
+    commands,
+    hostPlatform: options.hostPlatform,
+  })
   const agentManager = createAgentManager({
     registry: registeredAgents.data,
     adapters: [
@@ -393,6 +399,7 @@ export async function composeTeskraRuntime(
     paths,
     runLogs,
     permissions: permissionManager,
+    hostProcesses,
     credentials,
     resolveConcurrency: (workspaceId) => {
       const resolved = config.resolve({ workspaceId })
@@ -611,7 +618,7 @@ export async function composeTeskraRuntime(
     commands,
     // P0-2: the in-process registry is empty at startup; the pid probe is the
     // only way to tell a dead run from one whose Agent survived the restart.
-    hostProcesses: createHostProcessControl({ commands, hostPlatform: options.hostPlatform }),
+    hostProcesses,
     events,
     runLogs,
     resolveRuntime: (workspace) => runtimeFor(workspace.runtime),

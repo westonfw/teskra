@@ -37,6 +37,30 @@ function emptyStats(): { additions: number; deletions: number } {
   return { additions: 0, deletions: 0 }
 }
 
+// status runs with --untracked-files=all, so an un-ignored node_modules/dist
+// can yield thousands of untracked entries; each probe is a git spawn, so the
+// fan-out must stay bounded (review follow-up: unbounded Promise.all forked
+// one process per file).
+export const UNTRACKED_STAT_CONCURRENCY = 8
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let next = 0
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next
+      next += 1
+      results[index] = await fn(items[index] as T)
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
+
 /** TASK-036: converts raw Git output into renderer-safe, per-file DiffResult records. */
 export function createDiffService(deps: DiffServiceDeps): DiffService {
   return {
@@ -64,8 +88,10 @@ export function createDiffService(deps: DiffServiceDeps): DiffService {
 
       const untrackedStats = new Map<string, GitNumstatEntry>()
       const untrackedEntries = status.data.entries.filter((entry) => entry.code === '??')
-      const probed = await Promise.all(
-        untrackedEntries.map((entry) => deps.git.untrackedNumstat(workspaceId, entry.path)),
+      const probed = await mapWithConcurrency(
+        untrackedEntries,
+        UNTRACKED_STAT_CONCURRENCY,
+        (entry) => deps.git.untrackedNumstat(workspaceId, entry.path),
       )
       for (const [index, entry] of untrackedEntries.entries()) {
         const result = probed[index] as IpcResult<GitNumstatEntry>

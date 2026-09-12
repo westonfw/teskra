@@ -114,6 +114,15 @@ function invalid<T>(message: string, detail: string): IpcResult<T> {
   return fail({ code: 'VALIDATION_FAILED', message, retryable: false, detail })
 }
 
+function shuttingDown<T>(detail: string): IpcResult<T> {
+  return fail({
+    code: 'UNKNOWN',
+    message: 'Teskra is shutting down; the workflow run was not started.',
+    retryable: false,
+    detail,
+  })
+}
+
 function lineStats(patch: string): { additions: number; deletions: number } {
   let additions = 0
   let deletions = 0
@@ -148,6 +157,14 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
   const activeControllers = new Set<IterationController>()
   /** In-flight start() promises, so dispose() can wait them out (P2-1). */
   const inFlightStarts = new Set<Promise<IpcResult<FullWorkflowStartResult>>>()
+  /**
+   * Set synchronously by dispose() before the controller snapshot. A start()
+   * still in preparation (parked in worktree creation, not yet holding a
+   * controller) observes it and aborts before the WorkflowRun exists — so the
+   * set dispose() cancels and the set dispose() waits on can never diverge
+   * into a before-quit stall.
+   */
+  let disposing = false
 
   /**
    * Config precedence: explicit request override → repo-local `full`
@@ -273,6 +290,14 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
         })
     }
 
+    // A dispose() that raced the preparation cannot reach this start through
+    // activeControllers (none exists yet); abort before the WorkflowRun is
+    // created so dispose()'s wait settles instead of a fresh loop starting
+    // underneath it.
+    if (disposing) {
+      discardWorktree()
+      return shuttingDown('FullWorkflowService is disposing; start aborted before run creation.')
+    }
     const created = deps.runs.createRun({
       definition: buildDefaultFullWorkflowDefinition(config),
       taskId: request.taskId,
@@ -406,6 +431,9 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
     },
 
     async dispose() {
+      // Flag first: any start() still short of createController() aborts at
+      // its pre-creation check instead of slipping past the cancel snapshot.
+      disposing = true
       // Dispose each in-flight controller first (its engine cancel settles
       // the loop promptly), then wait out the trailing finalization writes.
       await Promise.allSettled([...activeControllers].map((controller) => controller.dispose()))

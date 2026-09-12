@@ -219,6 +219,8 @@ const SCHEMA: Record<string, TableSpec> = {
       ['updated_at', 'TEXT', 1, null, 0],
       // 009_agent_run_mode (ADR-0007): ALTER TABLE appends at the end.
       ['mode', 'TEXT', 0, null, 0],
+      // 011_agent_run_pid_identity: ALTER TABLE appends at the end.
+      ['pid_identity', 'TEXT', 0, null, 0],
     ],
     foreignKeys: [
       { from: 'task_id', table: 'tasks', to: 'id', onDelete: 'SET NULL' },

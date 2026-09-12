@@ -90,6 +90,8 @@ interface Fixture {
   readonly shellCalls: string[]
   readonly stepContexts: { workspaceId: string; worktreeId?: string }[]
   readonly worktreeCreates: WorktreeCreateRequest[]
+  readonly worktreeDiscards: number
+  readonly releaseWorktreeCreation: () => void
   readonly reviewBehavior: { decide: (round: number) => StepCompletion }
 }
 
@@ -100,6 +102,8 @@ function setup(options?: {
   overrideDefinition?: boolean
   /** Parks every agent step forever, so start() stays inside the loop. */
   hangAgent?: boolean
+  /** Parks worktree creation behind a manual gate (dispose race tests). */
+  gateWorktreeCreation?: boolean
 }): Fixture {
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')
@@ -244,27 +248,46 @@ function setup(options?: {
 
   const worktreeCreates: WorktreeCreateRequest[] = []
   let worktreeCounter = 0
+  let worktreeDiscards = 0
+  let releaseGate: (() => void) | undefined
   const worktreeManager = {
     create: (request: WorktreeCreateRequest): Promise<IpcResult<Worktree>> => {
       worktreeCreates.push(request)
-      worktreeCounter += 1
-      const created = worktrees.create(
-        {
-          id: `wt-${String(worktreeCounter)}`,
-          workspaceId: request.workspaceId,
-          ...(request.runId === undefined ? {} : { runId: request.runId }),
-          branch: `agent/${request.taskId ?? 'none'}/${request.agentId ?? 'none'}/${request.runId ?? 'none'}`,
-          baseBranch: 'main',
-          path: `/worktrees/${request.runId ?? 'none'}`,
-          state: 'ready',
-          isolation: request.isolation ?? 'worktree',
-        },
-        AT,
-      )
-      if (!created.ok) throw new Error(created.error.message)
-      return Promise.resolve({ ok: true, data: created.data })
+      const createWorktree = (): IpcResult<Worktree> => {
+        worktreeCounter += 1
+        const created = worktrees.create(
+          {
+            id: `wt-${String(worktreeCounter)}`,
+            workspaceId: request.workspaceId,
+            ...(request.runId === undefined ? {} : { runId: request.runId }),
+            branch: `agent/${request.taskId ?? 'none'}/${request.agentId ?? 'none'}/${request.runId ?? 'none'}`,
+            baseBranch: 'main',
+            path: `/worktrees/${request.runId ?? 'none'}`,
+            state: 'ready',
+            isolation: request.isolation ?? 'worktree',
+          },
+          AT,
+        )
+        if (!created.ok) throw new Error(created.error.message)
+        return { ok: true, data: created.data }
+      }
+      if (options?.gateWorktreeCreation === true) {
+        return new Promise((resolve) => {
+          releaseGate = () => {
+            resolve(createWorktree())
+          }
+        })
+      }
+      return Promise.resolve(createWorktree())
     },
     discard: (): Promise<IpcResult<Worktree>> => {
+      if (options?.gateWorktreeCreation === true) {
+        worktreeDiscards += 1
+        const discarded = worktrees.listByWorkspace('ws-1', undefined, true)
+        const first = discarded.ok ? discarded.data[0] : undefined
+        if (first === undefined) throw new Error('no worktree to discard in this fixture')
+        return Promise.resolve({ ok: true, data: first })
+      }
       throw new Error('unexpected discard in this fixture')
     },
   }
@@ -315,6 +338,10 @@ function setup(options?: {
     shellCalls,
     stepContexts,
     worktreeCreates,
+    get worktreeDiscards() {
+      return worktreeDiscards
+    },
+    releaseWorktreeCreation: () => releaseGate?.(),
     reviewBehavior,
   }
 }
@@ -471,6 +498,29 @@ describe('FullWorkflowService (TASK-063)', () => {
 
     // Idempotent: nothing is in flight anymore.
     await fixture.service.dispose()
+  })
+
+  it('aborts a start still in preparation when dispose() runs, without creating a run', async () => {
+    const fixture = setup({ gateWorktreeCreation: true })
+
+    const pending = fixture.service.start({ workspaceId: 'ws-1', taskId: 'task-1' })
+    await vi.waitFor(() => {
+      expect(fixture.worktreeCreates).toHaveLength(1)
+    })
+
+    // The start is parked in worktree creation — no controller exists yet, so
+    // dispose() cannot reach it through activeControllers. It must abort via
+    // the disposing flag instead of starting a loop underneath dispose.
+    const disposed = fixture.service.dispose()
+    fixture.releaseWorktreeCreation()
+    await disposed
+
+    const started = await pending
+    expect(started.ok).toBe(false)
+    if (!started.ok) expect(started.error.message).toContain('shutting down')
+    expect(fixture.store.listRuns()).toMatchObject({ ok: true, data: [] })
+    expect(fixture.agentCalls).toHaveLength(0)
+    expect(fixture.worktreeDiscards).toBe(1)
   })
 })
 

@@ -456,3 +456,41 @@ CSP + sandbox 已经挡掉了大部分利用路径，但这些是零成本的纵
 1. `dispatch-service.ts` 渲染 prompt 时仍把宿主形态 handoff/artifact 路径写进 prompt 文本
    （env 契约已修复，prompt 字面路径在 WSL 下与 env 不一致）。
 2. P0-1 / P0-2 的 Windows + WSL2 实机验证项（见上），本机 Linux 无法完成。
+
+## 8. 第三轮 Review 修复状态（2026-09-12）
+
+> 本轮 5 项（2 P0 + 3 P1）已修复并补测试；3 项 P2 按评估延后，记录在案。
+
+**已修复**
+
+1. **刷新后 diff 面板永久空白**（changes-page）：refresh 清空 patches 缓存但保留
+   selectedPath，effect 依赖不变不再拉取。现将「该 path 的 patch 是否已缓存」纳入
+   依赖（`selectedPatch` 门控），loadPatch 自身的双重去重保证多触发安全。
+2. **按 pid 杀进程缺身份校验**（reconciliation）：新增 migration 011
+   `agent_runs.pid_identity`（进程启动时间令牌：Linux `/proc/<pid>/stat` field 22、
+   macOS `ps -o lstart=`、Windows PowerShell `Get-Process .StartTime`，经
+   `HostProcessControl.identity()` 在启动时捕获）；reconciliation terminate 前比对，
+   令牌不匹配/进程已消失一律按已死处理（`none`），不再 terminate；无令牌的遗留行
+   回退原 probe-only 行为。**[Windows 验证] 待办**：PowerShell 分支仅有 stub 单测。
+3. **未跟踪文件 numstat 无并发上限**（diff-service）：`--untracked-files=all` 下每个
+   未跟踪文件 fork 一个 git 进程。新增 `mapWithConcurrency` 闸（上限 8），测试断言
+   并发峰值受限。
+4. **dispose 取消集合与等待集合不一致**（dispatch / full-workflow /
+   iteration-controller）：三个服务统一加 `disposing` 标志——dispose() 先同步置位再
+   做取消快照；尚在准备阶段（卡在 worktree 创建、尚未进入取消集合）的执行在
+   WorkflowRun 创建前检查标志并中止（dispatch / full-workflow 丢弃 worktree 返回
+   shutting-down 错误，iteration-controller 直接拒绝新 iterate），消除 before-quit
+   卡死窗口。各有竞态回归测试。
+5. **flushAll 时序窗口**（agent-manager）：`outputBatcher.flushAll()` 从 cancel 之前
+   挪到退订（stopOutput/stopCommand/stopExited）之后、`runLogs.disposeAll()` 之前——
+   订阅是 batcher 唯一推送源，退订后不再有 32ms 定时器能在日志句柄关闭后触发。
+   测试断言 cancel 过程中产生的输出最终落盘。
+
+**延后（P2，未修）**
+
+6. `retention-service.ts` ownsRunDir 用 realpath 过的 root 对比未 realpath 的 target，
+   data root 为符号链接时会漏删自己的 run 目录。
+7. `run-log-store.ts` tail 读取只剥一个 U+FFFD，截断点落在 3/4 字节序列中间时会
+   残留 2~3 个替换字符。
+8. `permission-manager.ts` 尾部 `*` 单词边界判定会打断 `npm run test*` 这类 token
+   中间的前缀匹配（仅影响审计日志的规则归因，放行逻辑不经此函数）。

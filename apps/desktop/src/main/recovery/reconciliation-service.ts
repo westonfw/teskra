@@ -200,18 +200,46 @@ export function createReconciliationService(
        * cannot be re-adopted (its PTY handle died with the previous
        * instance), so it is terminated — resuming onto a worktree a live
        * Agent still writes to would double-write.
+       *
+       * A pid alone does not name a process: after a reboot or pid wraparound
+       * the recorded number belongs to an unrelated process, and killing it
+       * (on Windows `taskkill /T /F` takes the whole tree) would be an
+       * arbitrary kill. Runs that carry a pid identity token (migration 011)
+       * are verified against a fresh start-time read; a mismatch — or a gone
+       * pid — means the recorded process is dead, without touching whatever
+       * owns the pid now. Legacy rows without a token fall back to the
+       * probe-only behavior.
        */
       const terminateSurvivor = async (run: AgentRun): Promise<'none' | 'terminated' | 'alive'> => {
         if (deps.hostProcesses === undefined || run.pid === undefined) return 'none'
-        const probe = await deps.hostProcesses.probe(run.pid)
-        if (!probe.ok) {
-          logger.warn(
-            { runId: run.id, pid: run.pid, error: probe.error },
-            'Host pid probe failed; treating the process as dead.',
-          )
-          return 'none'
+        if (run.pidIdentity !== undefined) {
+          const identity = await deps.hostProcesses.identity(run.pid)
+          if (!identity.ok) {
+            logger.warn(
+              { runId: run.id, pid: run.pid, error: identity.error },
+              'Host pid identity read failed; treating the process as dead.',
+            )
+            return 'none'
+          }
+          if (identity.data === null) return 'none'
+          if (identity.data !== run.pidIdentity) {
+            logger.warn(
+              { runId: run.id, pid: run.pid },
+              'The recorded pid now belongs to an unrelated process; treating the Agent process as dead.',
+            )
+            return 'none'
+          }
+        } else {
+          const probe = await deps.hostProcesses.probe(run.pid)
+          if (!probe.ok) {
+            logger.warn(
+              { runId: run.id, pid: run.pid, error: probe.error },
+              'Host pid probe failed; treating the process as dead.',
+            )
+            return 'none'
+          }
+          if (!probe.data) return 'none'
         }
-        if (!probe.data) return 'none'
         const terminated = await deps.hostProcesses.terminate(run.pid)
         if (terminated.ok) {
           logger.warn(

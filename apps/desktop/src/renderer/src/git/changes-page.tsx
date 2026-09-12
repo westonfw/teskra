@@ -105,10 +105,15 @@ export function ChangesPage() {
   const visibleFiles = useMemo(() => filesForDisplay(changes.files), [changes.files])
 
   // Patches are lazy (P1-5): only the selected file's patch crosses IPC.
+  // refresh() clears the cache while selectedPath may survive, so the cached
+  // entry — not the path — must gate the fetch, or a refresh leaves the panel
+  // permanently blank.
+  const selectedPatch = selectedPath === undefined ? undefined : patches[selectedPath]
   useEffect(() => {
     if (workspace === undefined || selectedPath === undefined) return
+    if (selectedPatch !== undefined) return
     void loadPatch(workspace.id, selectedPath)
-  }, [loadPatch, selectedPath, workspace])
+  }, [loadPatch, selectedPath, selectedPatch, workspace])
 
   const displayPatch = patchForDisplay(selected === undefined ? '' : (patches[selected.path] ?? ''))
   const diffLines = useMemo(() => splitDiffLines(displayPatch.text), [displayPatch.text])
