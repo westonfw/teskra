@@ -2,10 +2,12 @@ import { Card, InputNumber, Select, Space, Typography } from 'antd'
 
 import { LOG_LEVELS, type LogLevel } from '@teskra/contracts'
 
+import { useTranslation } from '../../i18n'
 import { ConfigField } from '../config-field'
 import { useSettingsStore } from '../settings-store'
 
 export function GeneralSettingsSection() {
+  const { t } = useTranslation()
   const config = useSettingsStore((state) => state.resolved?.config)
   const save = useSettingsStore((state) => state.save)
   const saving = useSettingsStore((state) => state.saving)
@@ -15,17 +17,17 @@ export function GeneralSettingsSection() {
   return (
     <Space direction="vertical" size={18} className="settings-section-stack">
       <div>
-        <Typography.Title level={3}>General</Typography.Title>
+        <Typography.Title level={3}>{t('settings.section.general.title')}</Typography.Title>
         <Typography.Paragraph type="secondary">
-          Runtime defaults shared by the workbench. Changes are written to the selected layer.
+          {t('settings.general.subtitle')}
         </Typography.Paragraph>
       </div>
 
-      <Card title="Logging" variant="borderless">
+      <Card title={t('settings.general.logging.title')} variant="borderless">
         <ConfigField
           path="logging.level"
-          label="Log level"
-          description="Controls the minimum severity written to the Teskra log."
+          label={t('settings.general.logging.level.label')}
+          description={t('settings.general.logging.level.description')}
         >
           <Select<LogLevel>
             value={config.logging.level}
@@ -36,11 +38,11 @@ export function GeneralSettingsSection() {
         </ConfigField>
       </Card>
 
-      <Card title="Concurrency" variant="borderless">
+      <Card title={t('settings.general.concurrency.title')} variant="borderless">
         <ConfigField
           path="concurrency.maxGlobalRuns"
-          label="Global runs"
-          description="Maximum number of Agent runs across all workspaces."
+          label={t('settings.general.concurrency.maxGlobalRuns.label')}
+          description={t('settings.general.concurrency.maxGlobalRuns.description')}
         >
           <InputNumber
             min={1}
@@ -54,8 +56,8 @@ export function GeneralSettingsSection() {
         </ConfigField>
         <ConfigField
           path="concurrency.maxRunsPerWorkspace"
-          label="Runs per workspace"
-          description="Prevents one workspace from occupying every Agent slot."
+          label={t('settings.general.concurrency.maxRunsPerWorkspace.label')}
+          description={t('settings.general.concurrency.maxRunsPerWorkspace.description')}
         >
           <InputNumber
             min={1}
@@ -69,8 +71,8 @@ export function GeneralSettingsSection() {
         </ConfigField>
         <ConfigField
           path="concurrency.maxRunsPerAgent"
-          label="Runs per Agent"
-          description="Caps parallel work delegated to a single Agent type."
+          label={t('settings.general.concurrency.maxRunsPerAgent.label')}
+          description={t('settings.general.concurrency.maxRunsPerAgent.description')}
         >
           <InputNumber
             min={1}
@@ -84,11 +86,11 @@ export function GeneralSettingsSection() {
         </ConfigField>
       </Card>
 
-      <Card title="Watchdog" variant="borderless">
+      <Card title={t('settings.general.watchdog.title')} variant="borderless">
         <ConfigField
           path="watchdog.stalledThresholdMs"
-          label="Stalled threshold"
-          description="Milliseconds without output before a run is marked as possibly stalled."
+          label={t('settings.general.watchdog.stalledThreshold.label')}
+          description={t('settings.general.watchdog.stalledThreshold.description')}
         >
           <InputNumber
             min={1000}

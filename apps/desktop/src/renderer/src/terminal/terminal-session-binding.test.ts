@@ -2,11 +2,14 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { IpcResult } from '@teskra/contracts'
 
+import { enUS, type TranslationKey } from '../i18n/en-US'
 import {
   bindTerminalSession,
   type TerminalSessionTransport,
   type TerminalSurface,
 } from './terminal-session-binding'
+
+const t = (key: TranslationKey): string => enUS[key]
 
 function ok(): IpcResult<void> {
   return { ok: true, data: undefined }
@@ -55,7 +58,7 @@ function harness() {
 describe('terminal session binding', () => {
   it('forwards input including Ctrl+C and renders ANSI output unchanged', () => {
     const test = harness()
-    bindTerminalSession('terminal-1', test.surface, test.transport)
+    bindTerminalSession('terminal-1', test.surface, test.transport, { t })
 
     test.emitInput('echo ready\r')
     test.emitInput('\x03')
@@ -68,7 +71,7 @@ describe('terminal session binding', () => {
 
   it('forwards only valid size changes and disposes without closing the PTY', () => {
     const test = harness()
-    const cleanup = bindTerminalSession('terminal-1', test.surface, test.transport)
+    const cleanup = bindTerminalSession('terminal-1', test.surface, test.transport, { t })
 
     test.emitResize(120, 36)
     test.emitResize(120, 36)
@@ -92,7 +95,7 @@ describe('terminal session binding', () => {
         error: { code: 'TERMINAL_NOT_FOUND', message: 'Terminal closed.', retryable: false },
       }
     })
-    bindTerminalSession('terminal-1', test.surface, test.transport, { onClosed, onError })
+    bindTerminalSession('terminal-1', test.surface, test.transport, { t, onClosed, onError })
 
     test.emitClosed()
     test.emitInput('x')

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import type { TerminalSession } from '@teskra/contracts'
 
+import { useTranslation } from '../i18n'
 import { terminalRenderers, type TerminalInstance } from './renderers'
 import { bindTerminalSession } from './terminal-session-binding'
 
@@ -31,7 +32,10 @@ export function TerminalView({
   const initialDataRef = useRef(initialData)
   const onClosedRef = useRef(onClosed)
   const [error, setError] = useState<string>()
+  const { t } = useTranslation()
+  const tRef = useRef(t)
   onClosedRef.current = onClosed
+  tRef.current = t
 
   useEffect(() => {
     const host = hostRef.current
@@ -62,6 +66,7 @@ export function TerminalView({
               }),
           },
           {
+            t: (key) => tRef.current(key),
             onError: setError,
             onClosed: () => onClosedRef.current?.(),
           },

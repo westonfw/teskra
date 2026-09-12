@@ -3,6 +3,8 @@ import { useCallback, useEffect, useState } from 'react'
 
 import type { PublicAppError } from '@teskra/contracts'
 
+import { useTranslation } from '../../i18n'
+
 /**
  * TASK-088: Credential Store status + key management. The UI only ever sees
  * key names — values are write-only (no get channel by design). When the OS
@@ -10,6 +12,7 @@ import type { PublicAppError } from '@teskra/contracts'
  * is stated explicitly instead of silently storing plaintext.
  */
 export function SecuritySettingsSection() {
+  const { t } = useTranslation()
   const [available, setAvailable] = useState<boolean>()
   const [keys, setKeys] = useState<readonly string[]>([])
   const [error, setError] = useState<PublicAppError>()
@@ -57,45 +60,43 @@ export function SecuritySettingsSection() {
   return (
     <Space direction="vertical" size={18} className="settings-section-stack">
       <div>
-        <Typography.Title level={3}>Security</Typography.Title>
+        <Typography.Title level={3}>{t('settings.section.security.title')}</Typography.Title>
         <Typography.Paragraph type="secondary">
-          Sensitive environment variables are stored encrypted through the operating system
-          (DPAPI on Windows, the desktop keyring on Linux) and injected into Agent processes at
-          launch. Plaintext values are never written to the database, config files, or logs.
+          {t('settings.security.subtitle')}
         </Typography.Paragraph>
       </div>
       {available === false && (
         <Alert
           type="warning"
           showIcon
-          message="Secure storage is unavailable in this environment"
-          description="Sensitive variables will not be persisted. Workspace env entries that look like secrets are rejected instead of being stored as plaintext."
+          message={t('settings.security.unavailable.message')}
+          description={t('settings.security.unavailable.description')}
         />
       )}
       {error !== undefined && <Alert type="error" showIcon message={error.message} />}
-      <Card title="Credential Store" variant="borderless">
+      <Card title={t('settings.security.store.title')} variant="borderless">
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Typography.Text type="secondary">
             {available === true
-              ? 'OS-backed encryption is available.'
+              ? t('settings.security.status.available')
               : available === false
-                ? 'OS-backed encryption is unavailable.'
-                : 'Checking availability…'}
+                ? t('settings.security.status.unavailable')
+                : t('settings.security.status.checking')}
           </Typography.Text>
           <List
             size="small"
             dataSource={[...keys]}
-            locale={{ emptyText: 'No credentials stored.' }}
+            locale={{ emptyText: t('settings.security.empty') }}
             renderItem={(key) => (
               <List.Item
                 actions={[
                   <Popconfirm
                     key="delete"
-                    title={`Delete credential "${key}"?`}
+                    title={t('settings.security.deleteConfirm', { key })}
                     onConfirm={() => void remove(key)}
                   >
                     <Button size="small" danger disabled={available !== true}>
-                      Delete
+                      {t('settings.security.delete')}
                     </Button>
                   </Popconfirm>,
                 ]}
@@ -105,15 +106,32 @@ export function SecuritySettingsSection() {
             )}
           />
           <Form form={form} layout="inline" onFinish={(values) => void add(values)}>
-            <Form.Item name="key" rules={[{ required: true, message: 'Name is required.' }]}>
-              <Input placeholder="Name (e.g. OPENAI_API_KEY)" disabled={available !== true} />
+            <Form.Item
+              name="key"
+              rules={[{ required: true, message: t('settings.security.nameRequired') }]}
+            >
+              <Input
+                placeholder={t('settings.security.namePlaceholder')}
+                disabled={available !== true}
+              />
             </Form.Item>
-            <Form.Item name="value" rules={[{ required: true, message: 'Value is required.' }]}>
-              <Input.Password placeholder="Value (write-only)" disabled={available !== true} />
+            <Form.Item
+              name="value"
+              rules={[{ required: true, message: t('settings.security.valueRequired') }]}
+            >
+              <Input.Password
+                placeholder={t('settings.security.valuePlaceholder')}
+                disabled={available !== true}
+              />
             </Form.Item>
             <Form.Item>
-              <Button type="primary" htmlType="submit" loading={saving} disabled={available !== true}>
-                Store
+              <Button
+                type="primary"
+                htmlType="submit"
+                loading={saving}
+                disabled={available !== true}
+              >
+                {t('settings.security.store')}
               </Button>
             </Form.Item>
           </Form>

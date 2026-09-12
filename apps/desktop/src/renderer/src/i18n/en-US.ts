@@ -342,6 +342,185 @@ export const enUS = {
   'worktree.discardConfirm.body':
     'This permanently deletes the worktree directory and its uncommitted changes. The branch "{branch}" and its commits are kept.',
   'worktree.terminalTitle': 'resolve: {branch}',
+
+  'git.eyebrow': 'CHANGES',
+  'git.title': 'Review repository changes',
+  'git.filesChangedOne': '{count} file changed',
+  'git.filesChangedMany': '{count} files changed',
+  'git.detachedHead': 'detached HEAD',
+  'git.empty': 'Working tree is clean',
+  'git.filesTitle': 'Files',
+  'git.largeFileListNotice':
+    'Showing {visible} of {total} files. Narrow the working set before reviewing the remainder.',
+  'git.diffTitle': 'Diff',
+  'git.openFile': 'Open file',
+  'git.largeDiffNotice':
+    'Showing the first {count} characters to keep the workbench responsive. Open the file for the complete content.',
+
+  'doctor.eyebrow': 'SYSTEM DIAGNOSTICS',
+  'doctor.title': 'Doctor',
+  'doctor.subtitle': 'Inspect runtime prerequisites and persistent state without changing them.',
+  'doctor.runAgain': 'Run again',
+  'doctor.unreachable': 'Teskra could not reach DoctorService.',
+  'doctor.running': 'Running diagnostics…',
+  'doctor.empty': 'Run Doctor to generate a health report.',
+  'doctor.allHealthy': 'All checked systems are healthy.',
+  'doctor.issuesFound': '{count} issue(s) found.',
+  'doctor.generated': 'Generated {time}',
+  'doctor.generatedFor': 'Generated {time} for {name}',
+  'doctor.outcome.healthy': 'Healthy',
+  'doctor.outcome.skipped': 'Skipped',
+
+  'recovery.eyebrow': 'CRASH RECOVERY',
+  'recovery.title': 'Recovery Center',
+  'recovery.subtitle':
+    'Interrupted runs, broken worktrees, and stale processes — each with a suggested next step.',
+  'recovery.scanning': 'Scanning for recoverable issues…',
+  'recovery.empty': 'Everything is healthy — nothing to recover.',
+  'recovery.kind.interrupted_run': 'Interrupted Runs',
+  'recovery.kind.broken_worktree': 'Broken Worktrees',
+  'recovery.kind.dirty_worktree': 'Dirty Worktrees',
+  'recovery.kind.conflict': 'Conflicts',
+  'recovery.kind.stale_process': 'Stale Processes',
+  'recovery.discardConfirm.body':
+    'This permanently deletes the worktree directory and its uncommitted changes. The agent branch and its commits are kept.',
+  'recovery.repair': 'Repair',
+  'recovery.discard': 'Discard…',
+  'recovery.inspect': 'Inspect',
+  'recovery.worktreeId': 'worktree {id}',
+
+  'settings.eyebrow': 'CONFIGURATION LAYER',
+  'settings.layerDescription':
+    'Choose where edits are stored. Every field shows the layer currently supplying it.',
+  'settings.layer.global': 'Global',
+  'settings.layer.workspace': 'Workspace',
+  'settings.noWorkspaceBody':
+    'Global settings remain available. Open a workspace to read or write its repository-local configuration.',
+  'settings.loading': 'Loading configuration…',
+  'settings.noSections': 'No Settings sections are registered.',
+  'settings.section.agents.title': 'Agents',
+  'settings.section.agents.description': 'Installed coding Agent integrations',
+  'settings.section.permissions.title': 'Permissions',
+  'settings.section.permissions.description': 'Agent permission rules and the command audit trail',
+  'settings.section.security.title': 'Security',
+  'settings.section.security.description': 'Credential Store and secret environment variables',
+  'settings.section.general.title': 'General',
+  'settings.section.general.description': 'Logging and runtime defaults',
+  'settings.section.environment.title': 'Environment',
+  'settings.section.environment.description': 'Windows and WSL',
+  'settings.section.advanced.title': 'Advanced',
+  'settings.section.advanced.description': 'Diagnostics and local data',
+  'settings.source.default': 'Built-in default',
+  'settings.source.global': 'Global config',
+  'settings.source.workspace': 'Workspace config',
+  'settings.source.override': 'Run override',
+
+  'settings.general.subtitle':
+    'Runtime defaults shared by the workbench. Changes are written to the selected layer.',
+  'settings.general.logging.title': 'Logging',
+  'settings.general.logging.level.label': 'Log level',
+  'settings.general.logging.level.description':
+    'Controls the minimum severity written to the Teskra log.',
+  'settings.general.concurrency.title': 'Concurrency',
+  'settings.general.concurrency.maxGlobalRuns.label': 'Global runs',
+  'settings.general.concurrency.maxGlobalRuns.description':
+    'Maximum number of Agent runs across all workspaces.',
+  'settings.general.concurrency.maxRunsPerWorkspace.label': 'Runs per workspace',
+  'settings.general.concurrency.maxRunsPerWorkspace.description':
+    'Prevents one workspace from occupying every Agent slot.',
+  'settings.general.concurrency.maxRunsPerAgent.label': 'Runs per Agent',
+  'settings.general.concurrency.maxRunsPerAgent.description':
+    'Caps parallel work delegated to a single Agent type.',
+  'settings.general.watchdog.title': 'Watchdog',
+  'settings.general.watchdog.stalledThreshold.label': 'Stalled threshold',
+  'settings.general.watchdog.stalledThreshold.description':
+    'Milliseconds without output before a run is marked as possibly stalled.',
+
+  'settings.environment.subtitle':
+    'Choose the default WSL distribution used when a workspace does not specify one.',
+  'settings.environment.wslDetectFailed': 'WSL detection failed.',
+  'settings.environment.retry': 'Retry',
+  'settings.environment.wslCardTitle': 'Windows Subsystem for Linux',
+  'settings.environment.defaultDistro.label': 'Default distribution',
+  'settings.environment.defaultDistro.description':
+    'This host preference is always saved to the global config layer.',
+  'settings.environment.defaultDistro.placeholder': 'Use the Windows default',
+  'settings.environment.distroDefault': '{name} · Windows default',
+
+  'settings.advanced.subtitle': 'Diagnostics, local data, and security-sensitive capabilities.',
+  'settings.advanced.localDirectories': 'Local directories',
+  'settings.advanced.openLogs': 'Open logs',
+  'settings.advanced.openDataDirectory': 'Open data directory',
+  'settings.advanced.credentialStore.message': 'Sensitive settings use the Credential Store',
+  'settings.advanced.credentialStore.description':
+    'API keys, tokens, and other secrets are stored encrypted via the Credential Store (see the Security section). Teskra will not save them in config files.',
+
+  'settings.agents.eyebrow': 'REGISTRY',
+  'settings.agents.title': 'Coding Agents',
+  'settings.agents.subtitle':
+    'Agent entries come from the Main-process Registry. Executable overrides are machine-specific and always stored in global config.',
+  'settings.agents.empty': 'No Agent definitions are registered.',
+  'settings.agents.executable': 'Executable',
+  'settings.agents.permissionEnforcement': 'Permission enforcement',
+  'settings.agents.notChecked': 'Not checked',
+  'settings.agents.installed': 'Installed',
+  'settings.agents.notInstalled': 'Not installed',
+  'settings.agents.autoDetect': 'Auto-detect {command}',
+  'settings.agents.save': 'Save',
+  'settings.agents.detect': 'Detect',
+
+  'settings.permissions.eyebrow': 'POLICY + AUDIT',
+  'settings.permissions.subtitle':
+    'Teskra is a PTY host, not a syscall gateway (ADR-0002): rules are projected into each Agent CLI’s own approval mechanism before a Run starts, and the audit trail records commands after they were recognized in the output stream. Nothing here intercepts a command before it runs.',
+  'settings.permissions.enforcement.title': 'Agent enforcement',
+  'settings.permissions.rules.title': 'Permission rules',
+  'settings.permissions.rules.new': 'New rule',
+  'settings.permissions.rules.askNote':
+    '“ask” only prompts on Agents with native approval (see above); everywhere else it degrades to audit-only at projection time.',
+  'settings.permissions.rules.empty': 'No rules yet',
+  'settings.permissions.rules.deleteConfirm': 'Delete this rule?',
+  'settings.permissions.scope.global': 'global',
+  'settings.permissions.scope.allAgents': 'all agents',
+  'settings.permissions.audit.title': 'Audit log',
+  'settings.permissions.audit.riskLevel': 'Risk level',
+  'settings.permissions.audit.filter': 'Filter',
+  'settings.permissions.audit.empty': 'No audit entries',
+  'settings.permissions.audit.column.risk': 'Risk',
+  'settings.permissions.audit.column.command': 'Command',
+  'settings.permissions.audit.column.run': 'Run',
+  'settings.permissions.audit.column.recognizedAt': 'Recognized at',
+  'settings.permissions.audit.recognizedNote':
+    '“Recognized at” is when the command was detected in the output stream — after it already executed.',
+  'settings.permissions.rule.new': 'New permission rule',
+  'settings.permissions.rule.edit': 'Edit permission rule',
+  'settings.permissions.rule.commandPatternPlaceholder':
+    'Command pattern, e.g. Bash(git push *) or git push',
+  'settings.permissions.rule.workspacePlaceholder': 'Workspace (empty = global)',
+  'settings.permissions.rule.agentPlaceholder': 'Agent (empty = all)',
+
+  'settings.security.subtitle':
+    'Sensitive environment variables are stored encrypted through the operating system (DPAPI on Windows, the desktop keyring on Linux) and injected into Agent processes at launch. Plaintext values are never written to the database, config files, or logs.',
+  'settings.security.unavailable.message': 'Secure storage is unavailable in this environment',
+  'settings.security.unavailable.description':
+    'Sensitive variables will not be persisted. Workspace env entries that look like secrets are rejected instead of being stored as plaintext.',
+  'settings.security.store.title': 'Credential Store',
+  'settings.security.status.available': 'OS-backed encryption is available.',
+  'settings.security.status.unavailable': 'OS-backed encryption is unavailable.',
+  'settings.security.status.checking': 'Checking availability…',
+  'settings.security.empty': 'No credentials stored.',
+  'settings.security.deleteConfirm': 'Delete credential "{key}"?',
+  'settings.security.delete': 'Delete',
+  'settings.security.nameRequired': 'Name is required.',
+  'settings.security.valueRequired': 'Value is required.',
+  'settings.security.namePlaceholder': 'Name (e.g. OPENAI_API_KEY)',
+  'settings.security.valuePlaceholder': 'Value (write-only)',
+  'settings.security.store': 'Store',
+
+  'terminal.new': 'New terminal',
+  'terminal.empty': 'No terminals in this workspace',
+  'terminal.exitedSuffix': ' · exited',
+  'terminal.connectionLost': 'The terminal connection was interrupted.',
+  'terminal.exitedMarker': '[terminal exited]',
 } as const
 
 export type TranslationKey = keyof typeof enUS

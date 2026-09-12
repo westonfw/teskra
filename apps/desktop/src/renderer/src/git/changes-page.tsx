@@ -5,6 +5,7 @@ import { useEffect, useMemo } from 'react'
 import type { DiffFile, DiffFileStatus } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../components/app-error-alert'
+import { useTranslation } from '../i18n'
 import { useGitStore } from '../stores/git-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
 import { splitDiffLines } from './diff-lines'
@@ -60,6 +61,7 @@ function FileRow({
 }
 
 export function ChangesPage() {
+  const { t } = useTranslation()
   const workspace = useWorkspaceStore((state) => state.current)
   const status = useGitStore((state) => state.status)
   const changes = useGitStore((state) => state.changes)
@@ -107,15 +109,17 @@ export function ChangesPage() {
     <div className="workbench-page changes-page">
       <div className="page-heading changes-heading">
         <div>
-          <Typography.Text className="settings-eyebrow">CHANGES</Typography.Text>
-          <Typography.Title level={2}>Review repository changes</Typography.Title>
+          <Typography.Text className="settings-eyebrow">{t('git.eyebrow')}</Typography.Text>
+          <Typography.Title level={2}>{t('git.title')}</Typography.Title>
           <Space size={12} wrap>
             <Typography.Text type="secondary">
-              {changes.files.length} {changes.files.length === 1 ? 'file' : 'files'} changed
+              {t(changes.files.length === 1 ? 'git.filesChangedOne' : 'git.filesChangedMany', {
+                count: changes.files.length,
+              })}
             </Typography.Text>
             <Typography.Text className="diff-additions">+{totals.additions}</Typography.Text>
             <Typography.Text className="diff-deletions">−{totals.deletions}</Typography.Text>
-            <Tag bordered={false}>{status?.branch ?? 'detached HEAD'}</Tag>
+            <Tag bordered={false}>{status?.branch ?? t('git.detachedHead')}</Tag>
             {(status?.ahead ?? 0) > 0 && <Tag color="cyan">↑ {status?.ahead}</Tag>}
             {(status?.behind ?? 0) > 0 && <Tag color="orange">↓ {status?.behind}</Tag>}
           </Space>
@@ -125,7 +129,7 @@ export function ChangesPage() {
           loading={loading}
           onClick={() => void refresh(workspace.id)}
         >
-          Refresh
+          {t('home.refresh')}
         </Button>
       </div>
 
@@ -136,16 +140,17 @@ export function ChangesPage() {
       <Spin spinning={loading && status === undefined}>
         {changes.files.length === 0 ? (
           <Card className="changes-empty" variant="borderless">
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Working tree is clean" />
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('git.empty')} />
           </Card>
         ) : (
           <div className="changes-workbench">
-            <Card className="changes-file-card" title="Files" variant="borderless">
+            <Card className="changes-file-card" title={t('git.filesTitle')} variant="borderless">
               {changes.files.length > MAX_VISIBLE_CHANGE_FILES && (
                 <div className="large-file-list-notice">
-                  Showing {MAX_VISIBLE_CHANGE_FILES.toLocaleString()} of{' '}
-                  {changes.files.length.toLocaleString()} files. Narrow the working set before
-                  reviewing the remainder.
+                  {t('git.largeFileListNotice', {
+                    visible: MAX_VISIBLE_CHANGE_FILES.toLocaleString(),
+                    total: changes.files.length.toLocaleString(),
+                  })}
                 </div>
               )}
               <div className="changes-file-list">
@@ -162,7 +167,7 @@ export function ChangesPage() {
 
             <Card
               className="changes-diff-card"
-              title={selected?.path ?? 'Diff'}
+              title={selected?.path ?? t('git.diffTitle')}
               extra={
                 selected !== undefined && selected.status !== 'deleted' ? (
                   <Button
@@ -170,7 +175,7 @@ export function ChangesPage() {
                     icon={<FolderOpenOutlined />}
                     onClick={() => void openFile(workspace.id, selected.path)}
                   >
-                    Open file
+                    {t('git.openFile')}
                   </Button>
                 ) : undefined
               }
@@ -178,13 +183,17 @@ export function ChangesPage() {
             >
               {displayPatch.truncated && (
                 <div className="large-diff-notice">
-                  Showing the first {MAX_RENDERED_PATCH_CHARS.toLocaleString()} characters to keep
-                  the workbench responsive. Open the file for the complete content.
+                  {t('git.largeDiffNotice', {
+                    count: MAX_RENDERED_PATCH_CHARS.toLocaleString(),
+                  })}
                 </div>
               )}
               <pre className="diff-patch" tabIndex={0}>
                 {diffLines.map((line, index) => (
-                  <span key={`${index}:${line.text}`} className={`diff-line diff-line-${line.kind}`}>
+                  <span
+                    key={`${index}:${line.text}`}
+                    className={`diff-line diff-line-${line.kind}`}
+                  >
                     {line.text}
                     {'\n'}
                   </span>

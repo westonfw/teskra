@@ -1,19 +1,23 @@
 import { CheckCircleOutlined, ExclamationCircleOutlined, ReloadOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Empty, List, Space, Spin, Tag, Typography } from 'antd'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { DoctorCheck, DoctorReport, PublicAppError } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../components/app-error-alert'
+import { useTranslation } from '../i18n'
 import { useWorkspaceStore } from '../stores/workspace-store'
 
 const severityColor = { info: 'green', warning: 'gold', error: 'red' } as const
 
 export function DoctorPage() {
+  const { t } = useTranslation()
   const workspace = useWorkspaceStore((state) => state.current)
   const [report, setReport] = useState<DoctorReport>()
   const [error, setError] = useState<PublicAppError>()
   const [loading, setLoading] = useState(false)
+  const tRef = useRef(t)
+  tRef.current = t
 
   const runDoctor = useCallback(async (): Promise<void> => {
     setLoading(true)
@@ -25,7 +29,7 @@ export function DoctorPage() {
     } catch {
       setError({
         code: 'UNKNOWN',
-        message: 'Teskra could not reach DoctorService.',
+        message: tRef.current('doctor.unreachable'),
         retryable: true,
       })
     } finally {
@@ -41,14 +45,12 @@ export function DoctorPage() {
     <div className="workbench-page doctor-page">
       <header className="page-heading">
         <div>
-          <Typography.Text className="settings-eyebrow">SYSTEM DIAGNOSTICS</Typography.Text>
-          <Typography.Title level={2}>Doctor</Typography.Title>
-          <Typography.Paragraph type="secondary">
-            Inspect runtime prerequisites and persistent state without changing them.
-          </Typography.Paragraph>
+          <Typography.Text className="settings-eyebrow">{t('doctor.eyebrow')}</Typography.Text>
+          <Typography.Title level={2}>{t('doctor.title')}</Typography.Title>
+          <Typography.Paragraph type="secondary">{t('doctor.subtitle')}</Typography.Paragraph>
         </div>
         <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void runDoctor()}>
-          Run again
+          {t('doctor.runAgain')}
         </Button>
       </header>
 
@@ -56,9 +58,9 @@ export function DoctorPage() {
         <AppErrorAlert className="page-alert" error={error} onClose={() => setError(undefined)} />
       )}
 
-      <Spin spinning={loading} tip="Running diagnostics…">
+      <Spin spinning={loading} tip={t('doctor.running')}>
         {report === undefined ? (
-          <Empty description="Run Doctor to generate a health report." />
+          <Empty description={t('doctor.empty')} />
         ) : (
           <Space direction="vertical" size={18} className="doctor-report">
             <Alert
@@ -72,10 +74,17 @@ export function DoctorPage() {
               }
               message={
                 report.issueCount === 0
-                  ? 'All checked systems are healthy.'
-                  : `${String(report.issueCount)} issue(s) found.`
+                  ? t('doctor.allHealthy')
+                  : t('doctor.issuesFound', { count: report.issueCount })
               }
-              description={`Generated ${new Date(report.generatedAt).toLocaleString()}${workspace === undefined ? '' : ` for ${workspace.name}`}`}
+              description={
+                workspace === undefined
+                  ? t('doctor.generated', { time: new Date(report.generatedAt).toLocaleString() })
+                  : t('doctor.generatedFor', {
+                      time: new Date(report.generatedAt).toLocaleString(),
+                      name: workspace.name,
+                    })
+              }
             />
             <List
               className="doctor-check-list"
@@ -90,6 +99,7 @@ export function DoctorPage() {
 }
 
 function DoctorCheckItem({ check }: { readonly check: DoctorCheck }) {
+  const { t } = useTranslation()
   const healthy = check.outcome === 'pass'
   return (
     <List.Item>
@@ -105,9 +115,9 @@ function DoctorCheckItem({ check }: { readonly check: DoctorCheck }) {
         extra={
           <Tag color={check.outcome === 'skipped' ? 'default' : severityColor[check.severity]}>
             {check.outcome === 'pass'
-              ? 'Healthy'
+              ? t('doctor.outcome.healthy')
               : check.outcome === 'skipped'
-                ? 'Skipped'
+                ? t('doctor.outcome.skipped')
                 : check.severity}
           </Tag>
         }

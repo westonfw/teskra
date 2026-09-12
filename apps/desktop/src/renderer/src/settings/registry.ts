@@ -1,9 +1,11 @@
 import type { ComponentType } from 'react'
 
+import type { TranslationKey } from '../i18n'
+
 export interface SettingsSectionDefinition {
   readonly id: string
-  readonly title: string
-  readonly description: string
+  readonly title: TranslationKey
+  readonly description: TranslationKey
   readonly order: number
   readonly component: ComponentType
 }

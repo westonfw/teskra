@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import type { TerminalShell, Workspace } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../components/app-error-alert'
+import { useTranslation } from '../i18n'
 import { useTerminalStore } from '../stores/terminal-store'
 import { TerminalView } from './terminal-view'
 
@@ -15,6 +16,7 @@ interface TerminalKeepAliveHostProps {
 }
 
 export function TerminalKeepAliveHost({ workspace, visible }: TerminalKeepAliveHostProps) {
+  const { t } = useTranslation()
   const tabs = useTerminalStore((state) => state.tabs)
   const activeId = useTerminalStore((state) => state.activeId)
   const history = useTerminalStore((state) => state.history)
@@ -56,16 +58,13 @@ export function TerminalKeepAliveHost({ workspace, visible }: TerminalKeepAliveH
           icon={<PlusOutlined />}
           onClick={() => void createTerminal({ workspaceId: workspace.id, shell })}
         >
-          New terminal
+          {t('terminal.new')}
         </Button>
       </div>
       {error !== undefined && <AppErrorAlert error={error} onClose={clearError} />}
       <Spin spinning={loading}>
         {workspaceTabs.length === 0 ? (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="No terminals in this workspace"
-          />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('terminal.empty')} />
         ) : (
           <Tabs
             className="terminal-tabs"
@@ -77,7 +76,7 @@ export function TerminalKeepAliveHost({ workspace, visible }: TerminalKeepAliveH
               label: (
                 <span>
                   {tab.session.title}
-                  {tab.status === 'closed' ? ' · exited' : ''}
+                  {tab.status === 'closed' ? t('terminal.exitedSuffix') : ''}
                 </span>
               ),
               forceRender: true,

@@ -16,6 +16,7 @@ interface RuntimeExecutableControlProps {
 }
 
 function RuntimeExecutableControl({ definition, runtime, label }: RuntimeExecutableControlProps) {
+  const { t } = useTranslation()
   const key = agentRuntimeKey(definition.id, runtime)
   const storedPath = useAgentStore((state) => state.executableOverrides[key])
   const detection = useAgentStore((state) => state.detections[key])
@@ -51,24 +52,26 @@ function RuntimeExecutableControl({ definition, runtime, label }: RuntimeExecuta
       <div className="agent-runtime-control-heading">
         <Typography.Text strong>{label}</Typography.Text>
         {detection === undefined ? (
-          <Tag>Not checked</Tag>
+          <Tag>{t('settings.agents.notChecked')}</Tag>
         ) : (
           <Tag color={detection.installed ? 'green' : 'red'}>
-            {detection.installed ? (detection.version ?? 'Installed') : 'Not installed'}
+            {detection.installed
+              ? (detection.version ?? t('settings.agents.installed'))
+              : t('settings.agents.notInstalled')}
           </Tag>
         )}
       </div>
       <Space.Compact block>
         <Input
           value={path}
-          placeholder={`Auto-detect ${definition.executable.command}`}
+          placeholder={t('settings.agents.autoDetect', { command: definition.executable.command })}
           onChange={(event) => setPath(event.target.value)}
         />
         <Button loading={saving} onClick={() => void save()}>
-          Save
+          {t('settings.agents.save')}
         </Button>
         <Button loading={detecting} onClick={() => void check()}>
-          Detect
+          {t('settings.agents.detect')}
         </Button>
       </Space.Compact>
       {detection?.executable !== undefined && (
@@ -102,28 +105,29 @@ export function AgentsSettingsSection() {
   return (
     <Space direction="vertical" size={18} className="settings-section-stack">
       <div>
-        <Typography.Text className="settings-eyebrow">REGISTRY</Typography.Text>
-        <Typography.Title level={3}>Coding Agents</Typography.Title>
+        <Typography.Text className="settings-eyebrow">
+          {t('settings.agents.eyebrow')}
+        </Typography.Text>
+        <Typography.Title level={3}>{t('settings.agents.title')}</Typography.Title>
         <Typography.Paragraph type="secondary">
-          Agent entries come from the Main-process Registry. Executable overrides are
-          machine-specific and always stored in global config.
+          {t('settings.agents.subtitle')}
         </Typography.Paragraph>
       </div>
       {error !== undefined && <AppErrorAlert error={error} onClose={clearError} />}
-      <Spin spinning={loading} tip="Loading Agents…">
+      <Spin spinning={loading} tip={t('runs.agents.loading')}>
         {definitions.length === 0 && !loading ? (
-          <Empty description="No Agent definitions are registered." />
+          <Empty description={t('settings.agents.empty')} />
         ) : (
           <Space direction="vertical" size={12} className="agent-settings-list">
             {definitions.map((definition) => (
               <Card key={definition.id} title={definition.name} extra={<Tag>{definition.id}</Tag>}>
                 <Space direction="vertical" size={8}>
                   <Typography.Text>
-                    Executable:{' '}
+                    {t('settings.agents.executable')}:{' '}
                     <Typography.Text code>{definition.executable.command}</Typography.Text>
                   </Typography.Text>
                   <Typography.Text type="secondary">
-                    Permission enforcement:{' '}
+                    {t('settings.agents.permissionEnforcement')}:{' '}
                     {permissionEnforcementInfo(definition.permissionEnforcement, t).label} (
                     {definition.permissionEnforcement}) —{' '}
                     {permissionEnforcementInfo(definition.permissionEnforcement, t).description}
@@ -138,7 +142,7 @@ export function AgentsSettingsSection() {
                   <RuntimeExecutableControl
                     definition={definition}
                     runtime={{ kind: 'windows' }}
-                    label="Windows"
+                    label={t('workspace.dialog.windows')}
                   />
                   <RuntimeExecutableControl
                     definition={definition}

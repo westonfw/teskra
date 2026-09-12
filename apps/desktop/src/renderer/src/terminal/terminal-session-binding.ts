@@ -1,5 +1,7 @@
 import type { IpcResult } from '@teskra/contracts'
 
+import type { TranslationKey } from '../i18n'
+
 export interface Disposable {
   dispose(): void
 }
@@ -18,6 +20,7 @@ export interface TerminalSessionTransport {
 }
 
 export interface TerminalBindingOptions {
+  readonly t: (key: TranslationKey) => string
   readonly onError?: (message: string) => void
   readonly onClosed?: () => void
 }
@@ -27,7 +30,7 @@ export function bindTerminalSession(
   terminalId: string,
   surface: TerminalSurface,
   transport: TerminalSessionTransport,
-  options: TerminalBindingOptions = {},
+  options: TerminalBindingOptions,
 ): () => void {
   let disposed = false
   let previousSize = ''
@@ -40,7 +43,7 @@ export function bindTerminalSession(
       const result = await operation
       if (!result.ok) report(result.error.message)
     } catch {
-      report('The terminal connection was interrupted.')
+      report(options.t('terminal.connectionLost'))
     }
   }
 
@@ -59,7 +62,7 @@ export function bindTerminalSession(
   })
   const stopClosed = transport.subscribeClosed(terminalId, () => {
     if (disposed) return
-    surface.write('\r\n\x1b[90m[terminal exited]\x1b[0m\r\n')
+    surface.write(`\r\n\x1b[90m${options.t('terminal.exitedMarker')}\x1b[0m\r\n`)
     options.onClosed?.()
   })
 

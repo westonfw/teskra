@@ -9,43 +9,43 @@ import type { SettingsSectionRegistry } from './registry'
 export function registerBuiltInSettings(registry: SettingsSectionRegistry): void {
   registry.register({
     id: 'agents',
-    title: 'Agents',
-    description: 'Installed coding Agent integrations',
+    title: 'settings.section.agents.title',
+    description: 'settings.section.agents.description',
     order: 30,
     component: AgentsSettingsSection,
   })
   registry.register({
     id: 'permissions',
-    title: 'Permissions',
-    description: 'Agent permission rules and the command audit trail',
+    title: 'settings.section.permissions.title',
+    description: 'settings.section.permissions.description',
     order: 40,
     component: PermissionsSettingsSection,
   })
   registry.register({
     id: 'security',
-    title: 'Security',
-    description: 'Credential Store and secret environment variables',
+    title: 'settings.section.security.title',
+    description: 'settings.section.security.description',
     order: 35,
     component: SecuritySettingsSection,
   })
   registry.register({
     id: 'general',
-    title: 'General',
-    description: 'Logging and runtime defaults',
+    title: 'settings.section.general.title',
+    description: 'settings.section.general.description',
     order: 10,
     component: GeneralSettingsSection,
   })
   registry.register({
     id: 'environment',
-    title: 'Environment',
-    description: 'Windows and WSL',
+    title: 'settings.section.environment.title',
+    description: 'settings.section.environment.description',
     order: 20,
     component: EnvironmentSettingsSection,
   })
   registry.register({
     id: 'advanced',
-    title: 'Advanced',
-    description: 'Diagnostics and local data',
+    title: 'settings.section.advanced.title',
+    description: 'settings.section.advanced.description',
     order: 90,
     component: AdvancedSettingsSection,
   })

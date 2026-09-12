@@ -3,10 +3,12 @@ import { useEffect, useState } from 'react'
 
 import type { PublicAppError, WslDistribution } from '@teskra/contracts'
 
+import { useTranslation } from '../../i18n'
 import { ConfigField } from '../config-field'
 import { useSettingsStore } from '../settings-store'
 
 export function EnvironmentSettingsSection() {
+  const { t } = useTranslation()
   const config = useSettingsStore((state) => state.resolved?.config)
   const loadConfig = useSettingsStore((state) => state.load)
   const [distributions, setDistributions] = useState<readonly WslDistribution[]>([])
@@ -21,7 +23,11 @@ export function EnvironmentSettingsSection() {
       if (result.ok) setDistributions(result.data)
       else setError(result.error)
     } catch {
-      setError({ code: 'UNKNOWN', message: 'WSL detection failed.', retryable: true })
+      setError({
+        code: 'UNKNOWN',
+        message: t('settings.environment.wslDetectFailed'),
+        retryable: true,
+      })
     } finally {
       setLoading(false)
     }
@@ -34,9 +40,9 @@ export function EnvironmentSettingsSection() {
   return (
     <Space direction="vertical" size={18} className="settings-section-stack">
       <div>
-        <Typography.Title level={3}>Environment</Typography.Title>
+        <Typography.Title level={3}>{t('settings.section.environment.title')}</Typography.Title>
         <Typography.Paragraph type="secondary">
-          Choose the default WSL distribution used when a workspace does not specify one.
+          {t('settings.environment.subtitle')}
         </Typography.Paragraph>
       </div>
       {error !== undefined && (
@@ -44,24 +50,24 @@ export function EnvironmentSettingsSection() {
           type="warning"
           showIcon
           message={error.message}
-          action={<Button onClick={() => void inspect()}>Retry</Button>}
+          action={<Button onClick={() => void inspect()}>{t('settings.environment.retry')}</Button>}
         />
       )}
-      <Card title="Windows Subsystem for Linux" variant="borderless">
+      <Card title={t('settings.environment.wslCardTitle')} variant="borderless">
         <ConfigField
           path="environment.defaultDistro"
-          label="Default distribution"
-          description="This host preference is always saved to the global config layer."
+          label={t('settings.environment.defaultDistro.label')}
+          description={t('settings.environment.defaultDistro.description')}
         >
           <Select<string | null>
             allowClear
-            placeholder="Use the Windows default"
+            placeholder={t('settings.environment.defaultDistro.placeholder')}
             loading={loading}
             value={config?.environment.defaultDistro ?? undefined}
             options={distributions.map((distribution) => ({
               value: distribution.name,
               label: distribution.isSystemDefault
-                ? `${distribution.name} · Windows default`
+                ? t('settings.environment.distroDefault', { name: distribution.name })
                 : distribution.name,
             }))}
             onChange={async (name) => {

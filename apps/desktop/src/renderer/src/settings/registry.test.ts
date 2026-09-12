@@ -11,15 +11,15 @@ describe('Settings section registry', () => {
     const stopListening = registry.subscribe(changed)
     const removeAdvanced = registry.register({
       id: 'advanced',
-      title: 'Advanced',
-      description: 'Paths',
+      title: 'settings.section.advanced.title',
+      description: 'settings.section.advanced.description',
       order: 30,
       component: EmptySection,
     })
     registry.register({
       id: 'general',
-      title: 'General',
-      description: 'General options',
+      title: 'settings.section.general.title',
+      description: 'settings.section.general.description',
       order: 10,
       component: EmptySection,
     })
@@ -37,11 +37,11 @@ describe('Settings section registry', () => {
     const registry = createSettingsSectionRegistry()
     const section = {
       id: 'general',
-      title: 'General',
-      description: 'General options',
+      title: 'settings.section.general.title',
+      description: 'settings.section.general.description',
       order: 10,
       component: EmptySection,
-    }
+    } as const
     registry.register(section)
     expect(() => registry.register(section)).toThrow(/already registered/u)
   })

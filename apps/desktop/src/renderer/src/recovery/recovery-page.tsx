@@ -11,16 +11,17 @@ import { useEffect } from 'react'
 import type { RecoveryIssue, RecoveryIssueKind } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../components/app-error-alert'
+import { useTranslation, type TranslationKey } from '../i18n'
 import { useNavigationStore } from '../stores/navigation-store'
 import { useRecoveryStore } from '../stores/recovery-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
 
-const KIND_LABELS: Record<RecoveryIssueKind, string> = {
-  interrupted_run: 'Interrupted Runs',
-  broken_worktree: 'Broken Worktrees',
-  dirty_worktree: 'Dirty Worktrees',
-  conflict: 'Conflicts',
-  stale_process: 'Stale Processes',
+const KIND_LABEL_KEYS: Record<RecoveryIssueKind, TranslationKey> = {
+  interrupted_run: 'recovery.kind.interrupted_run',
+  broken_worktree: 'recovery.kind.broken_worktree',
+  dirty_worktree: 'recovery.kind.dirty_worktree',
+  conflict: 'recovery.kind.conflict',
+  stale_process: 'recovery.kind.stale_process',
 }
 
 const KIND_ORDER: readonly RecoveryIssueKind[] = [
@@ -32,6 +33,7 @@ const KIND_ORDER: readonly RecoveryIssueKind[] = [
 ]
 
 export function RecoveryPage() {
+  const { t } = useTranslation()
   const workspace = useWorkspaceStore((state) => state.current)
   const issues = useRecoveryStore((state) => state.issues)
   const loading = useRecoveryStore((state) => state.loading)
@@ -50,12 +52,9 @@ export function RecoveryPage() {
     <div className="workbench-page recovery-page">
       <header className="page-heading">
         <div>
-          <Typography.Text className="settings-eyebrow">CRASH RECOVERY</Typography.Text>
-          <Typography.Title level={2}>Recovery Center</Typography.Title>
-          <Typography.Paragraph type="secondary">
-            Interrupted runs, broken worktrees, and stale processes — each with a suggested next
-            step.
-          </Typography.Paragraph>
+          <Typography.Text className="settings-eyebrow">{t('recovery.eyebrow')}</Typography.Text>
+          <Typography.Title level={2}>{t('recovery.title')}</Typography.Title>
+          <Typography.Paragraph type="secondary">{t('recovery.subtitle')}</Typography.Paragraph>
         </div>
         <Button
           icon={<ReloadOutlined />}
@@ -63,7 +62,7 @@ export function RecoveryPage() {
           disabled={workspaceId === undefined}
           onClick={() => workspaceId !== undefined && void load(workspaceId)}
         >
-          Refresh
+          {t('home.refresh')}
         </Button>
       </header>
 
@@ -71,12 +70,9 @@ export function RecoveryPage() {
         <AppErrorAlert className="page-alert" error={error} onClose={clearError} />
       )}
 
-      <Spin spinning={loading && issues.length === 0} tip="Scanning for recoverable issues…">
+      <Spin spinning={loading && issues.length === 0} tip={t('recovery.scanning')}>
         {issues.length === 0 ? (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="Everything is healthy — nothing to recover."
-          />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('recovery.empty')} />
         ) : (
           <Space direction="vertical" size={18} className="doctor-report">
             {KIND_ORDER.map((kind) => {
@@ -89,7 +85,7 @@ export function RecoveryPage() {
                   header={
                     <Space>
                       <MedicineBoxOutlined />
-                      <Typography.Text strong>{KIND_LABELS[kind]}</Typography.Text>
+                      <Typography.Text strong>{t(KIND_LABEL_KEYS[kind])}</Typography.Text>
                       <Tag bordered={false}>{group.length}</Tag>
                     </Space>
                   }
@@ -122,6 +118,7 @@ function RecoveryIssueItem({
   const discardWorktree = useRecoveryStore((state) => state.discardWorktree)
   const navigate = useNavigationStore((state) => state.navigate)
   const { modal } = AntApp.useApp()
+  const { t } = useTranslation()
 
   const busy = acting[issue.runId ?? issue.worktreeId ?? issue.id] === true
   const inspectTarget = issue.runId !== undefined ? 'runs' : 'git'
@@ -130,10 +127,9 @@ function RecoveryIssueItem({
     if (issue.worktreeId === undefined) return
     const worktreeId = issue.worktreeId
     modal.confirm({
-      title: 'Discard this worktree?',
-      content:
-        'This permanently deletes the worktree directory and its uncommitted changes. The agent branch and its commits are kept.',
-      okText: 'Discard',
+      title: t('worktree.discardConfirm.title'),
+      content: t('recovery.discardConfirm.body'),
+      okText: t('worktree.discard'),
       okButtonProps: { danger: true },
       onOk: () => discardWorktree(workspaceId, worktreeId),
     })
@@ -155,7 +151,7 @@ function RecoveryIssueItem({
                 loading={busy}
                 onClick={() => void resumeRun(workspaceId, issue.runId as string)}
               >
-                Resume
+                {t('runs.resume')}
               </Button>
             )}
             {issue.suggestedAction === 'repair' && issue.worktreeId !== undefined && (
@@ -167,10 +163,10 @@ function RecoveryIssueItem({
                   loading={busy}
                   onClick={() => void repairWorktree(workspaceId, issue.worktreeId as string)}
                 >
-                  Repair
+                  {t('recovery.repair')}
                 </Button>
                 <Button size="small" danger disabled={busy} onClick={confirmDiscard}>
-                  Discard…
+                  {t('recovery.discard')}
                 </Button>
               </>
             )}
@@ -180,7 +176,7 @@ function RecoveryIssueItem({
               disabled={busy}
               onClick={() => navigate(inspectTarget)}
             >
-              Inspect
+              {t('recovery.inspect')}
             </Button>
           </Space>
         }
@@ -189,14 +185,17 @@ function RecoveryIssueItem({
           <Typography.Text type="secondary">{issue.detail}</Typography.Text>
         )}
         <Space size={[6, 6]} wrap className="doctor-related-ids">
-          <Tag color="gold">{KIND_LABELS[issue.kind]}</Tag>
-          {issue.runId !== undefined && <Typography.Text code>run {issue.runId}</Typography.Text>}
+          <Tag color="gold">{t(KIND_LABEL_KEYS[issue.kind])}</Tag>
+          {issue.runId !== undefined && (
+            <Typography.Text code>{t('artifacts.runId', { id: issue.runId })}</Typography.Text>
+          )}
           {issue.worktreeId !== undefined && (
-            <Typography.Text code>worktree {issue.worktreeId}</Typography.Text>
+            <Typography.Text code>
+              {t('recovery.worktreeId', { id: issue.worktreeId })}
+            </Typography.Text>
           )}
         </Space>
       </Card>
     </List.Item>
   )
 }
-

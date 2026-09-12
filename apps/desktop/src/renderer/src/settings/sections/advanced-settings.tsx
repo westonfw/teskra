@@ -1,27 +1,29 @@
 import { FolderOpenOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Space, Typography } from 'antd'
 
+import { useTranslation } from '../../i18n'
 import { useSettingsStore } from '../settings-store'
 
 export function AdvancedSettingsSection() {
+  const { t } = useTranslation()
   const openDirectory = useSettingsStore((state) => state.openDirectory)
 
   return (
     <Space direction="vertical" size={18} className="settings-section-stack">
       <div>
-        <Typography.Title level={3}>Advanced</Typography.Title>
+        <Typography.Title level={3}>{t('settings.section.advanced.title')}</Typography.Title>
         <Typography.Paragraph type="secondary">
-          Diagnostics, local data, and security-sensitive capabilities.
+          {t('settings.advanced.subtitle')}
         </Typography.Paragraph>
       </div>
 
-      <Card title="Local directories" variant="borderless">
+      <Card title={t('settings.advanced.localDirectories')} variant="borderless">
         <Space wrap>
           <Button icon={<FolderOpenOutlined />} onClick={() => void openDirectory('logs')}>
-            Open logs
+            {t('settings.advanced.openLogs')}
           </Button>
           <Button icon={<FolderOpenOutlined />} onClick={() => void openDirectory('data')}>
-            Open data directory
+            {t('settings.advanced.openDataDirectory')}
           </Button>
         </Space>
       </Card>
@@ -30,8 +32,8 @@ export function AdvancedSettingsSection() {
         type="info"
         showIcon
         icon={<SafetyCertificateOutlined />}
-        message="Sensitive settings use the Credential Store"
-        description="API keys, tokens, and other secrets are stored encrypted via the Credential Store (see the Security section). Teskra will not save them in config files."
+        message={t('settings.advanced.credentialStore.message')}
+        description={t('settings.advanced.credentialStore.description')}
       />
     </Space>
   )

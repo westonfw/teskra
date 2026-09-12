@@ -4,6 +4,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { ResolvedConfig, WritableConfigLayer } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../components/app-error-alert'
+import { useTranslation } from '../i18n'
 import type { SettingsSectionRegistry } from './registry'
 import { useSettingsStore } from './settings-store'
 
@@ -15,6 +16,7 @@ interface SettingsPageProps {
 }
 
 export function SettingsPage({ registry, workspaceId: selectedWorkspaceId }: SettingsPageProps) {
+  const { t } = useTranslation()
   const sections = useSyncExternalStore(registry.subscribe, registry.getSnapshot)
   const [activeId, setActiveId] = useState(sections[0]?.id ?? '')
   const workspaceId = useSettingsStore((state) => state.workspaceId)
@@ -46,7 +48,7 @@ export function SettingsPage({ registry, workspaceId: selectedWorkspaceId }: Set
           <span className="settings-brand-mark">T</span>
           <div>
             <Typography.Title level={4}>Teskra</Typography.Title>
-            <Typography.Text type="secondary">Settings</Typography.Text>
+            <Typography.Text type="secondary">{t('nav.settings')}</Typography.Text>
           </div>
         </div>
         <Menu
@@ -54,8 +56,8 @@ export function SettingsPage({ registry, workspaceId: selectedWorkspaceId }: Set
           selectedKeys={[activeId]}
           items={sections.map((section) => ({
             key: section.id,
-            label: section.title,
-            title: section.description,
+            label: t(section.title),
+            title: t(section.description),
           }))}
           onSelect={({ key }) => setActiveId(key)}
         />
@@ -64,16 +66,20 @@ export function SettingsPage({ registry, workspaceId: selectedWorkspaceId }: Set
       <Layout.Content className="settings-content">
         <header className="settings-toolbar">
           <div>
-            <Typography.Text className="settings-eyebrow">CONFIGURATION LAYER</Typography.Text>
+            <Typography.Text className="settings-eyebrow">{t('settings.eyebrow')}</Typography.Text>
             <Typography.Paragraph type="secondary">
-              Choose where edits are stored. Every field shows the layer currently supplying it.
+              {t('settings.layerDescription')}
             </Typography.Paragraph>
           </div>
           <Segmented<WritableConfigLayer>
             value={targetLayer}
             options={[
-              { label: 'Global', value: 'global' },
-              { label: 'Workspace', value: 'workspace', disabled: workspaceId === undefined },
+              { label: t('settings.layer.global'), value: 'global' },
+              {
+                label: t('settings.layer.workspace'),
+                value: 'workspace',
+                disabled: workspaceId === undefined,
+              },
             ]}
             onChange={setTargetLayer}
           />
@@ -84,16 +90,12 @@ export function SettingsPage({ registry, workspaceId: selectedWorkspaceId }: Set
             className="settings-notice"
             type="info"
             showIcon
-            message="No workspace is open"
-            description="Global settings remain available. Open a workspace to read or write its repository-local configuration."
+            message={t('workspace.empty.title')}
+            description={t('settings.noWorkspaceBody')}
           />
         )}
         {error !== undefined && (
-          <AppErrorAlert
-            className="settings-notice"
-            error={error}
-            onClose={clearError}
-          />
+          <AppErrorAlert className="settings-notice" error={error} onClose={clearError} />
         )}
         {warnings.map((warning) => (
           <Alert
@@ -106,9 +108,9 @@ export function SettingsPage({ registry, workspaceId: selectedWorkspaceId }: Set
         ))}
 
         <div className="settings-panel">
-          <Spin spinning={loading} tip="Loading configuration…">
+          <Spin spinning={loading} tip={t('settings.loading')}>
             {ActiveSection === undefined ? (
-              <Alert type="info" message="No Settings sections are registered." />
+              <Alert type="info" message={t('settings.noSections')} />
             ) : (
               <ActiveSection />
             )}
