@@ -89,16 +89,23 @@ export async function ensureProcessGone(app: ElectronApplication): Promise<void>
       return false
     }
   }
-  const deadline = Date.now() + 8_000
+  // Give the app a short grace period to exit on its own after close().
+  const deadline = Date.now() + 5_000
   while (alive() && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 200))
   }
-  if (alive()) {
-    try {
+  if (!alive()) return
+  try {
+    if (process.platform === 'win32') {
+      // SIGKILL on the root PID is not enough on Windows: renderer/utility
+      // processes and node-pty grandchildren survive it and keep SQLite and
+      // repo cwd handles busy (EBUSY on cleanup). Kill the whole tree.
+      execFileSync('taskkill', ['/F', '/T', '/PID', String(pid)], { stdio: 'pipe' })
+    } else {
       app.process().kill('SIGKILL')
-    } catch {
-      // Already exited between the check and the kill.
     }
+  } catch {
+    // Already exited between the check and the kill.
   }
 }
 
