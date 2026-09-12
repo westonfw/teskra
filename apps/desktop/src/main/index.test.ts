@@ -48,6 +48,7 @@ const electron = vi.hoisted(() => {
     whenReady: vi.fn(() => Promise.resolve()),
     on: vi.fn(),
     quit: vi.fn(),
+    setPath: vi.fn(),
     requestSingleInstanceLock: vi.fn(() => true),
     isPackaged: true,
     getVersion: () => '0.0.0-test',
@@ -110,6 +111,26 @@ afterEach(() => {
 })
 
 describe('main process entry point', () => {
+  it('scopes Electron userData (and with it the instance lock) to the Teskra data root before locking', async () => {
+    process.env['TESKRA_HOME'] = '/tmp/teskra-entry-test-home'
+    try {
+      await importEntryPoint()
+
+      expect(electron.app.setPath).toHaveBeenCalledWith(
+        'userData',
+        '/tmp/teskra-entry-test-home/userData',
+      )
+      const setPathOrder = electron.app.setPath.mock.invocationCallOrder[0]
+      const lockOrder = electron.app.requestSingleInstanceLock.mock.invocationCallOrder[0]
+      if (setPathOrder === undefined || lockOrder === undefined) {
+        throw new Error('expected both setPath and requestSingleInstanceLock to be called')
+      }
+      expect(setPathOrder).toBeLessThan(lockOrder)
+    } finally {
+      delete process.env['TESKRA_HOME']
+    }
+  })
+
   it('quits immediately when another instance already holds the single-instance lock', async () => {
     electron.app.requestSingleInstanceLock.mockReturnValue(false)
 

@@ -4,12 +4,18 @@ import { join } from 'node:path'
 import { createRendererEventBridge, type RendererEventBridge } from './events/renderer-event-bridge'
 import { registerIpcRouter } from './ipc/router'
 import { getLogger } from './logger'
+import { createTeskraPaths } from './paths'
 import { composeTeskraRuntime } from './runtime/compose'
 import type { TeskraRuntime } from './runtime/facade'
 import { createSafeStorageCipher } from './security/safe-storage-cipher'
 
 let runtime: TeskraRuntime | undefined
 let rendererBridge: RendererEventBridge | undefined
+
+// Scope the single-instance lock (and Electron's own writable state) to the
+// Teskra data root: two instances with different TESKRA_HOME values have
+// separate single-writer SQLite databases, so they are safe to coexist.
+app.setPath('userData', join(createTeskraPaths().home(), 'userData'))
 
 // A second instance would share the single-writer SQLite database and the
 // ~/.teskra data root (ADR-0003) with the first, bypassing every in-process
