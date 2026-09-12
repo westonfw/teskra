@@ -819,7 +819,10 @@ body {
 .run-detail > .agent-run-terminal,
 .run-detail-tab > .agent-run-terminal {
   flex: 1;
-  min-height: 0;
+  /* Floor, not just a grow factor: siblings like a long Prompt may overflow
+     the drawer, and without a floor the terminal collapses to its heading
+     (the surface is absolutely positioned, so intrinsic height is ~30px). */
+  min-height: 280px;
 }
 
 .permission-rule-form {
