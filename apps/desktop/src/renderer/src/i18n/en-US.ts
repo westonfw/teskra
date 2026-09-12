@@ -203,7 +203,8 @@ export const enUS = {
   'errorSuggestion.PROCESS_NOT_FOUND':
     'The process has already exited. Refresh the active session.',
   'errorSuggestion.TERMINAL_NOT_FOUND': 'The terminal has already closed. Open a new terminal.',
-  'errorSuggestion.MERGE_BLOCKED': 'Resolve the reported Git conflicts before retrying.',
+  'errorSuggestion.MERGE_BLOCKED':
+    'Resolve the reported checks, then retry — or rerun with force if the override is intentional.',
   'errorSuggestion.VALIDATION_FAILED': 'Review the entered values and try again.',
   'errorSuggestion.UNKNOWN':
     'Retry the operation. If it persists, open the logs from Settings → Advanced.',

@@ -189,7 +189,7 @@ export const zhCN: Record<TranslationKey, string> = {
   'errorSuggestion.COMMAND_TIMEOUT': '重试；如果命令持续超时，请检查日志。',
   'errorSuggestion.PROCESS_NOT_FOUND': '该进程已退出。请刷新活动会话。',
   'errorSuggestion.TERMINAL_NOT_FOUND': '该终端已关闭。请打开一个新终端。',
-  'errorSuggestion.MERGE_BLOCKED': '请先解决报告的 Git 冲突，然后重试。',
+  'errorSuggestion.MERGE_BLOCKED': '先解决上述检查项再重试；如确认要覆盖，可使用强制合并。',
   'errorSuggestion.VALIDATION_FAILED': '检查输入的值后重试。',
   'errorSuggestion.UNKNOWN': '重试该操作。如果问题持续存在，请从 设置 → 高级 打开日志。',
 
