@@ -63,8 +63,14 @@ export function createGitRepo(): string {
 }
 
 export function removeDir(dir: string): void {
-  // Windows releases file handles (SQLite, PTY cwd) asynchronously; retry.
-  rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 300 })
+  // Windows releases file handles (SQLite, PTY cwd) asynchronously — and some
+  // grandchildren outlive even a taskkill'd tree. A cleanup failure must not
+  // fail an otherwise-green test: the runner VM is disposable either way.
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 300 })
+  } catch (cause) {
+    console.warn(`e2e cleanup: could not remove ${dir} (leaving it behind):`, cause)
+  }
 }
 
 /**
