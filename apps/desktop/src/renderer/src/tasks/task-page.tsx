@@ -87,6 +87,7 @@ export function TaskPage() {
   const health = useAgentStore((state) => state.health)
   const startRunSynchronization = useAgentStore((state) => state.startSynchronization)
   const startRun = useAgentStore((state) => state.startRun)
+  const resumeRun = useAgentStore((state) => state.resumeRun)
   const loadRunOutput = useAgentStore((state) => state.loadRunOutput)
   const clearAgentError = useAgentStore((state) => state.clearError)
   const [createOpen, setCreateOpen] = useState(false)
@@ -159,6 +160,11 @@ export function TaskPage() {
     // whose output predates this renderer's subscription is otherwise blank.
     await loadRunOutput(run.id)
     setOpenRunId(run.id)
+  }
+
+  const handleResumeRun = async (run: AgentRun): Promise<void> => {
+    const resumed = await resumeRun(run.id)
+    if (resumed !== undefined) setOpenRunId(resumed.id)
   }
 
   return (
@@ -356,6 +362,19 @@ export function TaskPage() {
                             ? t('tasks.runs.openActive')
                             : t('tasks.runs.viewResult')}
                         </Button>,
+                        // Same affordance as the Runs page: an interrupted run
+                        // can be resumed from here, not just inspected.
+                        ...(run.status === 'interrupted'
+                          ? [
+                              <Button
+                                key="resume"
+                                type="link"
+                                onClick={() => void handleResumeRun(run)}
+                              >
+                                {t('runs.resume')}
+                              </Button>,
+                            ]
+                          : []),
                       ]}
                     >
                       <List.Item.Meta
