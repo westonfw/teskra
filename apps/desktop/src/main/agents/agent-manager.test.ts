@@ -816,6 +816,41 @@ describe('AgentManager resume (TASK-042)', () => {
     ).toHaveLength(1)
   })
 
+  it('relaunches with the persisted mode: exec headless, legacy interactive (ADR-0007)', async () => {
+    const context = setup()
+    const started = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      mode: 'exec',
+      prompt: 'workflow step',
+    })
+    expect(started.ok).toBe(true)
+    // The launch mode is persisted on the run record at create time.
+    if (started.ok) expect(started.data.mode).toBe('exec')
+    interrupt(context, 'run-1')
+
+    const resumed = await context.manager.resume({ runId: 'run-1' })
+    expect(resumed.ok).toBe(true)
+    // Codex resumes via a fresh adapter.start (no native provider session).
+    expect(context.adapters.codex.start).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'exec' }),
+    )
+
+    // A run without a recorded mode (pre-009 legacy) keeps interactive resume.
+    const legacyContext = setup()
+    const legacy = await legacyContext.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+    })
+    expect(legacy.ok).toBe(true)
+    interrupt(legacyContext, 'run-1')
+    const resumedLegacy = await legacyContext.manager.resume({ runId: 'run-1' })
+    expect(resumedLegacy.ok).toBe(true)
+    expect(legacyContext.adapters.codex.start).toHaveBeenLastCalledWith(
+      expect.objectContaining({ mode: 'interactive' }),
+    )
+  })
+
   it('starts a new session with injected context when native resume is unavailable', async () => {
     const context = setup()
     await context.manager.start({

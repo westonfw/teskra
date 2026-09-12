@@ -646,6 +646,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           executionMode,
           runDir: runDirectory.data,
           status: shouldQueue ? 'queued' : 'preparing',
+          // ADR-0007: persist the resolved launch mode so resume can reuse it.
+          mode,
           ...(role === undefined ? {} : { role }),
           approvalMode,
           ...(request.taskId === undefined ? {} : { taskId: request.taskId }),
@@ -858,7 +860,11 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           runId: run.id,
           workspace: launchWorkspace.data,
           ...(task?.data === null || task?.data === undefined ? {} : { task: task.data }),
-          mode: 'interactive',
+          // ADR-0007: relaunch with the run's original mode — an exec run that
+          // comes back interactive would idle at the prompt forever. Runs
+          // predating 009 (no recorded mode) and CLIs without headless support
+          // keep the pre-ADR interactive behavior.
+          mode: run.mode === 'exec' && definition.capabilities.headless ? 'exec' : 'interactive',
           approvalMode: run.approvalMode,
           ...(resumePermission.data === undefined
             ? {}
