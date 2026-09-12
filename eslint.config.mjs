@@ -62,6 +62,57 @@ export default tseslint.config(
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  ...tseslint.configs.recommendedTypeChecked,
+  {
+    // P2-9: type-aware rules (no-floating-promises / no-misused-promises /
+    // await-thenable / require-await, via recommendedTypeChecked). Every
+    // linted TS file must belong to one of these projects — the explicit
+    // list is needed because this repo names its desktop configs
+    // tsconfig.node/web/e2e.json (projectService only discovers files named
+    // tsconfig.json).
+    files: ['**/*.{ts,tsx,mts,cts}'],
+    languageOptions: {
+      parserOptions: {
+        project: [
+          './apps/desktop/tsconfig.node.json',
+          './apps/desktop/tsconfig.web.json',
+          './apps/desktop/tsconfig.e2e.json',
+          './packages/contracts/tsconfig.json',
+          './packages/shared/tsconfig.json',
+          './tsconfig.json',
+        ],
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      // This codebase does dependency injection with closure-based factory
+      // objects (create*Manager returning plain object literals) and reads
+      // zustand state via `(state) => state.action` selectors — nothing ever
+      // relies on `this`, and the rule produced 300+ reports that were all
+      // false positives of that idiom. Class-based code is essentially
+      // nonexistent here, so the protection does not pay for its noise.
+      '@typescript-eslint/unbound-method': 'off',
+    },
+  },
+  {
+    files: ['**/*.{js,mjs,cjs}'],
+    extends: [tseslint.configs.disableTypeChecked],
+  },
+  {
+    // Test doubles are intentionally-async mocks (`vi.fn(async () => …)`)
+    // and fixtures parsed as `any`/`unknown`; the no-unsafe-* family and
+    // require-await produce noise without signal there. Promise-lifecycle
+    // rules (no-floating-promises & co.) stay enabled for tests — an
+    // un-awaited action in a test is a real flake source.
+    files: ['**/*.test.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/no-unsafe-argument': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+      '@typescript-eslint/require-await': 'off',
+    },
+  },
   {
     files: ['scripts/**/*.mjs'],
     languageOptions: {
@@ -317,6 +368,36 @@ export default tseslint.config(
     },
   },
   {
+    // P2-10: @teskra/shared is bundled into the sandboxed preload alongside
+    // contracts (security/baseline.test.ts allow-list), so it inherits the
+    // same constraint: no Node builtins, no electron. Runtime check lives in
+    // packages/shared/src/no-node-builtins.test.ts.
+    files: ['packages/shared/src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'electron',
+              message: 'shared must not import electron; it is bundled into the preload.',
+            },
+            ...nodeBuiltins.map((name) => ({
+              name,
+              message: `shared must not import Node builtin "${name}"; it is bundled into the sandboxed preload.`,
+            })),
+          ],
+          patterns: [
+            {
+              group: ['node:*'],
+              message: 'shared must not import Node builtins (node:*).',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // TASK-078 + TASK-010 boundary rules. One block because flat config lets
     // only the last matching block's options win for a given rule name.
     //
@@ -363,7 +444,7 @@ export default tseslint.config(
   {
     // Test files run under Vitest (Node) and are exempt — the runtime check
     // for shipped modules lives in src/no-node-builtins.test.ts.
-    files: ['packages/contracts/src/**/*.test.ts'],
+    files: ['packages/contracts/src/**/*.test.ts', 'packages/shared/src/**/*.test.ts'],
     rules: {
       'no-restricted-imports': 'off',
     },
