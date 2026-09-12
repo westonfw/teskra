@@ -69,10 +69,9 @@ docs/decisions/             = 已裁决的架构问题
 5. **`sandbox: true` 下 preload 不能 `require` 任意 npm 包**，contracts / zod 必须打进 preload bundle。
 6. **配置分两层**（ADR-0005）：`config.json`（JSON，Settings UI 回写）与
    `<repo>/.teskra/workflows/`（纯手写的 Workflow 定义）。不存在 `teskra.yaml`。
-   **注意实现现状**：`definition-loader.ts` 接受 `.yaml` / `.yml` / `.json` 扩展名，
-   但只用 `JSON.parse` 解析——仓库尚未引入 YAML 解析依赖，所以目前**只有 JSON
-   语法能被加载**（JSON 是 YAML 1.2 的子集，所以内容为 JSON 的 `.yaml` 文件可用，
-   真正的 YAML block 语法会报 "is not parseable"）。引入 `yaml` 依赖是独立 Task。
+   `definition-loader.ts` 接受 `.yaml` / `.yml` / `.json` 扩展名，按扩展名分派解析：
+   `.yaml` / `.yml` 走 `yaml` 包（YAML 1.2，支持完整 block 语法），`.json` 继续走
+   `JSON.parse`（保持既有解析行为与错误信息不变）。
 7. **ADR-0007 与 ADR-0008 曾撞号**（均一度写作 0007），已按时间先后重排：
    0007 = AgentRun 持久化启动模式（migration 009），
    0008 = Criteria Set 可脱离 Task（migration 010）。引用时注意别沿用旧编号。
@@ -109,7 +108,7 @@ npm run dev           # 启动 Electron 开发模式
 npm run typecheck     # TypeScript 检查
 npm run lint          # ESLint
 npm run format        # Prettier 写入
-npm run format:check  # Prettier 检查（注意：CI 尚未执行此步，当前仓库存在未格式化文件）
+npm run format:check  # Prettier 检查（CI 必过门禁，提交前先跑 npm run format）
 npm run test:unit     # Vitest 单元测试
 npm run test:e2e      # 构建 + Playwright Electron E2E（TASK-076，apps/desktop/e2e/）
 npm run test:security # 构建 + Electron 安全基线断言（TASK-002，scripts/assert-security-baseline.mjs）
@@ -130,7 +129,7 @@ GPU 进程仍持有设备资源时把它干掉——在 Windows 上曾把显卡�
 
 CI（GitHub Actions，`.github/workflows/ci.yml`，TASK-091）：matrix 为
 `windows-latest`（必过门禁，失败阻塞合并）+ `ubuntu-latest`（快速反馈，允许失败），
-执行 `npm ci` + typecheck + lint + test:unit + build + 安全基线断言，Node 版本从 `engines` 读取。
+执行 `npm ci` + typecheck + lint + format:check + test:unit + build + 安全基线断言，Node 版本从 `engines` 读取。
 另有独立的 `e2e` job（TASK-076，windows-latest + ubuntu-latest/xvfb，`continue-on-error`，
 待 Windows 实机验证后才提升为合并门禁）。
 

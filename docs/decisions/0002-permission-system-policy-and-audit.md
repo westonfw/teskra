@@ -109,6 +109,24 @@ CommandClassifier 保留，但用途改为：
 - UI 在 Run 详情里高亮 `DESTRUCTIVE` / `NETWORK_WRITE` 命令
 - Doctor / Recovery Center 可基于审计记录提示"这个 Run 执行过 git push"
 
+#### 识别能力与覆盖范围（2026-09-12 修订，P1-4）
+
+命令识别是**逐行启发式**的，且带跨 chunk 行缓冲（输出 batcher 按时间边界
+切块，完整行可能被拆到两个 chunk 里，逐 chunk 匹配会丢命令）。识别来源：
+
+- **通用 shell 提示符行**（`$ …`、`user@host:~/repo$ …`、`❯ …` 等），对所有
+  Agent 生效；
+- **各 Agent 自己的 TUI 格式**，由 `AgentDefinition.auditCommandPatterns`
+  声明（保持 Agent 名称不硬编码的原则）。当前内置规则：
+  - Claude Code：`⏺ Bash(<command>)` / `● Bash(<command>)` 转录行
+    （多行命令带 `…` 续行，保守起见不识别）；
+  - Codex：`codex exec` 输出的独立 `exec` 标记行 + 下一行 `<command> in <cwd>`。
+
+**明确的覆盖缺口**：全屏 TUI（如 Codex 交互界面的视口重绘）不产生稳定的
+滚动行，其中的命令**可能识别不到**。审计是 best-effort 的——
+**审计表为空不等于没有执行过命令**，Settings UI 的审计说明文案必须如实
+传达这一点（宁缺勿假：宁可漏报，不可虚构）。
+
 **明确不做**：假装能拦截。UI 上不出现会误导用户的「Allow Once / Deny」弹窗，
 除非该 Agent 的 `permissionEnforcement` 是 `native`（即 CLI 自身支持回调审批，
 例如 Claude Code 的 permission-prompt-tool）。

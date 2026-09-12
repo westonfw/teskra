@@ -82,10 +82,10 @@ Workflow 定义：<repo>/.teskra/workflows/*.{yaml,yml,json}
 > 配置分两层（TASK-080），不是单个文件。
 > `config.json` 会被 Settings UI 回写故用 JSON；Workflow 定义纯手写。
 >
-> **实现现状（2026-09-12）**：`definition-loader.ts` 接受三种扩展名，但只用
-> `JSON.parse` 解析——尚未引入 YAML 依赖，因此目前只有 JSON 语法能加载成功。
-> 内容为 JSON 的 `.yaml` 文件可用（JSON 是 YAML 1.2 子集），真正的 YAML block
-> 语法会被拒绝。引入 `yaml` 解析器是独立 Task。
+> **解析实现（2026-09-12 更新）**：`definition-loader.ts` 接受三种扩展名，按扩展名
+> 分派解析——`.yaml` / `.yml` 走 `yaml` 包（YAML 1.2，完整 block 语法可用），
+> `.json` 走 `JSON.parse`（保持既有解析行为与错误信息不变）。内容为 JSON 的
+> `.yaml` 文件同样可加载（JSON 是 YAML 1.2 子集）。
 
 产品定位：
 
