@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import {
-  artifactSchema,
-  listArtifactsRequestSchema,
-  recordArtifactRequestSchema,
-} from './artifact'
+import { artifactSchema, listArtifactsRequestSchema, recordArtifactRequestSchema } from './artifact'
 
 describe('artifact contracts (TASK-050)', () => {
   it('accepts a stored artifact record', () => {

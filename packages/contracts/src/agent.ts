@@ -1,5 +1,13 @@
 import { z } from 'zod'
 
+import {
+  IPC_TEXT_MAX,
+  ipcContentSchema,
+  ipcIdSchema,
+  ipcPathSchema,
+  ipcTextSchema,
+  terminalDimensionSchema,
+} from './limits'
 import { taskSchema } from './task'
 import { workspaceRuntimeRefSchema, workspaceSchema } from './workspace'
 
@@ -82,6 +90,21 @@ export type AgentPermissionConfig = z.infer<typeof agentPermissionConfigSchema>
 export const AGENT_COST_CLASSES = ['low', 'medium', 'high'] as const
 export const agentCostClassSchema = z.enum(AGENT_COST_CLASSES)
 
+/**
+ * ADR-0002 / P1-4 — one recognition rule for the post-hoc audit extractor.
+ * Agents render their own TUIs instead of shell prompt lines, so each Agent
+ * declares how an executed command looks in ITS output. `pattern` is matched
+ * against a single full output line; capture group 1 is the command. When
+ * `afterMarker` is set, `pattern` only applies to the line immediately
+ * following a line that matches the marker regex (e.g. Codex `codex exec`
+ * prints a bare `exec` marker line, then `<command> in <cwd>`).
+ */
+export const agentAuditCommandPatternSchema = z.strictObject({
+  pattern: z.string().min(1),
+  afterMarker: z.string().min(1).optional(),
+})
+export type AgentAuditCommandPattern = z.infer<typeof agentAuditCommandPatternSchema>
+
 export const agentRoutingProfileSchema = z.strictObject({
   agentId: z.string().min(1),
   useWhen: z.string().min(1).optional(),
@@ -120,6 +143,13 @@ export const agentDefinitionSchema = z
       permissionProfile: z.string().optional(),
     }),
     permissionEnforcement: permissionEnforcementSchema,
+    /**
+     * P1-4: TUI-specific command-recognition rules for the post-hoc audit.
+     * Absent = only the generic shell-prompt heuristic applies. Recognition is
+     * best-effort ("宁缺勿假"): full-screen TUI redraws may not be covered, so
+     * an empty audit never proves no commands ran.
+     */
+    auditCommandPatterns: z.array(agentAuditCommandPatternSchema).optional(),
     routing: agentRoutingProfileSchema.optional(),
   })
   .superRefine((definition, context) => {
@@ -130,11 +160,28 @@ export const agentDefinitionSchema = z
         message: 'routing.agentId must match the Agent definition id',
       })
     }
+    definition.auditCommandPatterns?.forEach((rule, index) => {
+      for (const [field, source] of [
+        ['pattern', rule.pattern],
+        ['afterMarker', rule.afterMarker],
+      ] as const) {
+        if (source === undefined) continue
+        try {
+          new RegExp(source)
+        } catch {
+          context.addIssue({
+            code: 'custom',
+            path: ['auditCommandPatterns', index, field],
+            message: `auditCommandPatterns[${index}].${field} is not a valid regular expression`,
+          })
+        }
+      }
+    })
   })
 export type AgentDefinition = z.infer<typeof agentDefinitionSchema>
 
 export const agentDetectionRequestSchema = z.strictObject({
-  agentId: z.string().min(1),
+  agentId: ipcIdSchema,
   runtime: workspaceRuntimeRefSchema,
   refresh: z.boolean().optional(),
 })
@@ -183,13 +230,13 @@ export const agentHealthSchema = z.strictObject({
 export type AgentHealth = z.infer<typeof agentHealthSchema>
 
 export const agentExecutableOverrideRequestSchema = z.strictObject({
-  agentId: z.string().min(1),
+  agentId: ipcIdSchema,
   runtime: workspaceRuntimeRefSchema,
 })
 export type AgentExecutableOverrideRequest = z.infer<typeof agentExecutableOverrideRequestSchema>
 
 export const setAgentExecutableOverrideRequestSchema = agentExecutableOverrideRequestSchema.extend({
-  path: z.string().min(1).nullable(),
+  path: ipcPathSchema.nullable(),
 })
 export type SetAgentExecutableOverrideRequest = z.infer<
   typeof setAgentExecutableOverrideRequestSchema
@@ -270,24 +317,24 @@ export const agentRunSchema = z.strictObject({
 export type AgentRun = z.infer<typeof agentRunSchema>
 
 export const startAgentRunRequestSchema = z.strictObject({
-  workspaceId: z.string().min(1),
-  agentType: z.string().min(1),
+  workspaceId: ipcIdSchema,
+  agentType: ipcIdSchema,
   /**
    * Pre-allocated Run id. Internal use only: services that must bind resources
    * to the Run before it launches (TASK-052 ReviewerService binds the
    * disposable-snapshot worktree to the Run id) pass one explicitly; everyone
    * else lets AgentManager generate it.
    */
-  runId: z.string().min(1).optional(),
-  taskId: z.string().min(1).optional(),
+  runId: ipcIdSchema.optional(),
+  taskId: ipcIdSchema.optional(),
   role: agentRoleSchema.optional(),
-  model: z.string().min(1).optional(),
+  model: ipcIdSchema.optional(),
   mode: z.enum(['interactive', 'exec']).optional(),
   approvalMode: approvalModeSchema.optional(),
   executionMode: executionModeSchema.optional(),
-  worktreeId: z.string().min(1).optional(),
-  prompt: z.string().optional(),
-  environment: z.record(z.string(), z.string()).optional(),
+  worktreeId: ipcIdSchema.optional(),
+  prompt: ipcTextSchema.optional(),
+  environment: z.record(z.string(), z.string().max(IPC_TEXT_MAX)).optional(),
 })
 export type StartAgentRunRequest = z.infer<typeof startAgentRunRequestSchema>
 
@@ -312,24 +359,24 @@ export type ReviewIsolation = z.infer<typeof reviewIsolationSchema>
  * a worktree); with no resolvable target the review runs shared-readonly.
  */
 export const startReviewRunRequestSchema = z.strictObject({
-  workspaceId: z.string().min(1),
-  agentType: z.string().min(1),
-  taskId: z.string().min(1).optional(),
+  workspaceId: ipcIdSchema,
+  agentType: ipcIdSchema,
+  taskId: ipcIdSchema.optional(),
   /**
    * Pre-allocated AgentRun id (TASK-060): the Review Panel allocates one id
    * per reviewer up-front so the prompt's handoff env paths (ADR-0004) match
    * the paths AgentManager injects before the Run exists.
    */
-  runId: z.string().min(1).optional(),
+  runId: ipcIdSchema.optional(),
   /** Explicit implement run whose worktree the review targets. */
-  targetRunId: z.string().min(1).optional(),
+  targetRunId: ipcIdSchema.optional(),
   /** Explicit worktree the review targets. */
-  targetWorktreeId: z.string().min(1).optional(),
-  model: z.string().min(1).optional(),
+  targetWorktreeId: ipcIdSchema.optional(),
+  model: ipcIdSchema.optional(),
   mode: z.enum(['interactive', 'exec']).optional(),
   executionMode: executionModeSchema.optional(),
-  prompt: z.string().optional(),
-  environment: z.record(z.string(), z.string()).optional(),
+  prompt: ipcTextSchema.optional(),
+  environment: z.record(z.string(), z.string().max(IPC_TEXT_MAX)).optional(),
 })
 export type StartReviewRunRequest = z.infer<typeof startReviewRunRequestSchema>
 
@@ -340,28 +387,37 @@ export const reviewRunStartResultSchema = z.strictObject({
 })
 export type ReviewRunStartResult = z.infer<typeof reviewRunStartResultSchema>
 
-export const agentRunIdRequestSchema = z.strictObject({ runId: z.string().min(1) })
+export const agentRunIdRequestSchema = z.strictObject({ runId: ipcIdSchema })
 export type AgentRunIdRequest = z.infer<typeof agentRunIdRequestSchema>
 
+export const agentRunOutputRequestSchema = agentRunIdRequestSchema.extend({
+  /**
+   * P1-6: when set, only the last `tailBytes` bytes of the run's terminal log
+   * are returned. Omit for the full output (backward-compatible default).
+   */
+  tailBytes: z.number().int().positive().optional(),
+})
+export type AgentRunOutputRequest = z.infer<typeof agentRunOutputRequestSchema>
+
 export const resumeAgentRunRequestSchema = agentRunIdRequestSchema.extend({
-  prompt: z.string().trim().min(1).optional(),
+  prompt: z.string().trim().min(1).max(IPC_TEXT_MAX).optional(),
 })
 export type ResumeAgentRunRequest = z.infer<typeof resumeAgentRunRequestSchema>
 
 export const sendAgentRunInputRequestSchema = agentRunIdRequestSchema.extend({
-  data: z.string(),
+  data: ipcContentSchema,
 })
 export type SendAgentRunInputRequest = z.infer<typeof sendAgentRunInputRequestSchema>
 
 export const resizeAgentRunRequestSchema = agentRunIdRequestSchema.extend({
-  cols: z.number().int().positive(),
-  rows: z.number().int().positive(),
+  cols: terminalDimensionSchema,
+  rows: terminalDimensionSchema,
 })
 export type ResizeAgentRunRequest = z.infer<typeof resizeAgentRunRequestSchema>
 
 export const listAgentRunsRequestSchema = z.strictObject({
-  workspaceId: z.string().min(1).optional(),
-  taskId: z.string().min(1).optional(),
+  workspaceId: ipcIdSchema.optional(),
+  taskId: ipcIdSchema.optional(),
   activeOnly: z.boolean().optional(),
 })
 export type ListAgentRunsRequest = z.infer<typeof listAgentRunsRequestSchema>

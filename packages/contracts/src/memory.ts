@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { IPC_CONTENT_MAX, ipcIdSchema } from './limits'
+
 /**
  * TASK-067 Workspace Memory domain (plan §45/§46, §139.1 `memories` table).
  *
@@ -43,26 +45,26 @@ export const memoryRecordSchema = z.strictObject({
 export type Memory = z.infer<typeof memoryRecordSchema>
 
 export const listMemoriesRequestSchema = z.strictObject({
-  workspaceId: z.string().min(1),
+  workspaceId: ipcIdSchema,
   type: memoryTypeSchema.optional(),
 })
 export type ListMemoriesRequest = z.infer<typeof listMemoriesRequestSchema>
 
 export const memoryIdRequestSchema = z.strictObject({
-  id: z.string().min(1),
+  id: ipcIdSchema,
 })
 export type MemoryIdRequest = z.infer<typeof memoryIdRequestSchema>
 
 export const createMemoryRequestSchema = z.strictObject({
-  workspaceId: z.string().min(1),
+  workspaceId: ipcIdSchema,
   type: memoryTypeSchema,
-  content: z.string().min(1),
+  content: z.string().min(1).max(IPC_CONTENT_MAX),
 })
 export type CreateMemoryRequest = z.infer<typeof createMemoryRequestSchema>
 
 export const updateMemoryRequestSchema = z.strictObject({
-  id: z.string().min(1),
+  id: ipcIdSchema,
   type: memoryTypeSchema.optional(),
-  content: z.string().min(1).optional(),
+  content: z.string().min(1).max(IPC_CONTENT_MAX).optional(),
 })
 export type UpdateMemoryRequest = z.infer<typeof updateMemoryRequestSchema>

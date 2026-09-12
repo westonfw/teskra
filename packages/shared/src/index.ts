@@ -24,8 +24,8 @@ const WATCHDOG_ACTIVE_STATUSES = new Set([
 export interface WatchdogRun {
   readonly status: string
   readonly createdAt: string
-  readonly startedAt?: string
-  readonly lastOutputAt?: string
+  readonly startedAt?: string | undefined
+  readonly lastOutputAt?: string | undefined
 }
 
 export interface WatchdogInspection {
@@ -61,7 +61,7 @@ export function inspectRunWatchdog(
 export interface HandoffContextSource {
   readonly type: HandoffType
   readonly parseStatus: HandoffParseStatus
-  readonly payload?: Record<string, unknown>
+  readonly payload?: Record<string, unknown> | undefined
 }
 
 function stringList(value: unknown): string[] {

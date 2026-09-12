@@ -1,10 +1,7 @@
 import { z } from 'zod'
 
-import {
-  agentRoleSchema,
-  approvalModeSchema,
-  teskraPermissionProfileSchema,
-} from './agent'
+import { agentRoleSchema, approvalModeSchema, teskraPermissionProfileSchema } from './agent'
+import { IPC_NAME_MAX, ipcIdSchema } from './limits'
 
 /**
  * ADR-0002 / TASK-065 — Permission contracts.
@@ -60,44 +57,50 @@ export type PermissionAuditEntry = z.infer<typeof permissionAuditEntrySchema>
 
 export const listPermissionRulesRequestSchema = z.strictObject({
   /** When set, global rules plus this workspace's rules are returned. */
-  workspaceId: z.string().min(1).optional(),
+  workspaceId: ipcIdSchema.optional(),
 })
 export type ListPermissionRulesRequest = z.infer<typeof listPermissionRulesRequestSchema>
 
 export const createPermissionRuleRequestSchema = z.strictObject({
-  commandPattern: z.string().trim().min(1),
+  commandPattern: z.string().trim().min(1).max(IPC_NAME_MAX),
   action: permissionActionSchema,
+  /**
+   * P1-3: stored rules are always `persistent`. The `once` / `session` values
+   * exist for the §139.1 column, but the rule CRUD path rejects them —
+   * ephemeral grants go through `resolvePermissionDecisionRequestSchema`
+   * (recordDecision) and live in memory for the app session.
+   */
   scope: permissionScopeSchema,
-  workspaceId: z.string().min(1).optional(),
-  agentType: z.string().min(1).optional(),
-  riskLevel: z.string().min(1).optional(),
+  workspaceId: ipcIdSchema.optional(),
+  agentType: ipcIdSchema.optional(),
+  riskLevel: ipcIdSchema.optional(),
 })
 export type CreatePermissionRuleRequest = z.infer<typeof createPermissionRuleRequestSchema>
 
 export const updatePermissionRuleRequestSchema = z.strictObject({
-  ruleId: z.string().min(1),
-  commandPattern: z.string().trim().min(1).optional(),
+  ruleId: ipcIdSchema,
+  commandPattern: z.string().trim().min(1).max(IPC_NAME_MAX).optional(),
   action: permissionActionSchema.optional(),
   scope: permissionScopeSchema.optional(),
   /** null clears the stored risk level. */
-  riskLevel: z.string().min(1).nullable().optional(),
+  riskLevel: ipcIdSchema.nullable().optional(),
 })
 export type UpdatePermissionRuleRequest = z.infer<typeof updatePermissionRuleRequestSchema>
 
-export const permissionRuleIdRequestSchema = z.strictObject({ ruleId: z.string().min(1) })
+export const permissionRuleIdRequestSchema = z.strictObject({ ruleId: ipcIdSchema })
 export type PermissionRuleIdRequest = z.infer<typeof permissionRuleIdRequestSchema>
 
 export const listPermissionAuditRequestSchema = z.strictObject({
-  runId: z.string().min(1).optional(),
-  workspaceId: z.string().min(1).optional(),
-  riskLevel: z.string().min(1).optional(),
+  runId: ipcIdSchema.optional(),
+  workspaceId: ipcIdSchema.optional(),
+  riskLevel: ipcIdSchema.optional(),
   limit: z.number().int().positive().max(1000).optional(),
 })
 export type ListPermissionAuditRequest = z.infer<typeof listPermissionAuditRequestSchema>
 
 export const resolvePermissionProfileRequestSchema = z.strictObject({
-  agentType: z.string().min(1),
-  workspaceId: z.string().min(1).optional(),
+  agentType: ipcIdSchema,
+  workspaceId: ipcIdSchema.optional(),
   role: agentRoleSchema.optional(),
   /** Defaults to 'manual' when only the rule merge is of interest (Settings preview). */
   approvalMode: approvalModeSchema.optional(),
@@ -134,12 +137,12 @@ export const permissionDecisionSchema = z.enum(PERMISSION_DECISIONS)
 export type PermissionDecision = z.infer<typeof permissionDecisionSchema>
 
 export const resolvePermissionDecisionRequestSchema = z.strictObject({
-  agentType: z.string().min(1),
-  commandPattern: z.string().trim().min(1),
+  agentType: ipcIdSchema,
+  commandPattern: z.string().trim().min(1).max(IPC_NAME_MAX),
   decision: permissionDecisionSchema,
-  workspaceId: z.string().min(1).optional(),
+  workspaceId: ipcIdSchema.optional(),
   /** Run the decision originated from; carried into the permission.resolved event. */
-  runId: z.string().min(1).optional(),
+  runId: ipcIdSchema.optional(),
 })
 export type ResolvePermissionDecisionRequest = z.infer<
   typeof resolvePermissionDecisionRequestSchema

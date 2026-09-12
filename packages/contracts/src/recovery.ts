@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { ipcIdSchema } from './limits'
+
 /**
  * TASK-070 Recovery Center. The Main-side RecoveryCenterService aggregates the
  * five recoverable problem categories; every issue carries one suggested
@@ -42,6 +44,6 @@ export type RecoveryReport = z.infer<typeof recoveryReportSchema>
 
 /** Without a workspaceId the report is intentionally empty. */
 export const listRecoveryIssuesRequestSchema = z.strictObject({
-  workspaceId: z.string().min(1).optional(),
+  workspaceId: ipcIdSchema.optional(),
 })
 export type ListRecoveryIssuesRequest = z.infer<typeof listRecoveryIssuesRequestSchema>

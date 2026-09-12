@@ -62,7 +62,7 @@ export type WorkflowValidation =
 
 export interface NormalizedDependency {
   readonly node: string
-  readonly on?: string
+  readonly on?: string | undefined
 }
 
 /** Normalizes the two dependsOn spellings (plan §153) into object form. */

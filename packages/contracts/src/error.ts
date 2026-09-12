@@ -32,9 +32,19 @@ export type ErrorCode = z.infer<typeof errorCodeSchema>
  */
 export const publicAppErrorSchema = z.strictObject({
   code: errorCodeSchema,
-  /** User-facing message, safe to display directly. */
+  /**
+   * User-facing message, safe to display directly. When `messageKey` is set
+   * this is only the fallback used when the Renderer cannot resolve the key.
+   */
   message: z.string(),
   retryable: z.boolean(),
+  /**
+   * Optional Renderer dictionary key (en-US / zh-CN, `errorMessage.*`); when
+   * present the Renderer localizes the message instead of showing `message`.
+   */
+  messageKey: z.string().optional(),
+  /** Interpolation params for `messageKey` — string/number values only. */
+  params: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
 })
 export type PublicAppError = z.infer<typeof publicAppErrorSchema>
 

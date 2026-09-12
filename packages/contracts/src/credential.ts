@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { IPC_TEXT_MAX, ipcNameSchema } from './limits'
+
 /**
  * Credential Store contracts (TASK-088, teskra-tasks.md; plan §60).
  *
@@ -16,12 +18,12 @@ export const credentialStoreStatusSchema = z.strictObject({
 export type CredentialStoreStatus = z.infer<typeof credentialStoreStatusSchema>
 
 export const setCredentialRequestSchema = z.strictObject({
-  key: z.string().min(1),
-  value: z.string().min(1),
+  key: ipcNameSchema,
+  value: z.string().min(1).max(IPC_TEXT_MAX),
 })
 export type SetCredentialRequest = z.infer<typeof setCredentialRequestSchema>
 
 export const deleteCredentialRequestSchema = z.strictObject({
-  key: z.string().min(1),
+  key: ipcNameSchema,
 })
 export type DeleteCredentialRequest = z.infer<typeof deleteCredentialRequestSchema>

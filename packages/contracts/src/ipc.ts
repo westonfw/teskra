@@ -5,6 +5,7 @@ import {
   agentDetectionRequestSchema,
   agentDetectionResultSchema,
   agentRunIdRequestSchema,
+  agentRunOutputRequestSchema,
   agentRunSchema,
   agentHealthSchema,
   agentExecutableOverrideRequestSchema,
@@ -22,6 +23,7 @@ import {
   type AgentDetectionResult,
   type AgentRun,
   type AgentRunIdRequest,
+  type AgentRunOutputRequest,
   type AgentHealth,
   type AgentExecutableOverrideRequest,
   type ListAgentDetectionsRequest,
@@ -182,6 +184,7 @@ import {
   gitCommitResultSchema,
   gitCommitSchema,
   gitDiffRequestSchema,
+  gitFilePatchRequestSchema,
   gitLogRequestSchema,
   gitOpenFileRequestSchema,
   gitRawDiffSchema,
@@ -203,6 +206,7 @@ import {
   type GitCommitRequest,
   type GitCommitResult,
   type GitDiffRequest,
+  type GitFilePatchRequest,
   type GitLogRequest,
   type GitOpenFileRequest,
   type GitRawDiff,
@@ -400,6 +404,7 @@ export const IPC_CHANNELS = {
   gitLog: 'teskra:git:log',
   gitCommit: 'teskra:git:commit',
   gitChanges: 'teskra:git:changes',
+  gitFilePatch: 'teskra:git:file-patch',
   gitOpenFile: 'teskra:git:open-file',
   worktreeCreate: 'teskra:worktree:create',
   worktreeList: 'teskra:worktree:list',
@@ -731,7 +736,7 @@ export const agentRunListChannel = channel(
 )
 export const agentRunOutputChannel = channel(
   IPC_CHANNELS.agentRunOutput,
-  agentRunIdRequestSchema,
+  agentRunOutputRequestSchema,
   z.string(),
 )
 export const agentRunResumeChannel = channel(
@@ -799,6 +804,11 @@ export const gitChangesChannel = channel(
   IPC_CHANNELS.gitChanges,
   gitWorkspaceRequestSchema,
   diffResultSchema,
+)
+export const gitFilePatchChannel = channel(
+  IPC_CHANNELS.gitFilePatch,
+  gitFilePatchRequestSchema,
+  gitRawDiffSchema,
 )
 export const gitOpenFileChannel = channel(
   IPC_CHANNELS.gitOpenFile,
@@ -1113,6 +1123,7 @@ export const ipcChannelDefinitions = {
   gitLog: gitLogChannel,
   gitCommit: gitCommitChannel,
   gitChanges: gitChangesChannel,
+  gitFilePatch: gitFilePatchChannel,
   gitOpenFile: gitOpenFileChannel,
   worktreeCreate: worktreeCreateChannel,
   worktreeList: worktreeListChannel,
@@ -1251,7 +1262,7 @@ export interface TeskraBridge {
     cancel(request: AgentRunIdRequest): Promise<IpcResult<AgentRun>>
     get(request: AgentRunIdRequest): Promise<IpcResult<AgentRun | null>>
     list(request?: ListAgentRunsRequest): Promise<IpcResult<AgentRun[]>>
-    getOutput(request: AgentRunIdRequest): Promise<IpcResult<string>>
+    getOutput(request: AgentRunOutputRequest): Promise<IpcResult<string>>
     resume(request: ResumeAgentRunRequest): Promise<IpcResult<AgentRun>>
   }
   readonly permission: {
@@ -1274,6 +1285,7 @@ export interface TeskraBridge {
     log(request: GitLogRequest): Promise<IpcResult<GitCommit[]>>
     commit(request: GitCommitRequest): Promise<IpcResult<GitCommitResult>>
     changes(request: GitWorkspaceRequest): Promise<IpcResult<DiffResult>>
+    filePatch(request: GitFilePatchRequest): Promise<IpcResult<GitRawDiff>>
     openFile(request: GitOpenFileRequest): Promise<IpcResult<void>>
   }
   readonly worktree: {
@@ -1330,6 +1342,11 @@ export interface TeskraBridge {
     loadDefinition(request: LoadWorkflowDefinitionRequest): Promise<IpcResult<WorkflowDefinition>>
     listRuns(request?: ListWorkflowRunsRequest): Promise<IpcResult<WorkflowRun[]>>
     getRun(request: WorkflowRunIdRequest): Promise<IpcResult<WorkflowRunDetail | null>>
+    /**
+     * P0-4: resolves with the run snapshot as soon as the pass is running;
+     * suspended steps do not keep the invoke pending — progress flows through
+     * the workflow.run_updated / workflow.step_updated events.
+     */
     startRun(request: WorkflowRunStartRequest): Promise<IpcResult<WorkflowRunDetail>>
     cancelRun(request: WorkflowRunIdRequest): Promise<IpcResult<WorkflowRun>>
     resolveStep(request: WorkflowStepResolveRequest): Promise<IpcResult<WorkflowStep>>

@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { IPC_TEXT_MAX, ipcIdSchema, ipcNameSchema, ipcPathSchema } from './limits'
+
 /** §139.1 `worktrees.state` (line 5240, §132 WorktreeState 八态). */
 export const WORKTREE_STATES = [
   'creating',
@@ -52,26 +54,26 @@ export type Worktree = z.infer<typeof worktreeSchema>
  * the run belongs to a task, otherwise the fixed fallback `agent/<runId>`.
  */
 export const worktreeCreateRequestSchema = z.strictObject({
-  workspaceId: z.string().min(1),
-  runId: z.string().min(1),
-  taskId: z.string().min(1).optional(),
-  agentId: z.string().min(1).optional(),
+  workspaceId: ipcIdSchema,
+  runId: ipcIdSchema,
+  taskId: ipcIdSchema.optional(),
+  agentId: ipcIdSchema.optional(),
   /** Defaults to the repository's current branch. */
-  baseBranch: z.string().min(1).optional(),
+  baseBranch: ipcNameSchema.optional(),
   /** Defaults to 'worktree'. */
   isolation: worktreeIsolationSchema.optional(),
 })
 export type WorktreeCreateRequest = z.infer<typeof worktreeCreateRequestSchema>
 
 export const worktreeListRequestSchema = z.strictObject({
-  workspaceId: z.string().min(1),
+  workspaceId: ipcIdSchema,
   state: worktreeStateSchema.optional(),
   /** TASK-047: archived worktrees are hidden unless explicitly requested. */
   includeArchived: z.boolean().optional(),
 })
 export type WorktreeListRequest = z.infer<typeof worktreeListRequestSchema>
 
-export const worktreeIdRequestSchema = z.strictObject({ worktreeId: z.string().min(1) })
+export const worktreeIdRequestSchema = z.strictObject({ worktreeId: ipcIdSchema })
 export type WorktreeIdRequest = z.infer<typeof worktreeIdRequestSchema>
 
 /**
@@ -81,7 +83,7 @@ export type WorktreeIdRequest = z.infer<typeof worktreeIdRequestSchema>
  * already merged into the base branch — unmerged branches are never deleted.
  */
 export const worktreeDiscardRequestSchema = z.strictObject({
-  worktreeId: z.string().min(1),
+  worktreeId: ipcIdSchema,
   confirm: z.boolean().optional(),
   deleteBranch: z.boolean().optional(),
 })
@@ -94,7 +96,7 @@ export type WorktreeDiscardRequest = z.infer<typeof worktreeDiscardRequestSchema
  * (creating/ready/dirty/conflict) and branches are never touched.
  */
 export const worktreeCleanupRequestSchema = z.strictObject({
-  workspaceId: z.string().min(1),
+  workspaceId: ipcIdSchema,
 })
 export type WorktreeCleanupRequest = z.infer<typeof worktreeCleanupRequestSchema>
 
@@ -162,7 +164,7 @@ export type MergePreflightResult = z.infer<typeof mergePreflightResultSchema>
  * `overridable` flag is true (TASK-045); hard blockers always refuse the merge.
  */
 export const worktreeMergeRequestSchema = z.strictObject({
-  worktreeId: z.string().min(1),
+  worktreeId: ipcIdSchema,
   force: z.boolean().optional(),
 })
 export type WorktreeMergeRequest = z.infer<typeof worktreeMergeRequestSchema>
@@ -186,25 +188,40 @@ export const DIFF_FILE_STATUSES = ['added', 'modified', 'deleted', 'renamed'] as
 export const diffFileStatusSchema = z.enum(DIFF_FILE_STATUSES)
 export type DiffFileStatus = z.infer<typeof diffFileStatusSchema>
 
-export const diffFileSchema = z.strictObject({
+/**
+ * Changes-list entry: identity + line stats only. The patch body is fetched
+ * per file on demand (git.filePatch) so the list never carries every patch
+ * across IPC at once.
+ */
+export const diffFileSummarySchema = z.strictObject({
   path: z.string(),
   status: diffFileStatusSchema,
   additions: z.number().int().nonnegative(),
   deletions: z.number().int().nonnegative(),
+})
+export type DiffFileSummary = z.infer<typeof diffFileSummarySchema>
+
+export const diffFileSchema = diffFileSummarySchema.extend({
   patch: z.string(),
 })
 export type DiffFile = z.infer<typeof diffFileSchema>
 
 export const diffResultSchema = z.strictObject({
-  files: z.array(diffFileSchema),
+  files: z.array(diffFileSummarySchema),
 })
 export type DiffResult = z.infer<typeof diffResultSchema>
 
-export const gitWorkspaceRequestSchema = z.strictObject({ workspaceId: z.string().min(1) })
+/** Full patch set, used where the patches themselves are the payload. */
+export const diffPatchResultSchema = z.strictObject({
+  files: z.array(diffFileSchema),
+})
+export type DiffPatchResult = z.infer<typeof diffPatchResultSchema>
+
+export const gitWorkspaceRequestSchema = z.strictObject({ workspaceId: ipcIdSchema })
 export type GitWorkspaceRequest = z.infer<typeof gitWorkspaceRequestSchema>
 
 export const gitOpenFileRequestSchema = gitWorkspaceRequestSchema.extend({
-  path: z.string().min(1),
+  path: ipcPathSchema,
 })
 export type GitOpenFileRequest = z.infer<typeof gitOpenFileRequestSchema>
 
@@ -233,12 +250,18 @@ export type GitBranch = z.infer<typeof gitBranchSchema>
 
 export const gitDiffRequestSchema = gitWorkspaceRequestSchema.extend({
   staged: z.boolean().optional(),
-  path: z.string().min(1).optional(),
+  path: ipcPathSchema.optional(),
 })
 export type GitDiffRequest = z.infer<typeof gitDiffRequestSchema>
 
 export const gitRawDiffSchema = z.strictObject({ patch: z.string() })
 export type GitRawDiff = z.infer<typeof gitRawDiffSchema>
+
+/** Lazy single-file patch for the changes list (DiffService.getFilePatch). */
+export const gitFilePatchRequestSchema = gitWorkspaceRequestSchema.extend({
+  path: ipcPathSchema,
+})
+export type GitFilePatchRequest = z.infer<typeof gitFilePatchRequestSchema>
 
 export const gitLogRequestSchema = gitWorkspaceRequestSchema.extend({
   limit: z.number().int().positive().max(200).optional(),
@@ -255,7 +278,7 @@ export const gitCommitSchema = z.strictObject({
 export type GitCommit = z.infer<typeof gitCommitSchema>
 
 export const gitCommitRequestSchema = gitWorkspaceRequestSchema.extend({
-  message: z.string().trim().min(1),
+  message: z.string().trim().min(1).max(IPC_TEXT_MAX),
   all: z.boolean().optional(),
 })
 export type GitCommitRequest = z.infer<typeof gitCommitRequestSchema>

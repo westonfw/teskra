@@ -142,9 +142,9 @@ describe('computeCriteriaReviewOutcome (TASK-054)', () => {
         { criterionId: 'c-opt', result: 'unknown' },
       ]),
     ).toBe('unknown')
-    expect(
-      computeCriteriaReviewOutcome(criteria, [{ criterionId: 'c-req', result: 'pass' }]),
-    ).toBe('unknown')
+    expect(computeCriteriaReviewOutcome(criteria, [{ criterionId: 'c-req', result: 'pass' }])).toBe(
+      'unknown',
+    )
     expect(computeCriteriaReviewOutcome(criteria, [])).toBe('unknown')
   })
 

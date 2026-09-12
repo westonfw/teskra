@@ -1,4 +1,4 @@
-import type { DiffResult } from './git'
+import type { DiffPatchResult } from './git'
 import type { PublicAppError } from './error'
 import type { ReviewPanelStatus } from './review'
 import type { WorkflowRunStatus, WorkflowStepStatus } from './workflow'
@@ -99,14 +99,14 @@ export interface WorkbenchEvents {
   }
   'git.diff.updated': {
     runId: string
-    diff: DiffResult
+    diff: DiffPatchResult
   }
 
   /** TASK-046: merge kept the conflict scene; worktree state is 'conflict'. */
   'worktree.merge_conflict': {
     worktreeId: string
     workspaceId: string
-    runId?: string
+    runId?: string | undefined
     branch: string
     baseBranch: string
     conflicts: string[]
@@ -115,7 +115,7 @@ export interface WorkbenchEvents {
   'worktree.merged': {
     worktreeId: string
     workspaceId: string
-    runId?: string
+    runId?: string | undefined
     branch: string
     baseBranch: string
   }

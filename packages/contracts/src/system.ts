@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { publicAppErrorSchema } from './error'
+import { ipcNameSchema } from './limits'
 
 export const systemInfoSchema = z.strictObject({
   appVersion: z.string().min(1),
@@ -36,7 +37,7 @@ export const futureRuntimePortSchema = z.enum(FUTURE_RUNTIME_PORTS)
 export type FutureRuntimePortName = z.infer<typeof futureRuntimePortSchema>
 
 export const setDefaultWslDistributionRequestSchema = z.strictObject({
-  name: z.string().min(1).nullable(),
+  name: ipcNameSchema.nullable(),
 })
 export type SetDefaultWslDistributionRequest = z.infer<
   typeof setDefaultWslDistributionRequestSchema

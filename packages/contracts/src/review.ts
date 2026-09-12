@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { reviewIsolationSchema } from './agent'
 import { criterionResultSchema } from './criteria'
 import { reviewSeveritySchema } from './handoff'
+import { ipcIdSchema, ipcTextSchema } from './limits'
 
 /**
  * Review-side records (TASK-053; plan §139.1 `review_findings`). These are the
@@ -30,8 +31,8 @@ export type ReviewFindingRecord = z.infer<typeof reviewFindingRecordSchema>
 /** Exactly one of `runId` / `taskId` selects the findings to list. */
 export const listReviewFindingsRequestSchema = z
   .strictObject({
-    runId: z.string().min(1).optional(),
-    taskId: z.string().min(1).optional(),
+    runId: ipcIdSchema.optional(),
+    taskId: ipcIdSchema.optional(),
   })
   .refine((request) => (request.runId === undefined) !== (request.taskId === undefined), {
     message: 'Exactly one of runId / taskId is required.',
@@ -56,8 +57,8 @@ export type CriterionScoreRecord = z.infer<typeof criterionScoreRecordSchema>
 /** Exactly one of `runId` / `taskId` selects the scores to list. */
 export const listCriterionScoresRequestSchema = z
   .strictObject({
-    runId: z.string().min(1).optional(),
-    taskId: z.string().min(1).optional(),
+    runId: ipcIdSchema.optional(),
+    taskId: ipcIdSchema.optional(),
   })
   .refine((request) => (request.runId === undefined) !== (request.taskId === undefined), {
     message: 'Exactly one of runId / taskId is required.',
@@ -215,20 +216,20 @@ export type ReviewPanelResult = z.infer<typeof reviewPanelResultSchema>
  * targetRunId, then the latest worktree-bound Run of the task).
  */
 export const startReviewPanelRequestSchema = z.strictObject({
-  workspaceId: z.string().min(1),
-  taskId: z.string().min(1),
-  reviewers: z.array(z.string().min(1)).min(1),
-  targetRunId: z.string().min(1).optional(),
-  targetWorktreeId: z.string().min(1).optional(),
+  workspaceId: ipcIdSchema,
+  taskId: ipcIdSchema,
+  reviewers: z.array(ipcIdSchema).min(1),
+  targetRunId: ipcIdSchema.optional(),
+  targetWorktreeId: ipcIdSchema.optional(),
   /** Set when the panel is driven by a WorkflowEngine review-panel node. */
-  workflowRunId: z.string().min(1).optional(),
+  workflowRunId: ipcIdSchema.optional(),
   /** Explicit prompt; when omitted the 'review' template (TASK-079) is rendered. */
-  prompt: z.string().optional(),
+  prompt: ipcTextSchema.optional(),
 })
 export type StartReviewPanelRequest = z.infer<typeof startReviewPanelRequestSchema>
 
-export const reviewPanelIdRequestSchema = z.strictObject({ panelId: z.string().min(1) })
+export const reviewPanelIdRequestSchema = z.strictObject({ panelId: ipcIdSchema })
 export type ReviewPanelIdRequest = z.infer<typeof reviewPanelIdRequestSchema>
 
-export const listReviewPanelsRequestSchema = z.strictObject({ taskId: z.string().min(1) })
+export const listReviewPanelsRequestSchema = z.strictObject({ taskId: ipcIdSchema })
 export type ListReviewPanelsRequest = z.infer<typeof listReviewPanelsRequestSchema>

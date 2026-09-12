@@ -85,7 +85,9 @@ export function computeReviewVerdict(
     )
   }
 
-  const unable = input.reviewers.filter((reviewer) => reviewer.verdict === 'unable_to_review').length
+  const unable = input.reviewers.filter(
+    (reviewer) => reviewer.verdict === 'unable_to_review',
+  ).length
   if (unable > 0) {
     reasons.push(
       `${plural(unable, 'reviewer')} could not complete the review; the verdict covers completed reviews only.`,

@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { ipcIdSchema } from './limits'
+
 /**
  * TASK-068 ContextBuilder domain (plan §47) — packs the prompt context an
  * Agent Run starts with:
@@ -15,10 +17,10 @@ import { z } from 'zod'
  */
 
 export const buildContextRequestSchema = z.strictObject({
-  workspaceId: z.string().min(1),
+  workspaceId: ipcIdSchema,
   /** When set, the Task, its confirmed criteria and the latest handoff are included. */
-  taskId: z.string().min(1).optional(),
-  role: z.string().min(1).optional(),
+  taskId: ipcIdSchema.optional(),
+  role: ipcIdSchema.optional(),
   /** Character budget for the assembled content; defaults to the builder's standard budget. */
   budgetChars: z.number().int().min(1).optional(),
 })

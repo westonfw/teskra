@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { IPC_NAME_MAX, ipcContentSchema, ipcIdSchema, ipcPathSchema } from './limits'
+
 /** §139.1 `artifacts.type` (line 5410) — 七种. */
 export const ARTIFACT_TYPES = [
   'plan',
@@ -44,12 +46,12 @@ export type Artifact = z.infer<typeof artifactSchema>
  */
 export const recordArtifactRequestSchema = z
   .strictObject({
-    taskId: z.string().min(1),
-    runId: z.string().min(1).optional(),
+    taskId: ipcIdSchema,
+    runId: ipcIdSchema.optional(),
     type: artifactTypeSchema,
-    name: z.string().trim().min(1),
-    content: z.string().optional(),
-    filePath: z.string().min(1).optional(),
+    name: z.string().trim().min(1).max(IPC_NAME_MAX),
+    content: ipcContentSchema.optional(),
+    filePath: ipcPathSchema.optional(),
     metadata: artifactMetadataSchema.optional(),
   })
   .refine(
@@ -62,8 +64,8 @@ export type RecordArtifactRequest = z.infer<typeof recordArtifactRequestSchema>
 /** At least one of `taskId` / `runId` narrows the listing. */
 export const listArtifactsRequestSchema = z
   .strictObject({
-    taskId: z.string().min(1).optional(),
-    runId: z.string().min(1).optional(),
+    taskId: ipcIdSchema.optional(),
+    runId: ipcIdSchema.optional(),
     type: artifactTypeSchema.optional(),
   })
   .refine(({ taskId, runId }) => taskId !== undefined || runId !== undefined, {
@@ -72,13 +74,13 @@ export const listArtifactsRequestSchema = z
 export type ListArtifactsRequest = z.infer<typeof listArtifactsRequestSchema>
 
 export const artifactIdRequestSchema = z.strictObject({
-  artifactId: z.string().min(1),
+  artifactId: ipcIdSchema,
 })
 export type ArtifactIdRequest = z.infer<typeof artifactIdRequestSchema>
 
 /** Scans the Run's artifact directory and registers not-yet-indexed files. */
 export const scanRunArtifactsRequestSchema = z.strictObject({
-  runId: z.string().min(1),
+  runId: ipcIdSchema,
 })
 export type ScanRunArtifactsRequest = z.infer<typeof scanRunArtifactsRequestSchema>
 

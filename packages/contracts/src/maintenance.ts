@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { retentionConfigSchema } from './config'
+import { ipcIdSchema } from './limits'
 
 /**
  * RetentionService contracts (TASK-069, teskra-tasks.md; plan §135).
@@ -43,7 +44,7 @@ export type RetentionPlanItem = z.infer<typeof retentionPlanItemSchema>
 
 export const retentionPlanRequestSchema = z.strictObject({
   /** Restricts the scan to one workspace; absent = all workspaces. */
-  workspaceId: z.string().min(1).optional(),
+  workspaceId: ipcIdSchema.optional(),
 })
 export type RetentionPlanRequest = z.infer<typeof retentionPlanRequestSchema>
 
@@ -56,7 +57,7 @@ export const retentionPlanSchema = z.strictObject({
 export type RetentionPlan = z.infer<typeof retentionPlanSchema>
 
 export const retentionRunRequestSchema = z.strictObject({
-  workspaceId: z.string().min(1).optional(),
+  workspaceId: ipcIdSchema.optional(),
   /** Defaults false. True = compute the plan and report it without deleting. */
   dryRun: z.boolean().optional(),
 })

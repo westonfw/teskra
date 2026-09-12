@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { ipcIdSchema } from './limits'
+
 export const DOCTOR_SEVERITIES = ['info', 'warning', 'error'] as const
 export const doctorSeveritySchema = z.enum(DOCTOR_SEVERITIES)
 export type DoctorSeverity = z.infer<typeof doctorSeveritySchema>
@@ -29,6 +31,6 @@ export const doctorReportSchema = z.strictObject({
 export type DoctorReport = z.infer<typeof doctorReportSchema>
 
 export const runDoctorRequestSchema = z.strictObject({
-  workspaceId: z.string().min(1).optional(),
+  workspaceId: ipcIdSchema.optional(),
 })
 export type RunDoctorRequest = z.infer<typeof runDoctorRequestSchema>

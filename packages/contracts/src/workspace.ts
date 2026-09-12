@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { IPC_TEXT_MAX, ipcIdSchema, ipcNameSchema, ipcPathSchema } from './limits'
+
 /**
  * plan §116.1 — values mirror §139.1 `workspaces.runtime_kind` (line 5200).
  */
@@ -52,26 +54,26 @@ export type Workspace = z.infer<typeof workspaceSchema>
 
 const workspaceInputFields = {
   runtime: workspaceRuntimeRefSchema,
-  path: z.string().min(1),
-  gitRoot: z.string().optional(),
-  defaultBranch: z.string().optional(),
+  path: ipcPathSchema,
+  gitRoot: ipcPathSchema.optional(),
+  defaultBranch: ipcNameSchema.optional(),
   /** Callers send plaintext; the Main process diverts secrets to the Credential Store. */
-  env: z.record(z.string(), z.string()).optional(),
+  env: z.record(z.string(), z.string().max(IPC_TEXT_MAX)).optional(),
 }
 
 export const createWorkspaceRequestSchema = z.strictObject({
-  name: z.string().min(1),
+  name: ipcNameSchema,
   ...workspaceInputFields,
 })
 export type CreateWorkspaceRequest = z.infer<typeof createWorkspaceRequestSchema>
 
 export const openWorkspaceRequestSchema = z.strictObject({
-  name: z.string().min(1).optional(),
+  name: ipcNameSchema.optional(),
   ...workspaceInputFields,
 })
 export type OpenWorkspaceRequest = z.infer<typeof openWorkspaceRequestSchema>
 
-export const workspaceIdRequestSchema = z.strictObject({ id: z.string().min(1) })
+export const workspaceIdRequestSchema = z.strictObject({ id: ipcIdSchema })
 export type WorkspaceIdRequest = z.infer<typeof workspaceIdRequestSchema>
 
 export const listRecentWorkspacesRequestSchema = z.strictObject({

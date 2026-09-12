@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { ipcIdSchema } from './limits'
+
 /**
  * Config Layers (TASK-080, teskra-tasks.md; plan §151 / ADR-0005).
  *
@@ -153,14 +155,14 @@ export const writableConfigLayerSchema = z.enum(['global', 'workspace'])
 export type WritableConfigLayer = z.infer<typeof writableConfigLayerSchema>
 
 export const resolveConfigRequestSchema = z.strictObject({
-  workspaceId: z.string().min(1).optional(),
+  workspaceId: ipcIdSchema.optional(),
 })
 export type ResolveConfigRequest = z.infer<typeof resolveConfigRequestSchema>
 
 export const updateConfigRequestSchema = z
   .strictObject({
     layer: writableConfigLayerSchema,
-    workspaceId: z.string().min(1).optional(),
+    workspaceId: ipcIdSchema.optional(),
     patch: teskraConfigLayerSchema,
   })
   .superRefine((request, context) => {

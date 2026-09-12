@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { IPC_TEXT_MAX, ipcIdSchema } from './limits'
+
 /**
  * TASK-048 AcceptanceCriteria Domain — values mirror §139.1:
  * `acceptance_criteria_sets.status` (line 5337) and
@@ -66,29 +68,29 @@ export const criterionResultSchema = z.enum(CRITERION_RESULTS)
 export type CriterionResult = z.infer<typeof criterionResultSchema>
 
 export const listCriteriaSetsRequestSchema = z.strictObject({
-  taskId: z.string().min(1),
+  taskId: ipcIdSchema,
 })
 export type ListCriteriaSetsRequest = z.infer<typeof listCriteriaSetsRequestSchema>
 
 export const criteriaSetIdRequestSchema = z.strictObject({
-  setId: z.string().min(1),
+  setId: ipcIdSchema,
 })
 export type CriteriaSetIdRequest = z.infer<typeof criteriaSetIdRequestSchema>
 
 export const criterionIdRequestSchema = z.strictObject({
-  criterionId: z.string().min(1),
+  criterionId: ipcIdSchema,
 })
 export type CriterionIdRequest = z.infer<typeof criterionIdRequestSchema>
 
 /** Always creates the next version as a `draft` set for the Task. */
 export const createCriteriaSetRequestSchema = z.strictObject({
-  taskId: z.string().min(1),
+  taskId: ipcIdSchema,
 })
 export type CreateCriteriaSetRequest = z.infer<typeof createCriteriaSetRequestSchema>
 
 export const addCriterionRequestSchema = z.strictObject({
-  setId: z.string().min(1),
-  description: z.string().trim().min(1),
+  setId: ipcIdSchema,
+  description: z.string().trim().min(1).max(IPC_TEXT_MAX),
   category: criterionCategorySchema.optional(),
   /** Defaults to true. */
   required: z.boolean().optional(),
@@ -97,8 +99,8 @@ export type AddCriterionRequest = z.infer<typeof addCriterionRequestSchema>
 
 export const updateCriterionRequestSchema = z
   .strictObject({
-    criterionId: z.string().min(1),
-    description: z.string().trim().min(1).optional(),
+    criterionId: ipcIdSchema,
+    description: z.string().trim().min(1).max(IPC_TEXT_MAX).optional(),
     /** Explicit null clears the category. */
     category: criterionCategorySchema.nullable().optional(),
     required: z.boolean().optional(),
@@ -116,7 +118,7 @@ export type UpdateCriterionRequest = z.infer<typeof updateCriterionRequestSchema
 
 /** `setId: null` clears the run's criteria binding. */
 export const bindRunCriteriaRequestSchema = z.strictObject({
-  runId: z.string().min(1),
-  setId: z.string().min(1).nullable(),
+  runId: ipcIdSchema,
+  setId: ipcIdSchema.nullable(),
 })
 export type BindRunCriteriaRequest = z.infer<typeof bindRunCriteriaRequestSchema>

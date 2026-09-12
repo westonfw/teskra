@@ -2,8 +2,9 @@ import { z } from 'zod'
 
 import { agentRoleSchema, agentRunSchema } from './agent'
 import { acceptanceCriterionSchema } from './criteria'
-import { diffResultSchema, worktreeIsolationSchema, worktreeSchema } from './git'
+import { diffPatchResultSchema, worktreeIsolationSchema, worktreeSchema } from './git'
 import { handoffRecordSchema } from './handoff'
+import { IPC_NAME_MAX, ipcIdSchema, ipcTextSchema } from './limits'
 import { criteriaReviewOutcomeSchema, criterionScoreRecordSchema } from './review'
 
 /**
@@ -160,13 +161,13 @@ export const workflowDefinitionFileInfoSchema = z.strictObject({
 export type WorkflowDefinitionFileInfo = z.infer<typeof workflowDefinitionFileInfoSchema>
 
 export const listWorkflowDefinitionsRequestSchema = z.strictObject({
-  workspaceId: z.string().min(1),
+  workspaceId: ipcIdSchema,
 })
 export type ListWorkflowDefinitionsRequest = z.infer<typeof listWorkflowDefinitionsRequestSchema>
 
 export const loadWorkflowDefinitionRequestSchema = z.strictObject({
-  workspaceId: z.string().min(1),
-  definitionId: z.string().min(1),
+  workspaceId: ipcIdSchema,
+  definitionId: ipcIdSchema,
 })
 export type LoadWorkflowDefinitionRequest = z.infer<typeof loadWorkflowDefinitionRequestSchema>
 
@@ -224,12 +225,12 @@ export const workflowRunDetailSchema = z.strictObject({
 export type WorkflowRunDetail = z.infer<typeof workflowRunDetailSchema>
 
 export const workflowRunIdRequestSchema = z.strictObject({
-  runId: z.string().min(1),
+  runId: ipcIdSchema,
 })
 export type WorkflowRunIdRequest = z.infer<typeof workflowRunIdRequestSchema>
 
 export const listWorkflowRunsRequestSchema = z.strictObject({
-  taskId: z.string().min(1).optional(),
+  taskId: ipcIdSchema.optional(),
   status: workflowRunStatusSchema.optional(),
 })
 export type ListWorkflowRunsRequest = z.infer<typeof listWorkflowRunsRequestSchema>
@@ -242,13 +243,13 @@ export type ListWorkflowRunsRequest = z.infer<typeof listWorkflowRunsRequestSche
  * the worktree's isolation tier and defaults to 'worktree'.
  */
 export const workflowDispatchRequestSchema = z.strictObject({
-  workspaceId: z.string().min(1),
-  taskId: z.string().min(1),
-  agent: z.string().min(1),
+  workspaceId: ipcIdSchema,
+  taskId: ipcIdSchema,
+  agent: ipcIdSchema,
   isolation: worktreeIsolationSchema.optional(),
-  model: z.string().min(1).optional(),
+  model: ipcIdSchema.optional(),
   /** Explicit prompt; when omitted the 'implement' template (TASK-079) is rendered. */
-  prompt: z.string().optional(),
+  prompt: ipcTextSchema.optional(),
 })
 export type WorkflowDispatchRequest = z.infer<typeof workflowDispatchRequestSchema>
 
@@ -269,17 +270,17 @@ export type WorkflowDispatchResult = z.infer<typeof workflowDispatchResultSchema
 
 /** TASK-059: starts one DAG pass of an existing WorkflowRun via WorkflowEngine. */
 export const workflowRunStartRequestSchema = z.strictObject({
-  runId: z.string().min(1),
-  workspaceId: z.string().min(1),
+  runId: ipcIdSchema,
+  workspaceId: ipcIdSchema,
   /** Present → agent steps run orchestrated; absent → attended (ADR-0002). */
-  worktreeId: z.string().min(1).optional(),
+  worktreeId: ipcIdSchema.optional(),
 })
 export type WorkflowRunStartRequest = z.infer<typeof workflowRunStartRequestSchema>
 
 /** TASK-059: resolves a suspended step (checkpoint / criteria-gate / review-panel). */
 export const workflowStepResolveRequestSchema = z.strictObject({
-  stepId: z.string().min(1),
-  outcome: z.string().min(1).optional(),
+  stepId: ipcIdSchema,
+  outcome: z.string().min(1).max(IPC_NAME_MAX).optional(),
   result: z.record(z.string(), z.unknown()).optional(),
 })
 export type WorkflowStepResolveRequest = z.infer<typeof workflowStepResolveRequestSchema>
@@ -321,21 +322,21 @@ export type WorkflowIterateStopReason = z.infer<typeof workflowIterateStopReason
  */
 export const workflowIterateRequestSchema = z
   .strictObject({
-    workspaceId: z.string().min(1),
-    taskId: z.string().min(1),
-    runId: z.string().min(1).optional(),
+    workspaceId: ipcIdSchema,
+    taskId: ipcIdSchema,
+    runId: ipcIdSchema.optional(),
     /** AgentRegistry id of the implementer/fixer agent (free-form string). */
-    agent: z.string().min(1).optional(),
+    agent: ipcIdSchema.optional(),
     /** AgentRegistry ids of the review-panel reviewers. */
-    reviewers: z.array(z.string().min(1)).min(1).optional(),
+    reviewers: z.array(ipcIdSchema).min(1).optional(),
     policy: iterationPolicySchema.partial().optional(),
     /** Present → agent steps run orchestrated in this worktree (ADR-0002). */
-    worktreeId: z.string().min(1).optional(),
-    model: z.string().min(1).optional(),
+    worktreeId: ipcIdSchema.optional(),
+    model: ipcIdSchema.optional(),
     /** Round-1 prompt override; the 'implement' template is rendered otherwise. */
-    prompt: z.string().optional(),
+    prompt: ipcTextSchema.optional(),
     /** Round ≥2 prompt override; the 'fix' template is rendered otherwise. */
-    fixPrompt: z.string().optional(),
+    fixPrompt: ipcTextSchema.optional(),
   })
   .refine(
     (request) =>
@@ -367,17 +368,17 @@ export type WorkflowIterateResult = z.infer<typeof workflowIterateResultSchema>
  * roles (never hardcoded agent ids).
  */
 export const startFullWorkflowRequestSchema = z.strictObject({
-  workspaceId: z.string().min(1),
-  taskId: z.string().min(1),
+  workspaceId: ipcIdSchema,
+  taskId: ipcIdSchema,
   /** AgentRegistry id of the implementer/fixer agent (free-form string). */
-  implementer: z.string().min(1).optional(),
+  implementer: ipcIdSchema.optional(),
   /** AgentRegistry ids of the review-panel reviewers. */
-  reviewers: z.array(z.string().min(1)).min(1).optional(),
+  reviewers: z.array(ipcIdSchema).min(1).optional(),
   /** Shell step command for the Build/Test step (default 'npm test'). */
-  testCommand: z.string().min(1).optional(),
+  testCommand: z.string().min(1).max(IPC_NAME_MAX).optional(),
   /** Worktree isolation tier (defaults to 'worktree'; always orchestrated, ADR-0002). */
   isolation: worktreeIsolationSchema.optional(),
-  model: z.string().min(1).optional(),
+  model: ipcIdSchema.optional(),
   /** Iteration safety-cap overrides (plan §124). */
   policy: iterationPolicySchema.partial().optional(),
 })
@@ -403,7 +404,7 @@ export const fullWorkflowRunSummarySchema = z.strictObject({
   run: workflowRunSchema,
   steps: z.array(workflowStepSchema),
   worktree: worktreeSchema.nullable(),
-  diff: diffResultSchema.nullable(),
+  diff: diffPatchResultSchema.nullable(),
   /** Criteria rows of the run's anchored criteria set (empty when unanchored). */
   criteria: z.array(acceptanceCriterionSchema),
   /** Latest criterion scores recorded for the run's Task. */
