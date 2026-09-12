@@ -391,6 +391,52 @@ describe('AgentManager (TASK-028)', () => {
     expect(output.ok && output.data.includes('dying words')).toBe(true)
   })
 
+  it('dispose waits out an in-flight adapterless cancel before closing', async () => {
+    let releaseIdentity!: (value: IpcResult<string | null>) => void
+    const identity = vi.fn(
+      () =>
+        new Promise<IpcResult<string | null>>((resolve) => {
+          releaseIdentity = resolve
+        }),
+    )
+    const terminate = vi.fn(async (): Promise<IpcResult<void>> => ({ ok: true, data: undefined }))
+    const context = setup(undefined, false, undefined, { identity, terminate })
+    const runDir = context.paths.runDir('run-1')
+    if (!runDir.ok) throw new Error(runDir.error.message)
+    const created = context.runs.create({
+      id: 'run-1',
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      executionMode: 'attended',
+      runDir: runDir.data,
+      status: 'running',
+    })
+    if (!created.ok) throw new Error(created.error.message)
+    const withPid = context.runs.update('run-1', { pid: 4242, pidIdentity: 'start-token-A' })
+    if (!withPid.ok) throw new Error(withPid.error.message)
+
+    const cancelling = context.manager.cancel('run-1')
+    await vi.waitFor(() => expect(identity).toHaveBeenCalledWith(4242))
+
+    // dispose() must not run off to runLogs.disposeAll()/DB close while the
+    // settle is still parked in the identity probe.
+    let disposed = false
+    const disposing = context.manager.dispose().then(() => {
+      disposed = true
+    })
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(disposed).toBe(false)
+
+    releaseIdentity({ ok: true, data: 'start-token-A' })
+    await disposing
+    await cancelling
+    expect(disposed).toBe(true)
+    expect(context.manager.get('run-1')).toMatchObject({
+      ok: true,
+      data: { status: 'cancelled' },
+    })
+  })
+
   it('translates output/input events and saves a non-zero crash exit', async () => {
     const context = setup()
     const output = vi.fn()

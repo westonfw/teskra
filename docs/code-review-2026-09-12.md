@@ -610,3 +610,16 @@ CSP + sandbox 已经挡掉了大部分利用路径，但这些是零成本的纵
    第八轮加的事后终态守卫随之撤掉。测试更新为认领语义：并发两个 cancel 共享
    一次执行——identity / terminate / agent.cancelled 各恰好一次，两者拿到同一
    cancelled 结果。
+
+## 15. 第十轮 Review 修复状态（2026-09-12）
+
+1. **在途的 adapterless cancel 不在 dispose() 等待范围内**（agent-manager）：
+   dispose() 只 await `activeAdapters` 的 cancel，adapterlessCancels 里的在途
+   settle 无人等待——用户取消僵尸 run 后立刻退出，parked 在 identity() 上的
+   settle 会在 runLogs.disposeAll() / database.close() 之后恢复，对着已关闭的
+   DB 写 runs.update → 失败 → run 停在 running，重启后变回 zombie（用户视角：
+   "取消了又回来")。与第二轮 flushAll 排序同一类问题，只是这条分支在 357b504
+   引入 await 后才可能悬在外面。修复：dispose() 在 adapter cancel 循环之后
+   `await Promise.all([...adapterlessCancels.values()])`，并在清理段
+   `adapterlessCancels.clear()`。测试：cancel parked 时 dispose 不返回，释放
+   identity 后 dispose 完成且 run 落 cancelled。

@@ -1224,12 +1224,19 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           }
         }),
       )
+      // Adapterless cancels hold no adapter binding, so the loop above does
+      // not cover them — but once their identity probe resumes they still
+      // write to the DB and the run logs. Wait them out before anything is
+      // closed, or the settle lands on a closed database and the cancelled
+      // run comes back as a zombie on the next start.
+      await Promise.all([...adapterlessCancels.values()])
       stopOutput()
       stopCommand()
       stopExited()
       activeAdapters.clear()
       pendingRuns.clear()
       cancelRequested.clear()
+      adapterlessCancels.clear()
       // Drain the output the cancels produced only AFTER unsubscribing: the
       // subscription is the batcher's only push source, so from here no 32ms
       // batch timer can fire past the log close below.
