@@ -740,6 +740,13 @@ body {
   width: 100%;
 }
 
+/* The Output tab wraps its children in another vertical Space; without an
+   explicit width the inline-flex container shrink-wraps to its widest child
+   (~195px) instead of filling the drawer. */
+.run-detail-tab {
+  width: 100%;
+}
+
 .run-prompt {
   margin: 0 !important;
   white-space: pre-wrap;
