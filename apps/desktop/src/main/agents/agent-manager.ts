@@ -101,9 +101,11 @@ export interface AgentManagerDeps {
    * (migration 011 `pid_identity`), so reconciliation can tell "the Agent
    * process survived" apart from "the pid was reused by an unrelated process"
    * before terminating anything. Without it, runs fall back to probe-only
-   * survivor handling.
+   * survivor handling. `terminate` is used by cancel() for a best-effort,
+   * identity-verified stop of a previous-instance process before the run is
+   * settled to its terminal state.
    */
-  readonly hostProcesses?: Pick<HostProcessControl, 'identity'>
+  readonly hostProcesses?: Pick<HostProcessControl, 'identity' | 'terminate'>
 }
 
 function fail<T>(error: InternalAppError): IpcResult<T> {
@@ -1081,6 +1083,24 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         // attended-write conflict) forever. Settling it to 'cancelled' —
         // terminal, hence non-resumable — cannot invite the double-write
         // reconciliation was avoiding, and releases everything it held.
+        //
+        // Before settling, best-effort stop the previous-instance process —
+        // but ONLY with identity verification: terminate when the fresh read
+        // matches the recorded token, skip when it is unreadable or does not
+        // match (never kill an unverified pid). Either way the settle
+        // proceeds; the user's cancel intent must be honored.
+        if (deps.hostProcesses !== undefined && current.data.pid !== undefined) {
+          const identity = await deps.hostProcesses.identity(current.data.pid)
+          if (identity.ok && identity.data !== null && identity.data === current.data.pidIdentity) {
+            const terminated = await deps.hostProcesses.terminate(current.data.pid)
+            if (!terminated.ok) {
+              logger.warn(
+                { runId, pid: current.data.pid, error: terminated.error },
+                'Best-effort termination of the previous-instance process failed during cancel.',
+              )
+            }
+          }
+        }
         const finishedAt = now()
         appendEvent(runId, 'agent.cancelled', {})
         const updated = deps.runs.update(runId, { status: 'cancelled', finishedAt }, finishedAt)
@@ -1089,6 +1109,9 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         collectHandoff(runId)
         deps.events.emit('agent.cancelled', { runId })
         if (updated.ok && updated.data !== null) synchronizeTaskStatus(updated.data)
+        // This run may have been the zombie blocking the queue: with no
+        // process left, no process.exited will ever advance it.
+        scheduleQueueAdvance()
         if (!updated.ok) return updated
         return updated.data === null
           ? missing('Agent run', runId)

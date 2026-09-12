@@ -570,3 +570,20 @@ CSP + sandbox 已经挡掉了大部分利用路径，但这些是零成本的纵
    store state（`patchFailures: Record<string, true>`），selectFile 清除是状态
    变更；changes-page 把当前 patch 的失败标志纳入 effect 依赖，清除后 effect
    自然重跑。changes-page 注释同步更新。
+
+## 12. 第七轮 Review 修复状态（2026-09-12）
+
+> 针对第六轮 cancel() 新分支的复审，两项均已修复并补测试。
+
+1. **释放并发槽却没推进队列**：新分支漏调 `scheduleQueueAdvance()`（queued 分支
+   有）。僵尸 run 在本实例没有进程，process.exited 永远不会补这一脚，queued 的
+   后续 run 会卡到用户手动操作别的 run。已在 synchronizeTaskStatus 后补上；测试
+   用 maxGlobalRuns=1 + adapterless active run 验证取消后队列推进。
+2. **落终态前没有任何终止尝试**：reconciliation 留 'alive' 的 run 被 cancel 落
+   cancelled 后退出 listActive()，unisolatedWriteConflict 就看不见它，用户可立即
+   在同一非隔离工作区再起 attended run——若上一实例的 agent 进程其实还活着，就是
+   P0-2 要防的双写。hostProcesses 依赖放宽为 `Pick<..., 'identity' | 'terminate'>`，
+   落终态前做一次带身份校验的 best-effort 终止：identity 读得出且与
+   run.pidIdentity 相符才 terminate，读不出/不匹配跳过（不乱杀）；终止成败都照常
+   落 cancelled（兑现用户取消意图）。测试覆盖：令牌相符 → terminate 被调；读取
+   失败/令牌不匹配 → 不 terminate 但仍落 cancelled。

@@ -111,7 +111,7 @@ function setup(
   concurrency?: ConcurrencyConfig,
   failAgentEventWrites = false,
   credentials?: CredentialStore,
-  hostProcesses?: Pick<HostProcessControl, 'identity'>,
+  hostProcesses?: Pick<HostProcessControl, 'identity' | 'terminate'>,
 ): TestContext {
   const connection = new Database(':memory:')
   connection.pragma('foreign_keys = ON')
@@ -259,7 +259,10 @@ describe('AgentManager (TASK-028)', () => {
       ok: true,
       data: 'start-token-1001',
     }))
-    const context = setup(undefined, false, undefined, { identity })
+    const context = setup(undefined, false, undefined, {
+      identity,
+      terminate: vi.fn(async () => ({ ok: true as const, data: undefined })),
+    })
     const started = await context.manager.start({
       workspaceId: 'workspace-1',
       agentType: 'codex',
@@ -282,7 +285,10 @@ describe('AgentManager (TASK-028)', () => {
       ok: false,
       error: { code: 'UNKNOWN', message: 'stat failed', retryable: true },
     }))
-    const context = setup(undefined, false, undefined, { identity })
+    const context = setup(undefined, false, undefined, {
+      identity,
+      terminate: vi.fn(async () => ({ ok: true as const, data: undefined })),
+    })
     const started = await context.manager.start({
       workspaceId: 'workspace-1',
       agentType: 'codex',
@@ -304,7 +310,10 @@ describe('AgentManager (TASK-028)', () => {
           releaseIdentity = resolve
         }),
     )
-    const context = setup(undefined, false, undefined, { identity })
+    const context = setup(undefined, false, undefined, {
+      identity,
+      terminate: vi.fn(async () => ({ ok: true as const, data: undefined })),
+    })
     const started = context.manager.start({
       workspaceId: 'workspace-1',
       agentType: 'codex',
@@ -702,6 +711,111 @@ describe('AgentManager (TASK-028)', () => {
     expect(result).toMatchObject({ ok: true, data: { status: 'cancelled' } })
     expect(cancelled).toHaveBeenCalledWith({ runId: 'run-1' })
     expect(context.manager.list({ activeOnly: true })).toEqual({ ok: true, data: [] })
+  })
+
+  it('best-effort terminates the verified previous-instance process before settling', async () => {
+    const identity = vi.fn(async (): Promise<IpcResult<string | null>> => ({
+      ok: true,
+      data: 'start-token-A',
+    }))
+    const terminate = vi.fn(async (): Promise<IpcResult<void>> => ({ ok: true, data: undefined }))
+    const context = setup(undefined, false, undefined, { identity, terminate })
+    const runDir = context.paths.runDir('run-1')
+    if (!runDir.ok) throw new Error(runDir.error.message)
+    const created = context.runs.create({
+      id: 'run-1',
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      executionMode: 'attended',
+      runDir: runDir.data,
+      status: 'running',
+    })
+    if (!created.ok) throw new Error(created.error.message)
+    const withPid = context.runs.update('run-1', { pid: 4242, pidIdentity: 'start-token-A' })
+    if (!withPid.ok) throw new Error(withPid.error.message)
+
+    const result = await context.manager.cancel('run-1')
+
+    expect(identity).toHaveBeenCalledWith(4242)
+    expect(terminate).toHaveBeenCalledWith(4242)
+    expect(result).toMatchObject({ ok: true, data: { status: 'cancelled' } })
+  })
+
+  it('never terminates an unverified pid during the adapterless cancel', async () => {
+    for (const identity of [
+      // Read failure: nothing is known about the pid.
+      vi.fn(async (): Promise<IpcResult<string | null>> => ({
+        ok: false,
+        error: { code: 'UNKNOWN' as const, message: 'stat failed', retryable: true },
+      })),
+      // The pid was reused by an unrelated process.
+      vi.fn(async (): Promise<IpcResult<string | null>> => ({ ok: true, data: 'other-token' })),
+    ]) {
+      const terminate = vi.fn(async (): Promise<IpcResult<void>> => ({ ok: true, data: undefined }))
+      const context = setup(undefined, false, undefined, { identity, terminate })
+      const runDir = context.paths.runDir('run-1')
+      if (!runDir.ok) throw new Error(runDir.error.message)
+      const created = context.runs.create({
+        id: 'run-1',
+        workspaceId: 'workspace-1',
+        agentType: 'codex',
+        executionMode: 'attended',
+        runDir: runDir.data,
+        status: 'running',
+      })
+      if (!created.ok) throw new Error(created.error.message)
+      const withPid = context.runs.update('run-1', { pid: 4242, pidIdentity: 'start-token-A' })
+      if (!withPid.ok) throw new Error(withPid.error.message)
+
+      // The cancel still settles — the user's intent is honored — but nothing
+      // is killed without a verified identity.
+      const result = await context.manager.cancel('run-1')
+      expect(terminate).not.toHaveBeenCalled()
+      expect(result).toMatchObject({ ok: true, data: { status: 'cancelled' } })
+      await context.manager.dispose()
+    }
+  })
+
+  it('advances the queue after cancelling an adapterless active run', async () => {
+    const context = setup({ maxGlobalRuns: 1, maxRunsPerWorkspace: 3, maxRunsPerAgent: 2 })
+    // The zombie holding the only slot (no process in this instance, so no
+    // process.exited will ever advance the queue for it). It gets a worktree
+    // so the new run queues on the concurrency limit instead of tripping the
+    // unisolated-write conflict.
+    const worktree = context.worktrees.create({
+      id: 'worktree-zombie',
+      workspaceId: 'workspace-1',
+      branch: 'agent/zombie',
+      baseBranch: 'main',
+      path: '/worktrees/zombie',
+      state: 'ready',
+      isolation: 'worktree',
+    })
+    if (!worktree.ok) throw new Error(worktree.error.message)
+    const runDir = context.paths.runDir('run-zombie')
+    if (!runDir.ok) throw new Error(runDir.error.message)
+    const zombie = context.runs.create({
+      id: 'run-zombie',
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      executionMode: 'orchestrated',
+      worktreeId: 'worktree-zombie',
+      runDir: runDir.data,
+      status: 'running',
+    })
+    if (!zombie.ok) throw new Error(zombie.error.message)
+
+    const queued = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+    })
+    expect(queued).toMatchObject({ ok: true, data: { status: 'queued' } })
+    expect(context.adapters.codex.start).not.toHaveBeenCalled()
+
+    await context.manager.cancel('run-zombie')
+
+    // The cancel itself must kick the queue: nothing else ever will.
+    await vi.waitFor(() => expect(context.adapters.codex.start).toHaveBeenCalled())
   })
 
   it('cancel stops only the process — the worktree, branch and files are untouched (TASK-047)', async () => {
