@@ -1,0 +1,42 @@
+import { enUS, type TranslationKey, type TranslationParams } from './en-US'
+import { zhCN } from './zh-CN'
+import { useLocaleStore, type Locale } from './locale-store'
+
+const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
+  'en-US': enUS,
+  'zh-CN': zhCN,
+}
+
+function translate(
+  locale: Locale,
+  key: TranslationKey,
+  params?: TranslationParams,
+): string {
+  let text: string = dictionaries[locale][key] ?? dictionaries['en-US'][key] ?? key
+  if (params !== undefined) {
+    for (const [name, value] of Object.entries(params)) {
+      text = text.replaceAll(`{${name}}`, String(value))
+    }
+  }
+  return text
+}
+
+export interface Translation {
+  readonly locale: Locale
+  setLocale(locale: Locale): void
+  t(key: TranslationKey, params?: TranslationParams): string
+}
+
+/** Binds the dictionary to the active locale; components re-render on switch. */
+export function useTranslation(): Translation {
+  const locale = useLocaleStore((state) => state.locale)
+  const setLocale = useLocaleStore((state) => state.setLocale)
+  return {
+    locale,
+    setLocale,
+    t: (key, params) => translate(locale, key, params),
+  }
+}
+
+export { LOCALES, useLocaleStore, type Locale } from './locale-store'
+export type { TranslationKey, TranslationParams }

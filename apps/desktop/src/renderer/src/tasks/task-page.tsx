@@ -28,6 +28,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { AgentPicker } from '../agents/agent-picker'
 import { AgentRunTerminal } from '../agents/agent-run-terminal'
 import { AppErrorAlert } from '../components/app-error-alert'
+import { useTranslation } from '../i18n'
 import { RunCommandsPanel } from '../permissions/run-commands-panel'
 import { agentRuntimeKey, useAgentStore } from '../stores/agent-store'
 import { useTaskStore } from '../stores/task-store'
@@ -96,6 +97,7 @@ export function TaskPage() {
   const [agentId, setAgentId] = useState<string>()
   const [prompt, setPrompt] = useState('')
   const [openRunId, setOpenRunId] = useState<string>()
+  const { t } = useTranslation()
   const selected = tasks.find(({ id }) => id === selectedId)
   const taskRuns = runs.filter(({ taskId }) => taskId === selected?.id)
   const openRun = runs.find(({ id }) => id === openRunId)
@@ -290,7 +292,7 @@ export function TaskPage() {
                 className="page-alert attended-warning"
                 type="warning"
                 showIcon
-                message="直接修改主工作区，未做隔离"
+                message={t('agent.attendedWarning')}
               />
               <div className="task-run-launcher">
                 <AgentPicker

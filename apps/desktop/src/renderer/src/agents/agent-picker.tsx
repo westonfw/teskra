@@ -9,6 +9,8 @@ import {
   type AgentAvailability,
 } from '@teskra/shared'
 
+import { useTranslation } from '../i18n'
+
 interface AgentPickerProps {
   readonly definitions: readonly AgentDefinition[]
   /** Health snapshots for the current runtime; omit while probes are loading. */
@@ -41,6 +43,7 @@ export function agentPickerOptions(
   definitions: readonly AgentDefinition[],
   health: readonly AgentHealth[] = [],
   role?: AgentRole,
+  formatSuggestion: (name: string) => string = (name) => `Consider ${name} instead`,
 ): AgentPickerOption[] {
   const context = role === undefined ? {} : { role }
   return rankAgents(definitions, health, context).map((definition) => {
@@ -59,7 +62,7 @@ export function agentPickerOptions(
           {availability === 'unavailable' && <Tag color="red">Unavailable</Tag>}
           {availability === 'rate-limited' && <Tag color="orange">Rate limited</Tag>}
           {alternative !== undefined && (
-            <Typography.Text type="secondary">建议改用 {alternative.name}</Typography.Text>
+            <Typography.Text type="secondary">{formatSuggestion(alternative.name)}</Typography.Text>
           )}
         </span>
       ),
@@ -79,11 +82,14 @@ export function AgentPicker({
   onChange,
   disabled,
 }: AgentPickerProps) {
+  const { t } = useTranslation()
   return (
     <Select
       className="agent-picker"
       value={value}
-      options={agentPickerOptions(definitions, health, role)}
+      options={agentPickerOptions(definitions, health, role, (name) =>
+        t('agentPicker.suggestAlternative', { name }),
+      )}
       placeholder="Select an Agent"
       disabled={disabled || definitions.length === 0}
       onChange={onChange}

@@ -578,6 +578,10 @@ body {
   width: min(280px, 34vw);
 }
 
+.locale-switcher {
+  min-width: 96px;
+}
+
 .agent-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));

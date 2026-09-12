@@ -4,6 +4,7 @@ import {
   ControlOutlined,
   FolderOutlined,
   GitlabOutlined,
+  GlobalOutlined,
   HomeOutlined,
   MedicineBoxOutlined,
   PlayCircleOutlined,
@@ -22,22 +23,27 @@ import { RecoveryPage } from '../recovery/recovery-page'
 import { TaskPage } from '../tasks/task-page'
 import { AgentCatalogPage } from '../agents/agent-catalog-page'
 import type { SettingsSectionRegistry } from '../settings/registry'
+import { LOCALES, useTranslation, type Locale, type TranslationKey } from '../i18n'
 import { useNavigationStore, type WorkbenchPage } from '../stores/navigation-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
 import { TerminalKeepAliveHost } from '../terminal/terminal-keep-alive-host'
 import { WorkspacePage } from '../workspace/workspace-page'
 
 const navigation = [
-  { key: 'home', label: 'Home', icon: <HomeOutlined /> },
-  { key: 'workspace', label: 'Workspace', icon: <FolderOutlined /> },
-  { key: 'tasks', label: 'Tasks', icon: <ProjectOutlined /> },
-  { key: 'runs', label: 'Runs', icon: <PlayCircleOutlined /> },
-  { key: 'git', label: 'Git', icon: <GitlabOutlined /> },
-  { key: 'terminal', label: 'Terminal', icon: <CodeOutlined /> },
-  { key: 'doctor', label: 'Doctor', icon: <SafetyCertificateOutlined /> },
-  { key: 'recovery', label: 'Recovery', icon: <MedicineBoxOutlined /> },
-  { key: 'settings', label: 'Settings', icon: <SettingOutlined /> },
-] satisfies ReadonlyArray<{ key: WorkbenchPage; label: string; icon: React.ReactNode }>
+  { key: 'home', labelKey: 'nav.home', icon: <HomeOutlined /> },
+  { key: 'workspace', labelKey: 'nav.workspace', icon: <FolderOutlined /> },
+  { key: 'tasks', labelKey: 'nav.tasks', icon: <ProjectOutlined /> },
+  { key: 'runs', labelKey: 'nav.runs', icon: <PlayCircleOutlined /> },
+  { key: 'git', labelKey: 'nav.git', icon: <GitlabOutlined /> },
+  { key: 'terminal', labelKey: 'nav.terminal', icon: <CodeOutlined /> },
+  { key: 'doctor', labelKey: 'nav.doctor', icon: <SafetyCertificateOutlined /> },
+  { key: 'recovery', labelKey: 'nav.recovery', icon: <MedicineBoxOutlined /> },
+  { key: 'settings', labelKey: 'nav.settings', icon: <SettingOutlined /> },
+] satisfies ReadonlyArray<{
+  key: WorkbenchPage
+  labelKey: TranslationKey
+  icon: React.ReactNode
+}>
 
 interface AppShellProps {
   readonly settingsRegistry: SettingsSectionRegistry
@@ -49,14 +55,15 @@ function runtimeLabel(kind: string, distro?: string): string {
 
 function WorkspaceRequired({ feature }: { readonly feature: string }) {
   const navigate = useNavigationStore((state) => state.navigate)
+  const { t } = useTranslation()
   return (
     <div className="workbench-page centered-empty">
       <Empty
         image={Empty.PRESENTED_IMAGE_SIMPLE}
-        description={`Open a workspace before using ${feature}.`}
+        description={t('workspaceRequired.body', { feature })}
       >
         <Button type="primary" onClick={() => navigate('workspace')}>
-          Choose workspace
+          {t('workspaceRequired.action')}
         </Button>
       </Empty>
     </div>
@@ -70,6 +77,7 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
   const workspace = useWorkspaceStore((state) => state.current)
   const loadRecent = useWorkspaceStore((state) => state.loadRecent)
   const selectWorkspace = useWorkspaceStore((state) => state.selectWorkspace)
+  const { t, locale, setLocale } = useTranslation()
 
   useEffect(() => {
     void loadRecent()
@@ -91,12 +99,16 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
         <Menu
           mode="inline"
           selectedKeys={[page]}
-          items={navigation}
+          items={navigation.map((item) => ({
+            key: item.key,
+            label: t(item.labelKey),
+            icon: item.icon,
+          }))}
           onSelect={({ key }) => navigate(key as WorkbenchPage)}
         />
         <div className="workbench-nav-footer">
           <ControlOutlined />
-          <span>Orchestrate your coding agents.</span>
+          <span>{t('app.tagline')}</span>
         </div>
       </Layout.Sider>
 
@@ -105,7 +117,7 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
           <Select
             className="workspace-switcher"
             value={workspace?.id}
-            placeholder="No workspace"
+            placeholder={t('topbar.noWorkspace')}
             options={recent.map((item) => ({ value: item.id, label: item.name }))}
             onChange={selectWorkspace}
             suffixIcon={<FolderOutlined />}
@@ -113,13 +125,26 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
           <div className="topbar-context">
             <Space size={6}>
               <BranchesOutlined />
-              <Typography.Text>{workspace?.defaultBranch ?? 'No branch'}</Typography.Text>
+              <Typography.Text>{workspace?.defaultBranch ?? t('topbar.noBranch')}</Typography.Text>
             </Space>
             {workspace !== undefined && (
               <Tag bordered={false} color="cyan">
                 {runtimeLabel(workspace.runtime.kind, workspace.runtime.distro)}
               </Tag>
             )}
+            <Select<Locale>
+              className="locale-switcher"
+              size="small"
+              variant="borderless"
+              value={locale}
+              suffixIcon={<GlobalOutlined />}
+              options={LOCALES.map((value) => ({
+                value,
+                label: t(`app.language.${value}` as TranslationKey),
+              }))}
+              onChange={setLocale}
+              aria-label={t('app.language')}
+            />
           </div>
         </header>
 
@@ -127,18 +152,18 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
           <div className={page === 'terminal' ? 'route-layer route-layer-hidden' : 'route-layer'}>
             {page === 'home' && <HomePage />}
             {page === 'workspace' && <WorkspacePage />}
-            {page === 'tasks' && needsWorkspace('Tasks', <TaskPage />)}
-            {page === 'runs' && needsWorkspace('Runs', <AgentCatalogPage />)}
-            {page === 'git' && needsWorkspace('Git', <ChangesPage />)}
+            {page === 'tasks' && needsWorkspace(t('nav.tasks'), <TaskPage />)}
+            {page === 'runs' && needsWorkspace(t('nav.runs'), <AgentCatalogPage />)}
+            {page === 'git' && needsWorkspace(t('nav.git'), <ChangesPage />)}
             {page === 'doctor' && <DoctorPage />}
-            {page === 'recovery' && needsWorkspace('Recovery Center', <RecoveryPage />)}
+            {page === 'recovery' && needsWorkspace(t('nav.recovery'), <RecoveryPage />)}
             {page === 'settings' && (
               <SettingsPage registry={settingsRegistry} workspaceId={workspace?.id} />
             )}
           </div>
 
           {workspace === undefined ? (
-            page === 'terminal' && <WorkspaceRequired feature="Terminal" />
+            page === 'terminal' && <WorkspaceRequired feature={t('nav.terminal')} />
           ) : (
             <TerminalKeepAliveHost workspace={workspace} visible={page === 'terminal'} />
           )}

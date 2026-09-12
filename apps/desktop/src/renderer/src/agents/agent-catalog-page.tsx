@@ -24,6 +24,7 @@ import { inspectRunWatchdog, type WatchdogInspection } from '@teskra/shared'
 import { useEffect, useMemo, useState } from 'react'
 
 import { AppErrorAlert } from '../components/app-error-alert'
+import { useTranslation } from '../i18n'
 import { useSettingsStore } from '../settings/settings-store'
 import { agentRuntimeKey, useAgentStore } from '../stores/agent-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
@@ -77,6 +78,7 @@ export function AgentCatalogPage() {
   const settingsWorkspaceId = useSettingsStore((state) => state.workspaceId)
   const resolvedConfig = useSettingsStore((state) => state.resolved)
   const setSettingsWorkspace = useSettingsStore((state) => state.setWorkspace)
+  const { t } = useTranslation()
   const [selectedId, setSelectedId] = useState<string>()
   const [selectedRunId, setSelectedRunId] = useState<string>()
   const [prompt, setPrompt] = useState('')
@@ -193,8 +195,8 @@ export function AgentCatalogPage() {
         className="page-alert attended-warning"
         type="warning"
         showIcon
-        message="直接修改主工作区，未做隔离"
-        description="Attended runs use the current workspace. Review changes before committing."
+        message={t('agent.attendedWarning')}
+        description={t('agent.attendedWarningDetail')}
       />
 
       <Card className="run-launch-card" title="Start an attended run">
@@ -203,8 +205,8 @@ export function AgentCatalogPage() {
             className="page-alert"
             type="warning"
             showIcon
-            message="该 Agent 的权限无法由 Teskra 约束，仅依赖 worktree 隔离"
-            description="This Agent exposes no permission mechanism Teskra can project to. Approval mode has no effect on it; only worktree isolation limits what it can change."
+            message={t('agent.noEnforcement')}
+            description={t('agent.noEnforcementDetailInteractive')}
           />
         )}
         <div className="run-launch-form">
@@ -438,17 +440,18 @@ function RunDetail({
   onRestart,
   onResume,
 }: RunDetailProps) {
+  const { t } = useTranslation()
   return (
     <Space direction="vertical" size={20} className="run-detail">
       {run.executionMode === 'attended' && run.worktreeId === undefined && (
-        <Alert type="warning" showIcon message="直接修改主工作区，未做隔离" />
+        <Alert type="warning" showIcon message={t('agent.attendedWarning')} />
       )}
       {permissionEnforcement === 'none' && (
         <Alert
           type="warning"
           showIcon
-          message="该 Agent 的权限无法由 Teskra 约束，仅依赖 worktree 隔离"
-          description="This Agent exposes no permission mechanism Teskra can project to; its approval mode was not enforceable."
+          message={t('agent.noEnforcement')}
+          description={t('agent.noEnforcementDetail')}
         />
       )}
       {run.status === 'interrupted' && (

@@ -1,7 +1,10 @@
 import { App as AntApp, ConfigProvider, theme } from 'antd'
+import antdEnUS from 'antd/locale/en_US'
+import antdZhCN from 'antd/locale/zh_CN'
 import { useEffect } from 'react'
 import type { JSX } from 'react'
 
+import { useLocaleStore } from './i18n'
 import { registerBuiltInSettings } from './settings/builtin-sections'
 import { createSettingsSectionRegistry } from './settings/registry'
 import { AppShell } from './shell/app-shell'
@@ -12,9 +15,11 @@ registerBuiltInSettings(settingsRegistry)
 
 function App(): JSX.Element {
   useEffect(() => useTerminalStore.getState().startSynchronization(), [])
+  const locale = useLocaleStore((state) => state.locale)
 
   return (
     <ConfigProvider
+      locale={locale === 'zh-CN' ? antdZhCN : antdEnUS}
       theme={{
         algorithm: theme.darkAlgorithm,
         token: {
