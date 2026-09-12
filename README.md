@@ -21,15 +21,60 @@ Teskra 是一个 **Windows-first、Task-first、Agent-first** 的桌面端多 Ag
 
 ## 快速开始
 
-要求：**Node 22 LTS**（`engine-strict` 强制）、Windows 11 + WSL2（Windows-first，允许在 WSL2/Linux 上开发）。
+要求：
 
-```bash
-npm ci                # 安装（不要用 npm install）
-npm run dev           # Electron 开发模式
+- **Node 22 LTS**（`engine-strict` 强制；用 `.nvmrc` 切换：`nvm use`）
+- **Windows 11 + WSL2**（Windows-first，允许在 WSL2/Linux 上开发）
+- **Windows 上还需要 C++ 桌面开发工具链**（Visual Studio Build Tools）：`npm ci` 会从源码编译
+  `node-pty` native module。注意 `node-pty` 的 gyp 配置强制开启 Spectre 缓解，因此除了
+  "使用 C++ 的桌面开发"工作负荷外，还必须在 VS Installer →「单个组件」中勾选
+  **"MSVC … C++ x64/x86 Spectre 缓解库（最新）"**，否则编译报 `MSB8040` 失败。
+
+### Windows（cmd）
+
+```cmd
+:: 先清除两个已知致命的环境变量（仅当前窗口生效；若为全局残留建议直接从系统环境变量中删除）
+set "ELECTRON_RUN_AS_NODE="
+set "NoDefaultCurrentDirectoryInExePath="
+
+npm ci
+npm run dev
 ```
 
-> 提示：在 VS Code 内嵌终端里运行时，先 `unset ELECTRON_RUN_AS_NODE`
-> （VS Code Server 会设置该变量，导致 Electron 以纯 Node 模式启动失败）。
+### Windows（PowerShell）
+
+```powershell
+Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
+Remove-Item Env:NoDefaultCurrentDirectoryInExePath -ErrorAction SilentlyContinue
+
+npm ci
+npm run dev
+```
+
+### Windows（Git Bash）
+
+```bash
+unset ELECTRON_RUN_AS_NODE NoDefaultCurrentDirectoryInExePath
+npm ci
+npm run dev
+```
+
+### WSL2 / Linux
+
+```bash
+npm ci                # 不要用 npm install；postinstall 会下载 Electron 并编译 native modules
+npm run dev
+```
+
+> 提示：在 VS Code 内嵌终端（含 Remote/WSL）里运行时，VS Code Server 会注入
+> `ELECTRON_RUN_AS_NODE=1`，仍需先 `unset` 它再启动。
+
+两个环境变量为什么会致命：
+
+- **`ELECTRON_RUN_AS_NODE=1`**：强制 electron.exe 以纯 Node 模式运行，主进程报
+  `Cannot read properties of undefined (reading 'setPath')` 后退出。
+- **`NoDefaultCurrentDirectoryInExePath=1`**：安全加固项，会让 cmd 不在当前目录查找批处理文件，
+  导致 node-pty 编译时 winpty 的 `GetCommitHash.bat` 报 "is not recognized"。
 
 ```bash
 npm run typecheck     # TypeScript
