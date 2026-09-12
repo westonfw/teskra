@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -112,7 +112,7 @@ test.describe('Task Runs card resume', () => {
       app = undefined
     } finally {
       if (app !== undefined) app.process().kill('SIGKILL')
-      rmSync(teskraHome, { recursive: true, force: true })
+      removeDir(teskraHome)
       removeDir(repoDir)
     }
   })

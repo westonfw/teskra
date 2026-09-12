@@ -64,7 +64,7 @@ export function createGitRepo(): string {
 
 export function removeDir(dir: string): void {
   // Windows releases file handles (SQLite, PTY cwd) asynchronously; retry.
-  rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 300 })
 }
 
 /**
@@ -129,7 +129,7 @@ export const test = base.extend<TeskraE2EFixtures>({
   teskraHome: async ({}, use) => {
     const home = mkdtempSync(join(tmpdir(), 'teskra-e2e-home-'))
     await use(home)
-    rmSync(home, { recursive: true, force: true })
+    removeDir(home)
   },
   electronApp: async ({ teskraHome }, use) => {
     // Chromium's setuid sandbox is unavailable on some headless Linux CI

@@ -1,3 +1,5 @@
+import { join } from 'node:path'
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Keep the pino file/stdout logger quiet (getLogger reads this lazily).
@@ -118,7 +120,7 @@ describe('main process entry point', () => {
 
       expect(electron.app.setPath).toHaveBeenCalledWith(
         'userData',
-        '/tmp/teskra-entry-test-home/userData',
+        join('/tmp/teskra-entry-test-home', 'userData'),
       )
       const setPathOrder = electron.app.setPath.mock.invocationCallOrder[0]
       const lockOrder = electron.app.requestSingleInstanceLock.mock.invocationCallOrder[0]
