@@ -2,11 +2,13 @@ import { FitAddon } from '@xterm/addon-fit'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 
+import { useThemeStore } from '../../theme/theme-store'
 import type {
   TerminalInstance,
   TerminalRenderer,
   TerminalRendererOptions,
 } from './terminal-renderer'
+import { xtermThemes } from './xterm-themes'
 
 /** The only module allowed to know about xterm.js (TASK-082). */
 export class XtermTerminalRenderer implements TerminalRenderer {
@@ -20,18 +22,15 @@ export class XtermTerminalRenderer implements TerminalRenderer {
       scrollback: 10_000,
       allowProposedApi: false,
       disableStdin: options.readOnly ?? false,
-      theme: {
-        background: '#090d14',
-        foreground: '#d9e2ef',
-        cursor: '#70ddd1',
-        cursorAccent: '#090d14',
-        selectionBackground: '#2d5e6d99',
-      },
+      theme: xtermThemes[useThemeStore.getState().theme],
     })
     const fit = new FitAddon()
     terminal.loadAddon(fit)
     terminal.open(element)
     if (options.initialData !== undefined) terminal.write(options.initialData)
+    const unsubscribeTheme = useThemeStore.subscribe((state) => {
+      terminal.options.theme = xtermThemes[state.theme]
+    })
 
     return {
       write: (data) => terminal.write(data),
@@ -41,7 +40,10 @@ export class XtermTerminalRenderer implements TerminalRenderer {
       setReadOnly: (readOnly) => {
         terminal.options.disableStdin = readOnly
       },
-      dispose: () => terminal.dispose(),
+      dispose: () => {
+        unsubscribeTheme()
+        terminal.dispose()
+      },
     }
   }
 }

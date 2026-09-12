@@ -7,10 +7,12 @@ import {
   GlobalOutlined,
   HomeOutlined,
   MedicineBoxOutlined,
+  MoonOutlined,
   PlayCircleOutlined,
   ProjectOutlined,
   SafetyCertificateOutlined,
   SettingOutlined,
+  SunOutlined,
 } from '@ant-design/icons'
 import { Button, Empty, Layout, Menu, Select, Space, Tag, Typography } from 'antd'
 import { useEffect } from 'react'
@@ -28,6 +30,7 @@ import { useGitStore } from '../stores/git-store'
 import { useNavigationStore, type WorkbenchPage } from '../stores/navigation-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
 import { TerminalKeepAliveHost } from '../terminal/terminal-keep-alive-host'
+import { THEME_MODES, useThemeStore, type ThemeMode } from '../theme/theme-store'
 import { WorkspacePage } from '../workspace/workspace-page'
 
 const navigation = [
@@ -79,6 +82,8 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
   const loadRecent = useWorkspaceStore((state) => state.loadRecent)
   const selectWorkspace = useWorkspaceStore((state) => state.selectWorkspace)
   const { t, locale, setLocale } = useTranslation()
+  const themeMode = useThemeStore((state) => state.theme)
+  const setTheme = useThemeStore((state) => state.setTheme)
   const gitBranch = useGitStore((state) => state.status?.branch)
   const refreshGit = useGitStore((state) => state.refresh)
 
@@ -147,6 +152,19 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
                 {runtimeLabel(workspace.runtime.kind, workspace.runtime.distro)}
               </Tag>
             )}
+            <Select<ThemeMode>
+              className="theme-switcher"
+              size="small"
+              variant="borderless"
+              value={themeMode}
+              suffixIcon={themeMode === 'dark' ? <MoonOutlined /> : <SunOutlined />}
+              options={THEME_MODES.map((value) => ({
+                value,
+                label: t(`app.theme.${value}` as TranslationKey),
+              }))}
+              onChange={setTheme}
+              aria-label={t('app.theme')}
+            />
             <Select<Locale>
               className="locale-switcher"
               size="small"

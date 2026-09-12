@@ -8,6 +8,9 @@ export const enUS = {
   'app.language': 'Language',
   'app.language.en-US': 'English',
   'app.language.zh-CN': '中文',
+  'app.theme': 'Theme',
+  'app.theme.dark': 'Dark',
+  'app.theme.light': 'Light',
 
   'nav.home': 'Home',
   'nav.workspace': 'Workspace',

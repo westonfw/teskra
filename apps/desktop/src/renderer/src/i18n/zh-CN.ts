@@ -6,6 +6,9 @@ export const zhCN: Record<TranslationKey, string> = {
   'app.language': '语言',
   'app.language.en-US': 'English',
   'app.language.zh-CN': '中文',
+  'app.theme': '主题',
+  'app.theme.dark': '深色',
+  'app.theme.light': '浅色',
 
   'nav.home': '首页',
   'nav.workspace': '工作区',

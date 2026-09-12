@@ -9,6 +9,7 @@ import { registerBuiltInSettings } from './settings/builtin-sections'
 import { createSettingsSectionRegistry } from './settings/registry'
 import { AppShell } from './shell/app-shell'
 import { useTerminalStore } from './stores/terminal-store'
+import { useThemeStore } from './theme/theme-store'
 
 const settingsRegistry = createSettingsSectionRegistry()
 registerBuiltInSettings(settingsRegistry)
@@ -16,16 +17,22 @@ registerBuiltInSettings(settingsRegistry)
 function App(): JSX.Element {
   useEffect(() => useTerminalStore.getState().startSynchronization(), [])
   const locale = useLocaleStore((state) => state.locale)
+  const mode = useThemeStore((state) => state.theme)
+  const isDark = mode === 'dark'
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = mode
+  }, [mode])
 
   return (
     <ConfigProvider
       locale={locale === 'zh-CN' ? antdZhCN : antdEnUS}
       theme={{
-        algorithm: theme.darkAlgorithm,
+        algorithm: isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
         token: {
-          colorPrimary: '#65cfc5',
-          colorBgBase: '#0b0f17',
-          colorBgContainer: '#141b28',
+          colorPrimary: isDark ? '#65cfc5' : '#0f9b8e',
+          colorBgBase: isDark ? '#0b0f17' : '#f5f7fa',
+          colorBgContainer: isDark ? '#141b28' : '#ffffff',
           borderRadius: 10,
           fontSize: 14,
         },
