@@ -12,6 +12,8 @@
 //   3. the production index.html carries the CSP meta tag (injected at build
 //      time by electron.vite.config.ts; dev mode is exempt because vite HMR
 //      and the react-refresh preamble need inline scripts and ws:).
+//   4. the main bundle retains the P1-10 window hardening guards
+//      (setWindowOpenHandler deny, will-navigate, will-attach-webview).
 //
 // Usage: node scripts/assert-security-baseline.mjs   (run `npm run build` first,
 // or use `npm run test:security` which builds first.)
@@ -101,6 +103,22 @@ check(
   'production index.html has a Content-Security-Policy meta',
   /http-equiv="Content-Security-Policy"/.test(indexHtml) &&
     /default-src (?:'|&#39;)self(?:'|&#39;)/.test(indexHtml),
+)
+
+// --- 4. main-process window hardening (P1-10) --------------------------------
+// The window/navigation guards live in RendererEventBridge; assert the guards
+// survived bundling into the main-process artifact.
+const mainFiles = collectFiles(join(outDir, 'main'), ['.js', '.cjs', '.mjs'])
+check('main bundle exists', mainFiles.length > 0)
+const mainCode = mainFiles.map((file) => readFileSync(file, 'utf8')).join('\n')
+check(
+  'main bundle denies window.open (setWindowOpenHandler)',
+  mainCode.includes('setWindowOpenHandler'),
+)
+check('main bundle intercepts will-navigate', mainCode.includes('will-navigate'))
+check(
+  'main bundle blocks webview attach (will-attach-webview)',
+  mainCode.includes('will-attach-webview'),
 )
 
 if (failures > 0) {

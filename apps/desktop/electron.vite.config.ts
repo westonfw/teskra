@@ -1,6 +1,23 @@
+import { readFileSync } from 'node:fs'
+
 import react from '@vitejs/plugin-react'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import type { Plugin } from 'vite'
+
+// P2-16: single version source for the bundles. scripts/release.mjs sets
+// TESKRA_APP_VERSION to the resolved release version so the value baked into
+// the main/preload bundles matches -c.extraMetadata.version; otherwise fall
+// back to the desktop package.json (also what `app.getVersion()` reports in
+// dev). Consumed as APP_VERSION from src/main/build-info.ts.
+const packageVersion = (
+  JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as {
+    version: string
+  }
+).version
+const appVersion = process.env['TESKRA_APP_VERSION'] ?? packageVersion
+const appVersionDefine: Record<string, string> = {
+  __TESKRA_APP_VERSION__: JSON.stringify(appVersion),
+}
 
 /**
  * TASK-002: inject a strict CSP meta into the production index.html.
@@ -35,6 +52,7 @@ export default defineConfig({
     // ./src/*.ts), so it cannot stay an external runtime require — bundle it
     // (and its zod dependency) into the main-process output.
     plugins: [externalizeDepsPlugin({ exclude: ['@teskra/contracts', '@teskra/shared', 'zod'] })],
+    define: appVersionDefine,
   },
   preload: {
     // TASK-002: sandboxed preload scripts can only require `electron`, so all
@@ -43,6 +61,7 @@ export default defineConfig({
     // unless disabled, so turn it off explicitly — `electron` itself stays
     // external regardless (preset rollupOptions.external).
     plugins: [],
+    define: appVersionDefine,
     build: {
       externalizeDeps: false,
     },

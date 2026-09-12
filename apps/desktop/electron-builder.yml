@@ -44,6 +44,14 @@ win:
 
 nsis:
   # Per-user install: no admin rights required on a clean Windows machine.
+  #
+  # oneClick vs allowToChangeInstallationDirectory (P2-14): the two are
+  # mutually exclusive — electron-builder only honours a custom install
+  # directory with the assisted installer (oneClick: false) and silently
+  # ignored the option here. We keep the one-click installer: Teskra is
+  # Windows-first and the streamlined per-user install (no admin prompt, no
+  # wizard pages) is the better default experience; users who need a custom
+  # location are served by the portable target below.
   oneClick: true
   perMachine: false
   # Explicit even though false is the default: uninstalling must never touch
@@ -51,7 +59,6 @@ nsis:
   # install directory, so the uninstaller does not see it — this guards the
   # app-data deletion switch regardless.
   deleteAppDataOnUninstall: false
-  allowToChangeInstallationDirectory: true
 
 portable:
   artifactName: ${productName}-${version}-portable.${ext}

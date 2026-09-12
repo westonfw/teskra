@@ -20,7 +20,10 @@ npm run release:checksums -- --verify    # 校验 SHA256SUMS.txt
 1. **版本号解析**（见下节）。
 2. **签名状态检查**：目标为 win 且 `CSC_LINK` + `CSC_KEY_PASSWORD` 均存在时提示将执行
    Authenticode 签名；否则打印警告并继续产出**未签名**安装包（不失败）。
-3. **build**：`npm run build --workspace @teskra/desktop`（electron-vite）。
+3. **build**：`npm run build --workspace @teskra/desktop`（electron-vite）；构建环境注入
+   `TESKRA_APP_VERSION=<version>`，由 `apps/desktop/electron.vite.config.ts` 的 `define`
+   烘焙进 main / preload bundle（`window.teskra.appVersion` 的来源，见
+   `apps/desktop/src/main/build-info.ts`）。
 4. **package**：electron-builder，注入 `-c.extraMetadata.version=<version>`，`--publish never`。
 5. **checksum**：`scripts/make-checksums.mjs` 生成 `apps/desktop/dist/SHA256SUMS.txt`。
 6. **release notes**：从 git log 生成 `apps/desktop/dist/RELEASE_NOTES.md` 骨架
@@ -34,8 +37,11 @@ npm run release:checksums -- --verify    # 校验 SHA256SUMS.txt
 2. `--version` 参数（用于 workflow_dispatch 手动触发）；
 3. `apps/desktop/package.json` 的 `version`（开发机默认路径）。
 
-解析结果通过 electron-builder 的 `-c.extraMetadata.version` 注入构建，因此 artifact 文件名
-（`Teskra-Setup-<version>.exe` / `Teskra-<version>-portable.exe`）与应用自身版本号始终一致。
+解析结果从同一个值注入两处：build 时经 `TESKRA_APP_VERSION` 烘焙进 main / preload bundle
+（`window.teskra.appVersion`），package 时经 electron-builder 的 `-c.extraMetadata.version`
+注入，因此 artifact 文件名（`Teskra-Setup-<version>.exe` / `Teskra-<version>-portable.exe`）、
+应用自身版本号与渲染进程可见版本号始终一致。开发模式（未设置 `TESKRA_APP_VERSION`）下 define
+回退到 `apps/desktop/package.json` 的 `version`，与 `app.getVersion()` 一致。
 解析结果不是 semver 时脚本直接失败，不会产出带脏版本号的产物。
 
 ## Authenticode 签名（Windows）
