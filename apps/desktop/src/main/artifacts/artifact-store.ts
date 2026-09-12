@@ -87,11 +87,7 @@ const WINDOWS_ABSOLUTE_PATTERN = /^([A-Za-z]:[\\/]|\\\\)/u
  * (or vice versa), so platform-local isAbsolute/resolve alone is not enough.
  */
 export function resolveArtifactPath(artifactDir: string, filePath: string): string | undefined {
-  if (
-    isAbsolute(filePath) ||
-    filePath.startsWith('/') ||
-    WINDOWS_ABSOLUTE_PATTERN.test(filePath)
-  ) {
+  if (isAbsolute(filePath) || filePath.startsWith('/') || WINDOWS_ABSOLUTE_PATTERN.test(filePath)) {
     return undefined
   }
   if (filePath.split(/[\\/]/u).includes('..')) {

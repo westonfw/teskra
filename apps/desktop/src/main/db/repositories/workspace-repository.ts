@@ -1,7 +1,12 @@
 import type Database from 'better-sqlite3'
 import { z } from 'zod'
 
-import type { IpcResult, Workspace, WorkspaceEnvValue, WorkspaceRuntimeRef } from '@teskra/contracts'
+import type {
+  IpcResult,
+  Workspace,
+  WorkspaceEnvValue,
+  WorkspaceRuntimeRef,
+} from '@teskra/contracts'
 import { workspaceEnvValueSchema, workspaceRuntimeRefSchema } from '@teskra/contracts'
 
 import {
@@ -63,10 +68,10 @@ export interface CreateWorkspaceInput {
   readonly name: string
   readonly runtime: WorkspaceRuntimeRef
   readonly path: string
-  readonly gitRoot?: string
-  readonly defaultBranch?: string
-  readonly env?: Record<string, WorkspaceEnvValue>
-  readonly lastOpenedAt?: string
+  readonly gitRoot?: string | undefined
+  readonly defaultBranch?: string | undefined
+  readonly env?: Record<string, WorkspaceEnvValue> | undefined
+  readonly lastOpenedAt?: string | undefined
 }
 
 /** `null` clears a nullable column; `undefined` leaves it untouched. */

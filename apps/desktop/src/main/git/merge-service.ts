@@ -122,6 +122,8 @@ export function createMergeService(deps: MergeServiceDeps): MergeService {
       return fail({
         code: 'WORKSPACE_NOT_FOUND',
         message: `Workspace "${worktree.workspaceId}" was not found.`,
+        messageKey: 'errorMessage.workspaceNotFound',
+        params: { id: worktree.workspaceId },
         retryable: false,
         detail: `MergeService could not resolve workspace id=${JSON.stringify(worktree.workspaceId)}`,
       })
@@ -194,6 +196,8 @@ export function createMergeService(deps: MergeServiceDeps): MergeService {
         return fail({
           code: 'VALIDATION_FAILED',
           message: `Worktree "${worktreeId}" was not found.`,
+          messageKey: 'errorMessage.worktreeNotFound',
+          params: { id: worktreeId },
           retryable: false,
           detail: `MergeService could not resolve worktree id=${JSON.stringify(worktreeId)}`,
         })
@@ -261,6 +265,8 @@ export function createMergeService(deps: MergeServiceDeps): MergeService {
           return fail({
             code: 'VALIDATION_FAILED',
             message: `Worktree "${worktreeId}" was not found.`,
+            messageKey: 'errorMessage.worktreeNotFound',
+            params: { id: worktreeId },
             retryable: false,
             detail: `MergeService lost worktree id=${JSON.stringify(worktreeId)} mid-merge`,
           })
@@ -295,6 +301,8 @@ export function createMergeService(deps: MergeServiceDeps): MergeService {
         return fail({
           code: 'VALIDATION_FAILED',
           message: `Worktree "${worktreeId}" was not found.`,
+          messageKey: 'errorMessage.worktreeNotFound',
+          params: { id: worktreeId },
           retryable: false,
           detail: `MergeService lost worktree id=${JSON.stringify(worktreeId)} mid-merge`,
         })

@@ -9,14 +9,13 @@ import type {
   Workspace,
 } from '@teskra/contracts'
 
+import { createAgentOutputBatcher } from '../agents/agent-output-batcher'
 import type { WorkspaceRepository } from '../db/repositories'
 import type { EventBus } from '../events/event-bus'
 import { type InternalAppError, toPublicError } from '../errors'
+import { getLogger } from '../logger'
 import type { ProcessManager } from '../process/process-manager'
-import {
-  resolveEnvReferencesBestEffort,
-  type CredentialStore,
-} from '../security/credential-store'
+import { resolveEnvReferencesBestEffort, type CredentialStore } from '../security/credential-store'
 import { createWorkspaceRuntime, type WorkspaceRuntime } from '../workspace/runtime'
 
 type TerminalProcesses = Pick<ProcessManager, 'start' | 'write' | 'resize' | 'stop'>
@@ -28,8 +27,8 @@ export interface TerminalManager {
   close(terminalId: string): Promise<IpcResult<void>>
   get(terminalId: string): TerminalSession | undefined
   list(workspaceId?: string): readonly TerminalSession[]
-  /** Unsubscribes from the shared EventBus; it does not kill active terminals. */
-  dispose(): void
+  /** Stops every active terminal process (P0-2 shutdown), then unsubscribes. */
+  dispose(): Promise<void>
 }
 
 export interface TerminalManagerDeps {
@@ -39,6 +38,8 @@ export interface TerminalManagerDeps {
   readonly resolveRuntime?: (workspace: Workspace) => IpcResult<WorkspaceRuntime>
   readonly now?: () => string
   readonly createId?: () => string
+  /** Coalescing window for terminal.output forwarding; defaults to 32ms. */
+  readonly outputBatchMs?: number
   /**
    * TASK-088: workspace env secret refs are resolved through the Credential
    * Store for the terminal process. Unresolvable secrets are omitted (logged
@@ -62,6 +63,8 @@ function terminalNotFound<T>(terminalId: string): IpcResult<T> {
   return fail({
     code: 'TERMINAL_NOT_FOUND',
     message: `Terminal "${terminalId}" is not active.`,
+    messageKey: 'errorMessage.terminalNotActive',
+    params: { id: terminalId },
     retryable: false,
     detail: `terminal registry has no entry for ${JSON.stringify(terminalId)}`,
   })
@@ -76,11 +79,22 @@ export function createTerminalManager(deps: TerminalManagerDeps): TerminalManage
   const resolveRuntime =
     deps.resolveRuntime ?? ((workspace: Workspace) => createWorkspaceRuntime(workspace.runtime))
 
+  // P1-2: bursty PTY fragments (hundreds per second under `npm install`) are
+  // coalesced into one terminal.output per animation-scale window, matching
+  // the AgentOutputBatcher pattern used for agent runs.
+  const outputBatcher = createAgentOutputBatcher(
+    (terminalId, data) => deps.events.emit('terminal.output', { terminalId, data }),
+    deps.outputBatchMs,
+  )
+
   const closeSession = (terminalId: string): void => {
     const session = sessions.get(terminalId)
     if (session === undefined) {
       return
     }
+    // Deliver still-buffered output before terminal.closed so the replay
+    // order (output tail, then exit) survives batching.
+    outputBatcher.flush(terminalId)
     sessions.delete(terminalId)
     terminalByProcess.delete(session.processId)
     deps.events.emit('terminal.closed', { terminalId })
@@ -89,7 +103,7 @@ export function createTerminalManager(deps: TerminalManagerDeps): TerminalManage
   const unsubscribeOutput = deps.events.subscribe('process.output', ({ processId, data }) => {
     const terminalId = terminalByProcess.get(processId)
     if (terminalId !== undefined) {
-      deps.events.emit('terminal.output', { terminalId, data })
+      outputBatcher.push(terminalId, data)
     }
   })
   const unsubscribeExit = deps.events.subscribe('process.exited', ({ processId }) => {
@@ -109,6 +123,8 @@ export function createTerminalManager(deps: TerminalManagerDeps): TerminalManage
         return fail({
           code: 'WORKSPACE_NOT_FOUND',
           message: `Workspace "${request.workspaceId}" was not found.`,
+          messageKey: 'errorMessage.workspaceNotFound',
+          params: { id: request.workspaceId },
           retryable: false,
           detail: `cannot create terminal for missing workspace ${JSON.stringify(request.workspaceId)}`,
         })
@@ -202,9 +218,28 @@ export function createTerminalManager(deps: TerminalManagerDeps): TerminalManage
         : all.filter((session) => session.workspaceId === workspaceId)
     },
 
-    dispose() {
+    async dispose() {
+      // P0-2: quitting must not leak terminal processes. Stop each session
+      // through the interrupt → terminate → kill ladder while the event
+      // subscriptions are still live, so process.exited closes sessions (and
+      // emits terminal.closed) instead of leaving stale state behind.
+      await Promise.all(
+        [...sessions.values()].map(async (session) => {
+          const stopped = await deps.processes.stop(session.processId)
+          if (!stopped.ok) {
+            getLogger('process').error(
+              { terminalId: session.id, error: stopped.error },
+              'Failed to stop a terminal during shutdown.',
+            )
+            closeSession(session.id)
+          }
+        }),
+      )
+      outputBatcher.flushAll()
       unsubscribeOutput()
       unsubscribeExit()
+      sessions.clear()
+      terminalByProcess.clear()
     },
   }
 

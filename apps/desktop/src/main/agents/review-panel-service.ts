@@ -267,7 +267,10 @@ export function createReviewPanelService(deps: ReviewPanelServiceDeps): ReviewPa
       if (parsed.success) {
         aggregate = parsed.data
       } else {
-        logger.warn({ panelId: panel.id }, 'Persisted panel aggregate failed validation; dropping it.')
+        logger.warn(
+          { panelId: panel.id },
+          'Persisted panel aggregate failed validation; dropping it.',
+        )
       }
     }
     return {
@@ -290,7 +293,9 @@ export function createReviewPanelService(deps: ReviewPanelServiceDeps): ReviewPa
    * and scores, and feeding those to another reviewer would break the mutual
    * isolation the panel exists for.
    */
-  const resolveImplementRunId = (request: StartReviewPanelRequest): IpcResult<string | undefined> => {
+  const resolveImplementRunId = (
+    request: StartReviewPanelRequest,
+  ): IpcResult<string | undefined> => {
     if (request.targetRunId !== undefined) {
       const run = deps.runs.getById(request.targetRunId)
       if (!run.ok) return run
@@ -633,7 +638,10 @@ export function createReviewPanelService(deps: ReviewPanelServiceDeps): ReviewPa
       })
       if (!completed.ok) return completed
       if (completed.data === null) {
-        return invalid('The review panel vanished while converging.', `panel ${panelId} update missed`)
+        return invalid(
+          'The review panel vanished while converging.',
+          `panel ${panelId} update missed`,
+        )
       }
       emitPanel(completed.data)
       return assemble(completed.data)

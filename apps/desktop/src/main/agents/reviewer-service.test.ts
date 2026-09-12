@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { IpcResult, WorkbenchEvents, Worktree } from '@teskra/contracts'
+import type { AgentDefinition, IpcResult, WorkbenchEvents, Worktree } from '@teskra/contracts'
 
 import { migrateDatabase } from '../db/migrations'
 import {
@@ -39,7 +39,7 @@ afterEach(() => {
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
-function mockAdapter(definition: typeof CODEX_AGENT | typeof FAKE_AGENT): CodingAgentAdapter {
+function mockAdapter(definition: AgentDefinition): CodingAgentAdapter {
   return {
     definition,
     detect: vi.fn(async ({ runtime }) => ({

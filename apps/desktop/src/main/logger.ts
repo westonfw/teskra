@@ -16,7 +16,16 @@ import { redactSecrets } from './redact'
  *
  * Main process only — the sandboxed preload never touches pino.
  */
-export const LOG_SCOPES = ['app', 'runtime', 'agent', 'process', 'ipc', 'git', 'security', 'memory'] as const
+export const LOG_SCOPES = [
+  'app',
+  'runtime',
+  'agent',
+  'process',
+  'ipc',
+  'git',
+  'security',
+  'memory',
+] as const
 export type LogScope = (typeof LOG_SCOPES)[number]
 
 export interface LoggerFactoryOptions {
@@ -32,7 +41,7 @@ function baseOptions(): LoggerOptions {
     hooks: {
       logMethod(args, method) {
         const redacted = args.map((arg) => redactSecrets(arg))
-        ;(method as (...a: unknown[]) => void).apply(this, redacted)
+        Reflect.apply(method, this, redacted)
       },
     },
   }

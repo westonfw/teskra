@@ -175,7 +175,6 @@ describe('WorkspaceRepository', () => {
     expect(created.data.lastOpenedAt).toBe('2026-09-09T10:00:00.000Z')
   })
 
-
   it('returns VALIDATION_FAILED for corrupted env_json instead of throwing', () => {
     setup()
     repo.create({ id: 'ws-1', name: 'Demo', runtime: { kind: 'windows' }, path: 'C:\\d' })

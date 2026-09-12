@@ -45,9 +45,10 @@ describe('AgentEventRepository', () => {
     expect(events.ok).toBe(true)
     if (!events.ok) return
     expect(events.data.map((event) => event.seq)).toEqual([1, 2])
-    expect(events.data[0].eventType).toBe('run.started')
-    expect(events.data[0].payload).toEqual({ prompt: 'go' })
-    expect(events.data[0].createdAt).toMatch(ISO_UTC_PATTERN)
+    const first = events.data[0]
+    expect(first?.eventType).toBe('run.started')
+    expect(first?.payload).toEqual({ prompt: 'go' })
+    expect(first?.createdAt).toMatch(ISO_UTC_PATTERN)
   })
 
   it('tracks nextSeq per run', () => {

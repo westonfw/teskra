@@ -182,8 +182,7 @@ export function createTaskRepository(connection: Database.Database): TaskReposit
     delete(id) {
       return execute(ENTITY, 'delete', () => {
         return connection.transaction(() => {
-          const deleted =
-            connection.prepare('DELETE FROM tasks WHERE id = ?').run(id).changes > 0
+          const deleted = connection.prepare('DELETE FROM tasks WHERE id = ?').run(id).changes > 0
           // ADR-0008: deleting the task NULLs its criteria sets' task_id
           // (migration 010). Sets still anchored by audit rows (runs /
           // workflow runs / panels / findings) stay so the acceptance

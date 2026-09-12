@@ -8,11 +8,12 @@ import {
 } from '@teskra/contracts'
 
 import type { RuntimeEventSource } from '../runtime/facade'
+import { isAllowedNavigation } from './navigation-policy'
 
 export interface RendererWindowOptions {
   readonly preloadPath: string
   readonly rendererHtmlPath: string
-  readonly rendererUrl?: string
+  readonly rendererUrl?: string | undefined
 }
 
 export interface RendererEventBridge {
@@ -57,6 +58,18 @@ export function createRendererEventBridge(
       window.on('ready-to-show', () => {
         if (!window.isDestroyed()) {
           window.show()
+        }
+      })
+
+      // P1-10: defense-in-depth on top of CSP + sandbox. The renderer must
+      // never open windows, embed webviews, or navigate away from the app.
+      window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+      window.webContents.on('will-attach-webview', (event) => {
+        event.preventDefault()
+      })
+      window.webContents.on('will-navigate', (event) => {
+        if (!isAllowedNavigation(event.url, options.rendererUrl)) {
+          event.preventDefault()
         }
       })
 

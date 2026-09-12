@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, afterEach } from 'vitest'
 
 import type { IpcResult, WorkbenchEvents, Workspace } from '@teskra/contracts'
 
+import { AGENT_OUTPUT_BATCH_MS } from '../agents/agent-output-batcher'
 import { createEventBus, type EventBus } from '../events/event-bus'
 import type {
   ManagedProcess,
@@ -120,6 +121,8 @@ function managerSetup(idValues = ['term-1', 'proc-1', 'term-2', 'proc-2']) {
 }
 
 describe('TerminalManager (TASK-017)', () => {
+  afterEach(() => vi.useRealTimers())
+
   it('creates a PowerShell terminal for a Windows workspace', () => {
     const { events, processFake, manager } = managerSetup()
     const created = vi.fn()
@@ -180,6 +183,7 @@ describe('TerminalManager (TASK-017)', () => {
   })
 
   it('maps process output and natural exit to terminal events', () => {
+    vi.useFakeTimers()
     const { events, manager } = managerSetup()
     const output = vi.fn()
     const closed = vi.fn()
@@ -188,11 +192,56 @@ describe('TerminalManager (TASK-017)', () => {
     const created = manager.create({ workspaceId: 'wsl-ws', shell: 'bash' })
     if (!created.ok) throw new Error('expected terminal')
 
-    events.emit('process.output', { processId: created.data.processId, data: '\u001b[32mok' })
-    expect(output).toHaveBeenCalledWith({ terminalId: created.data.id, data: '\u001b[32mok' })
+    events.emit('process.output', { processId: created.data.processId, data: '\x1b[32mok' })
+    // P1-2: forwarding is batched; nothing is emitted until the batch window closes.
+    expect(output).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(AGENT_OUTPUT_BATCH_MS)
+    expect(output).toHaveBeenCalledWith({ terminalId: created.data.id, data: '\x1b[32mok' })
     events.emit('process.exited', { processId: created.data.processId, exitCode: 0 })
     expect(manager.get(created.data.id)).toBeUndefined()
     expect(closed).toHaveBeenCalledWith({ terminalId: created.data.id })
+  })
+
+  it('coalesces a burst of process output into one terminal.output event (P1-2)', () => {
+    vi.useFakeTimers()
+    const { events, manager } = managerSetup()
+    const output = vi.fn()
+    events.subscribe('terminal.output', output)
+    const created = manager.create({ workspaceId: 'wsl-ws', shell: 'bash' })
+    if (!created.ok) throw new Error('expected terminal')
+
+    for (let index = 0; index < 500; index += 1) {
+      events.emit('process.output', {
+        processId: created.data.processId,
+        data: `chunk-${String(index)}|`,
+      })
+    }
+    vi.advanceTimersByTime(AGENT_OUTPUT_BATCH_MS)
+
+    expect(output).toHaveBeenCalledOnce()
+    const payload = output.mock.calls[0]?.[0] as { terminalId: string; data: string }
+    expect(payload.terminalId).toBe(created.data.id)
+    expect(payload.data.startsWith('chunk-0|')).toBe(true)
+    expect(payload.data.endsWith('chunk-499|')).toBe(true)
+  })
+
+  it('flushes buffered output before terminal.closed so replay order survives exit (P1-2)', () => {
+    vi.useFakeTimers()
+    const { events, manager } = managerSetup()
+    const order: string[] = []
+    const output = vi.fn(() => order.push('output'))
+    events.subscribe('terminal.output', output)
+    events.subscribe('terminal.closed', () => order.push('closed'))
+    const created = manager.create({ workspaceId: 'wsl-ws', shell: 'bash' })
+    if (!created.ok) throw new Error('expected terminal')
+
+    events.emit('process.output', { processId: created.data.processId, data: 'tail' })
+    events.emit('process.exited', { processId: created.data.processId, exitCode: 0 })
+
+    expect(order).toEqual(['output', 'closed'])
+    expect(output).toHaveBeenCalledWith({ terminalId: created.data.id, data: 'tail' })
+    vi.advanceTimersByTime(AGENT_OUTPUT_BATCH_MS * 2)
+    expect(output).toHaveBeenCalledOnce()
   })
 
   it('forwards input and resize to the owning process only', () => {
@@ -223,17 +272,26 @@ describe('TerminalManager (TASK-017)', () => {
     expect(close.ok).toBe(false)
   })
 
-  it('dispose only detaches event forwarding and does not stop active PTYs', () => {
+  it('dispose stops every active terminal process and detaches event forwarding (P0-2)', async () => {
     const { events, processFake, manager } = managerSetup()
     const output = vi.fn()
+    const closed = vi.fn()
     events.subscribe('terminal.output', output)
-    const created = manager.create({ workspaceId: 'wsl-ws', shell: 'bash' })
-    if (!created.ok) throw new Error('expected terminal')
+    events.subscribe('terminal.closed', closed)
+    const first = manager.create({ workspaceId: 'wsl-ws', shell: 'bash' })
+    const second = manager.create({ workspaceId: 'wsl-ws', shell: 'wsl' })
+    if (!first.ok || !second.ok) throw new Error('expected terminals')
 
-    manager.dispose()
-    events.emit('process.output', { processId: created.data.processId, data: 'hidden' })
+    await manager.dispose()
+
+    // Both terminal processes were stopped; their process.exited events closed
+    // the sessions while the subscriptions were still live.
+    expect(processFake.stops).toEqual([first.data.processId, second.data.processId])
+    expect(manager.get(first.data.id)).toBeUndefined()
+    expect(manager.get(second.data.id)).toBeUndefined()
+    expect(closed).toHaveBeenCalledTimes(2)
+
+    events.emit('process.output', { processId: first.data.processId, data: 'hidden' })
     expect(output).not.toHaveBeenCalled()
-    expect(processFake.stops).toEqual([])
-    expect(manager.get(created.data.id)).toEqual(created.data)
   })
 })

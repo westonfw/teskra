@@ -109,8 +109,7 @@ export function buildCommitMessage(input: {
   readonly summary: string
   readonly handoffSummary?: string
 }): string {
-  const scope =
-    input.taskId === undefined ? input.summary : `${input.taskId} ${input.summary}`
+  const scope = input.taskId === undefined ? input.summary : `${input.taskId} ${input.summary}`
   const rawSubject = `agent(${input.agentId}): ${scope}`
   const subject =
     rawSubject.length > SUBJECT_LIMIT ? rawSubject.slice(0, SUBJECT_LIMIT).trimEnd() : rawSubject

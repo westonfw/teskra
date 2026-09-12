@@ -253,16 +253,19 @@ export function createCredentialStore(deps: CredentialStoreDeps): CredentialStor
 
     list() {
       const entries = load()
-      return entries.ok
-        ? { ok: true, data: Object.keys(entries.data).sort() }
-        : entries
+      return entries.ok ? { ok: true, data: Object.keys(entries.data).sort() } : entries
     },
   }
 }
 
+/** Key prefix shared by every credential of one workspace, e.g. `workspace/<id>/`. */
+export function workspaceCredentialKeyPrefix(workspaceId: string): string {
+  return `workspace/${workspaceId}/`
+}
+
 /** Store key for a workspace env secret, e.g. `workspace/<id>/OPENAI_API_KEY`. */
 export function workspaceEnvCredentialKey(workspaceId: string, envKey: string): string {
-  return `workspace/${workspaceId}/${envKey}`
+  return `${workspaceCredentialKeyPrefix(workspaceId)}${envKey}`
 }
 
 /** The non-secret entries of a workspace env map (secret refs dropped). */
@@ -333,7 +336,9 @@ export function resolveEnvReferencesBestEffort(
     return resolved.data
   }
   const plain = plainEnvValues(env)
-  const dropped = Object.keys(env).filter((key) => isWorkspaceSecretRef(env[key] as WorkspaceEnvValue))
+  const dropped = Object.keys(env).filter((key) =>
+    isWorkspaceSecretRef(env[key] as WorkspaceEnvValue),
+  )
   if (dropped.length > 0) {
     getLogger('security').warn(
       { ...logContext, keys: dropped, error: resolved.error },

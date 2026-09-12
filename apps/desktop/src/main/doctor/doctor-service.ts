@@ -96,7 +96,11 @@ function overallSeverity(checks: readonly DoctorCheck[]): DoctorSeverity {
 }
 
 function processMatchesRun(
-  run: { readonly id: string; readonly processId?: string; readonly pid?: number },
+  run: {
+    readonly id: string
+    readonly processId?: string | undefined
+    readonly pid?: number | undefined
+  },
   processes: ReturnType<ProcessManager['list']>,
 ): boolean {
   return processes.some(

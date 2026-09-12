@@ -4,6 +4,7 @@ import type { IpcResult, TerminalShell, WorkspaceRuntimeRef } from '@teskra/cont
 
 import { type InternalAppError, toPublicError } from '../errors'
 import { createTeskraPaths, TESKRA_DATA_DIR, type TeskraPaths } from '../paths'
+import { windowsPathToWsl } from './wsl-paths'
 
 /**
  * WorkspaceRuntime abstraction (TASK-010, teskra-tasks.md; plan §8 / §116.1).
@@ -32,7 +33,7 @@ export interface ShellExecutionContext {
   readonly executable: string
   readonly args: readonly string[]
   /** Omitted when the cwd is encoded in `args` (WSL `--cd` / `bash -lc`). */
-  readonly cwd?: string
+  readonly cwd?: string | undefined
 }
 
 export interface TerminalLaunchSpec {
@@ -99,9 +100,62 @@ export function resolveExecutableLookup(
     : runtime.resolveCommand('which', [command])
 }
 
+/**
+ * True only for a WSL workspace executing through wsl.exe on a Windows host —
+ * the one configuration where host paths and host env vars do not reach the
+ * agent process unchanged. On a Linux/WSL2 dev host a "wsl" workspace IS the
+ * native filesystem (hostNative), so no translation applies.
+ */
+function crossesWslBoundary(runtime: WorkspaceRuntime): boolean {
+  return runtime.ref.kind === 'wsl' && !runtime.hostNative
+}
+
+/**
+ * Maps a host-side path into the form a process inside this runtime can use.
+ * Run files (handoff.json, artifacts/, permission-settings.json) live in the
+ * HOST data root (ADR-0004 2026-09-12: the host writes run logs there and
+ * collects handoffs from there), so a WSL-on-Windows agent must reach them
+ * through the /mnt/<drive> automount — `C:\Users\u\.teskra\…` → `/mnt/c/…`.
+ * Paths that are not drive-letter/UNC Windows paths pass through unchanged,
+ * as does every host-native runtime.
+ */
+export function resolveRuntimePath(runtime: WorkspaceRuntime, hostPath: string): string {
+  if (!crossesWslBoundary(runtime)) {
+    return runtime.ref.kind === 'windows' ? win32.normalize(hostPath) : posix.normalize(hostPath)
+  }
+  return windowsPathToWsl(hostPath) ?? hostPath
+}
+
+/**
+ * Environment variables set on the wsl.exe host process do NOT cross into WSL
+ * unless declared in WSLENV (a colon-separated name list). For a WSL-on-Windows
+ * runtime this returns `env` plus a WSLENV covering every key (merged with any
+ * inherited declaration); host-native runtimes get `env` back untouched.
+ * Values are pre-translated via resolveRuntimePath where they hold paths, so
+ * plain passthrough (no /p flag) is correct here.
+ */
+export function resolveSpawnEnv(
+  runtime: WorkspaceRuntime,
+  env: Readonly<Record<string, string>>,
+  inheritedWslEnv?: string,
+): Record<string, string> {
+  if (!crossesWslBoundary(runtime)) {
+    return { ...env }
+  }
+  const keys = Object.keys(env).filter((key) => key !== 'WSLENV')
+  if (keys.length === 0) {
+    return { ...env }
+  }
+  const existing = env['WSLENV'] ?? inheritedWslEnv
+  const additions = keys.join(':')
+  const wslenv =
+    existing !== undefined && existing.length > 0 ? `${existing}:${additions}` : additions
+  return { ...env, WSLENV: wslenv }
+}
+
 export interface WorkspaceRuntimeDeps {
   /** Host platform override for tests; defaults to process.platform. */
-  readonly hostPlatform?: string
+  readonly hostPlatform?: string | undefined
   /** Host-side data root resolution (TASK-078); defaults to the real module. */
   readonly paths?: TeskraPaths
   /** TASK-011 WSL detection result; absent = unknown → conservative fallback. */
@@ -119,7 +173,7 @@ export function supportsCdFlag(wslVersion: string | undefined): boolean {
   if (segments.length < 2 || segments.some((n) => Number.isNaN(n))) {
     return false
   }
-  const [major, minor] = segments
+  const [major = 0, minor = 0] = segments
   return major > 0 || minor >= 51
 }
 

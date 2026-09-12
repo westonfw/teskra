@@ -23,6 +23,27 @@ describe('toPublicError (teskra-tasks.md §0)', () => {
     expectTypeOf(publicError).not.toHaveProperty('cause')
   })
 
+  it('passes messageKey / params through when present', () => {
+    const publicError = toPublicError(
+      {
+        code: 'WORKSPACE_NOT_FOUND',
+        message: 'Workspace "ws-1" was not found.',
+        messageKey: 'errorMessage.workspaceNotFound',
+        params: { id: 'ws-1' },
+        retryable: false,
+      },
+      'corr-3',
+    )
+    expect(publicError).toEqual({
+      code: 'WORKSPACE_NOT_FOUND',
+      message: 'Workspace "ws-1" was not found.',
+      messageKey: 'errorMessage.workspaceNotFound',
+      params: { id: 'ws-1' },
+      retryable: false,
+    })
+    expect('detail' in publicError).toBe(false)
+  })
+
   it('logs detail / cause with correlationId through the injected logger', () => {
     const records: Array<{ record: Record<string, unknown>; message: string }> = []
     const logger: AppErrorLogger = {

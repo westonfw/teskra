@@ -99,8 +99,20 @@ const DIAMOND_ALL_SKIP = define([
     expression: "seed.outcome == 'yes'",
     runOn: 'always',
   },
-  { id: 'b', type: 'agent', agent: 'fake', dependsOn: [{ node: 'root', on: 'true' }], runOn: 'always' },
-  { id: 'c', type: 'agent', agent: 'fake', dependsOn: [{ node: 'root', on: 'true' }], runOn: 'always' },
+  {
+    id: 'b',
+    type: 'agent',
+    agent: 'fake',
+    dependsOn: [{ node: 'root', on: 'true' }],
+    runOn: 'always',
+  },
+  {
+    id: 'c',
+    type: 'agent',
+    agent: 'fake',
+    dependsOn: [{ node: 'root', on: 'true' }],
+    runOn: 'always',
+  },
   { id: 'd', type: 'agent', agent: 'fake', dependsOn: ['b', 'c'], runOn: 'always' },
 ])
 
@@ -331,6 +343,42 @@ describe('createWorkflowEngine (TASK-057)', () => {
     expect(stepByNode('check').status).toBe('completed')
   })
 
+  it('begin returns the run snapshot immediately while a suspended step parks the pass (P0-4)', async () => {
+    const { engine, run, agent, stepByNode, stepEvents } = setup(CHECKPOINT)
+
+    const begun = engine.begin(run.id, CONTEXT)
+    expect(begun.ok).toBe(true)
+    if (!begun.ok) return
+    // The pass is running, the snapshot is available synchronously — no
+    // waiting on the checkpoint's resolveStep.
+    expect(begun.data.run.status).toBe('running')
+    expect(begun.data.steps.map((step) => step.nodeId).sort()).toEqual(['check', 'impl'])
+
+    agent.complete('impl')
+    await flush()
+    expect(stepByNode('check').status).toBe('running')
+    // Progress is observable through events, not through the return value.
+    expect(stepEvents).toContainEqual({ nodeId: 'check', status: 'running' })
+
+    expect(engine.resolveStep(stepByNode('check').id).ok).toBe(true)
+    await flush()
+    expect(stepByNode('check').status).toBe('completed')
+  })
+
+  it('begin surfaces immediate validation errors instead of starting a pass (P0-4)', async () => {
+    const { engine, run } = setup(CHECKPOINT)
+
+    const missing = engine.begin('no-such-run', CONTEXT)
+    expect(missing.ok).toBe(false)
+
+    const first = engine.begin(run.id, CONTEXT)
+    expect(first.ok).toBe(true)
+    const duplicate = engine.begin(run.id, CONTEXT)
+    expect(duplicate.ok).toBe(false)
+    if (!duplicate.ok) expect(duplicate.error.code).toBe('VALIDATION_FAILED')
+    await engine.dispose()
+  })
+
   it('cancels queued and running steps and invokes executor cancel hooks', async () => {
     const { engine, run, agent, stepByNode } = setup(SEQUENTIAL)
 
@@ -457,13 +505,46 @@ describe('createWorkflowEngine (TASK-057)', () => {
     const pass = engine.start(run.id, CONTEXT)
     expect(stepByNode('a').status).toBe('running')
 
-    engine.dispose()
+    await engine.dispose()
     const finished = await pass
 
     expect(finished.ok).toBe(true)
     expect(agent.cancelled).toHaveLength(2)
     expect(stepByNode('a').status).toBe('cancelled')
     expect(stepByNode('b').status).toBe('cancelled')
+    expect(finished.ok && finished.data.run.status).toBe('cancelled')
+  })
+
+  it('dispose settles only after the per-pass cancels have finished (P2-2)', async () => {
+    const { engine, run, agent, stepByNode } = setup(PARALLEL)
+    // An async executor cancel hook: dispose() must wait it out — the
+    // composition root closes the database right after, and a fire-and-forget
+    // cancel would write to the closed connection.
+    let releaseCancels!: () => void
+    const gate = new Promise<void>((resolve) => {
+      releaseCancels = resolve
+    })
+    agent.executor.cancel = (stepId) => {
+      agent.cancelled.push(stepId)
+      return gate
+    }
+
+    const pass = engine.start(run.id, CONTEXT)
+    expect(stepByNode('a').status).toBe('running')
+
+    let disposed = false
+    const disposing = engine.dispose().then(() => {
+      disposed = true
+    })
+    await flush()
+    expect(agent.cancelled.length).toBeGreaterThan(0)
+    expect(disposed).toBe(false)
+
+    releaseCancels()
+    await disposing
+    expect(disposed).toBe(true)
+    expect(agent.cancelled).toHaveLength(2)
+    const finished = await pass
     expect(finished.ok && finished.data.run.status).toBe('cancelled')
   })
 })

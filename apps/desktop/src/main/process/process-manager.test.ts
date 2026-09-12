@@ -367,4 +367,119 @@ describe('ProcessManager (TASK-014)', () => {
       if (stopped.ok) expect(stopped.data.stage).toBe('interrupt')
     },
   )
+
+  it('declares every env key in WSLENV for a WSL-boundary runtime (P0-1)', () => {
+    const backend = fakePtyBackend()
+    const manager = createProcessManager({
+      events: createEventBus(),
+      spawn: backend.spawn,
+      hostPlatform: 'win32',
+    })
+    // The ambient environment may carry its own WSLENV (e.g. under WSL2);
+    // pin it so the merge is asserted deterministically.
+    const inherited = process.env['WSLENV']
+    process.env['WSLENV'] = 'USER/p'
+    try {
+      // The shared `runtime` fixture is a WSL-on-Windows runtime (hostNative:
+      // false), so env values must be declared in WSLENV to cross into WSL.
+      manager.start({
+        ...request('p1'),
+        env: {
+          TESKRA_HANDOFF_PATH: '/mnt/c/u/.teskra/runs/r1/handoff.json',
+          TESKRA_RUN_ID: 'r1',
+        },
+      })
+
+      const options = backend.calls[0]?.options as { env: Record<string, string> }
+      expect(options.env['TESKRA_HANDOFF_PATH']).toBe('/mnt/c/u/.teskra/runs/r1/handoff.json')
+      expect(options.env['WSLENV']).toBe('USER/p:TESKRA_HANDOFF_PATH:TESKRA_RUN_ID')
+    } finally {
+      if (inherited === undefined) {
+        delete process.env['WSLENV']
+      } else {
+        process.env['WSLENV'] = inherited
+      }
+    }
+  })
+
+  it('leaves env untouched for a host-native runtime (no WSLENV)', () => {
+    const backend = fakePtyBackend()
+    const manager = createProcessManager({
+      events: createEventBus(),
+      spawn: backend.spawn,
+      hostPlatform: 'linux',
+    })
+    const inherited = process.env['WSLENV']
+    delete process.env['WSLENV']
+    try {
+      const nativeRuntime: WorkspaceRuntime = { ...runtime, hostNative: true }
+      manager.start({ ...request('p1'), runtime: nativeRuntime, env: { FOO: 'bar' } })
+
+      const options = backend.calls[0]?.options as { env: Record<string, string> }
+      expect(options.env['FOO']).toBe('bar')
+      expect(options.env['WSLENV']).toBeUndefined()
+    } finally {
+      if (inherited !== undefined) process.env['WSLENV'] = inherited
+    }
+  })
+
+  it('disposeAll stops every active process through the kill ladder (P0-2)', async () => {
+    const backend = fakePtyBackend()
+    const manager = createProcessManager({
+      events: createEventBus(),
+      spawn: backend.spawn,
+      hostPlatform: 'linux',
+    })
+    manager.start(request('p1'))
+    manager.start(request('p2'))
+    const [cooperative, stubborn] = backend.terminals
+    if (cooperative === undefined || stubborn === undefined) throw new Error('expected fake PTYs')
+    cooperative.write = function (data) {
+      this.writes.push(data)
+      if (data === '') this.emitExit(130, 2)
+    }
+    stubborn.kill = function (signal) {
+      this.kills.push(signal)
+      if (signal === 'SIGKILL') this.emitExit(137, 9)
+    }
+
+    const result = await manager.disposeAll(FAST_KILL_POLICY)
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.failed).toEqual([])
+    expect(result.data.stopped.map((entry) => entry.exit.processId).sort()).toEqual(['p1', 'p2'])
+    expect(result.data.stopped.map((entry) => entry.stage).sort()).toEqual(['interrupt', 'kill'])
+    expect(manager.list()).toEqual([])
+
+    // Disposal is idempotent: a second call has nothing left to stop.
+    const again = await manager.disposeAll(FAST_KILL_POLICY)
+    expect(again).toEqual({ ok: true, data: { stopped: [], failed: [] } })
+  })
+
+  it('disposeAll reports stuck processes without blocking the remaining stops (P0-2)', async () => {
+    const backend = fakePtyBackend()
+    const manager = createProcessManager({
+      events: createEventBus(),
+      spawn: backend.spawn,
+      hostPlatform: 'linux',
+    })
+    manager.start(request('p1'))
+    manager.start(request('p2'))
+    // p1's backend never reports exit: its stop times out after force kill.
+    const cooperative = backend.terminals[1]
+    if (cooperative === undefined) throw new Error('expected fake PTYs')
+    cooperative.write = function (data) {
+      this.writes.push(data)
+      if (data === '') this.emitExit(130, 2)
+    }
+
+    const result = await manager.disposeAll(FAST_KILL_POLICY)
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.stopped.map((entry) => entry.exit.processId)).toEqual(['p2'])
+    expect(result.data.failed).toHaveLength(1)
+    expect(result.data.failed[0]).toMatchObject({ id: 'p1', error: { code: 'COMMAND_TIMEOUT' } })
+  })
 })

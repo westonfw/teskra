@@ -31,7 +31,7 @@ import type { EventBus } from '../events/event-bus'
 import { type InternalAppError, toPublicError } from '../errors'
 import { getLogger } from '../logger'
 import { classifyCommand } from './command-classifier'
-import { extractExecutedCommands } from './command-extraction'
+import { createCommandExtractor, type CommandExtractor } from './command-extraction'
 
 /**
  * TASK-065 — PermissionManager (ADR-0002: policy projection + audit, NO
@@ -43,10 +43,15 @@ import { extractExecutedCommands } from './command-extraction'
  *     TeskraPermissionProfile (deny wins on conflict) and reports `ask`
  *     downgrades as notices; `prepareRunPermission` feeds the resolved
  *     profile into the TASK-077 projection before a Run launches.
- *  3. Post-hoc audit: `agent.output` chunks are scanned for prompt lines,
- *     recognized commands are risk-labelled by the TASK-064 classifier and
- *     persisted to `permission_audit` (`detectedAt` = "recognized at", never
- *     "blocked at"). Auditing is best-effort and never blocks the Run.
+ *  3. Post-hoc audit: `agent.output` chunks are scanned for prompt lines and
+ *     for the Agent-specific TUI formats declared on
+ *     `AgentDefinition.auditCommandPatterns` (P1-4), recognized commands are
+ *     risk-labelled by the TASK-064 classifier and persisted to
+ *     `permission_audit` (`detectedAt` = "recognized at", never "blocked
+ *     at"). Recognition is line-based with a per-Run cross-chunk buffer (the
+ *     output batcher cuts at time boundaries) and stays best-effort:
+ *     full-screen TUI redraws may not be recognized, so an empty audit never
+ *     proves no commands ran. Auditing never blocks the Run.
  */
 
 /** Matches a stored rule pattern against a detected command line. */
@@ -54,9 +59,15 @@ export function matchCommandPattern(pattern: string, command: string): boolean {
   const trimmed = pattern.trim()
   if (trimmed.length === 0) return false
   if (trimmed === '*') return true
-  // Trailing star = glob over the literal prefix, word boundary included:
-  // `rm *` matches `rm -rf build` but not `rmdir build`.
-  if (trimmed.endsWith('*')) return command.startsWith(trimmed.slice(0, -1))
+  // Trailing star = glob over the literal prefix with an executable-name word
+  // boundary: the command must start with the prefix and continue at a word
+  // boundary (whitespace or end of line). `rm *` and `rm*` both match
+  // `rm -rf build`; neither matches `rmdir build` (P2-18).
+  if (trimmed.endsWith('*')) {
+    const prefix = trimmed.slice(0, -1)
+    if (prefix.endsWith(' ')) return command.startsWith(prefix)
+    return command === prefix || command.startsWith(`${prefix} `)
+  }
   return command === trimmed || command.startsWith(`${trimmed} `)
 }
 
@@ -82,7 +93,7 @@ export interface AgentPermissionPreparer {
   prepareRunPermission(options: {
     definition: AgentDefinition
     workspaceId: string
-    role?: AgentRole
+    role?: AgentRole | undefined
     approvalMode: ApprovalMode
     runDir: string
   }): IpcResult<PreparedAgentPermission | undefined>
@@ -132,6 +143,12 @@ export function createPermissionManager(deps: PermissionManagerDeps): Permission
   const sessionDecisions = new Map<string, SessionDecisions>()
   /** Commands already audited per Run (the extractor may re-see a line). */
   const auditedCommands = new Map<string, Set<string>>()
+  /**
+   * P1-4: per-Run line-buffered extractors. Created lazily on the Run's first
+   * output chunk from its Agent's `auditCommandPatterns`, flushed and dropped
+   * when the Run ends.
+   */
+  const extractors = new Map<string, CommandExtractor>()
 
   const mergeSession = (
     key: string,
@@ -163,41 +180,75 @@ export function createPermissionManager(deps: PermissionManagerDeps): Permission
     return matches[0]?.id
   }
 
+  const extractorFor = (runId: string): CommandExtractor => {
+    const existing = extractors.get(runId)
+    if (existing !== undefined) return existing
+    const run = deps.runs.getById(runId)
+    const definition =
+      run.ok && run.data !== null ? deps.registry.get(run.data.agentType) : undefined
+    const extractor = createCommandExtractor(definition?.auditCommandPatterns ?? [])
+    extractors.set(runId, extractor)
+    return extractor
+  }
+
+  const auditCommands = (runId: string, commands: readonly string[]): void => {
+    if (commands.length === 0) return
+    const seen = auditedCommands.get(runId) ?? new Set<string>()
+    auditedCommands.set(runId, seen)
+    for (const command of commands) {
+      if (seen.has(command)) continue
+      seen.add(command)
+      const risk = classifyCommand(command)
+      const matchedRuleId = findMatchedRule(runId, command)
+      const recorded = deps.permissions.recordAudit({
+        runId,
+        command,
+        riskLevel: risk,
+        ...(matchedRuleId === undefined ? {} : { matchedRuleId }),
+        detectedAt: now(),
+      })
+      if (!recorded.ok) {
+        logger.error(
+          { runId, error: recorded.error },
+          'Failed to persist a permission audit entry; the Run is unaffected.',
+        )
+        continue
+      }
+      deps.events.emit('permission.audit_recorded', { runId, riskLevel: risk })
+    }
+  }
+
   const auditChunk = (runId: string, data: string): void => {
     try {
-      const commands = extractExecutedCommands(data)
-      if (commands.length === 0) return
-      const seen = auditedCommands.get(runId) ?? new Set<string>()
-      auditedCommands.set(runId, seen)
-      for (const command of commands) {
-        if (seen.has(command)) continue
-        seen.add(command)
-        const risk = classifyCommand(command)
-        const matchedRuleId = findMatchedRule(runId, command)
-        const recorded = deps.permissions.recordAudit({
-          runId,
-          command,
-          riskLevel: risk,
-          ...(matchedRuleId === undefined ? {} : { matchedRuleId }),
-          detectedAt: now(),
-        })
-        if (!recorded.ok) {
-          logger.error(
-            { runId, error: recorded.error },
-            'Failed to persist a permission audit entry; the Run is unaffected.',
-          )
-          continue
-        }
-        deps.events.emit('permission.audit_recorded', { runId, riskLevel: risk })
-      }
+      auditCommands(runId, extractorFor(runId).push(data))
     } catch (cause) {
       logger.error({ runId, cause }, 'Permission audit failed; the Run is unaffected.')
+    }
+  }
+
+  const finishAudit = (runId: string): void => {
+    const extractor = extractors.get(runId)
+    extractors.delete(runId)
+    try {
+      if (extractor !== undefined) {
+        // The last line of a stream often lacks a trailing newline; recognize it.
+        auditCommands(runId, extractor.flush())
+      }
+    } catch (cause) {
+      logger.error({ runId, cause }, 'Permission audit flush failed; the Run is unaffected.')
+    } finally {
+      // P2-3: the per-Run dedupe set would otherwise grow unbounded for the
+      // whole app session — the Run is over, so its entries can never recur.
+      auditedCommands.delete(runId)
     }
   }
 
   const stopAudit = deps.events.subscribe('agent.output', ({ runId, data }) => {
     auditChunk(runId, data)
   })
+  const stopAuditFlush = (
+    ['agent.completed', 'agent.failed', 'agent.cancelled', 'agent.interrupted'] as const
+  ).map((event) => deps.events.subscribe(event, ({ runId }) => finishAudit(runId)))
 
   const resolveProfile = (
     request: ResolvePermissionProfileRequest,
@@ -275,6 +326,20 @@ export function createPermissionManager(deps: PermissionManagerDeps): Permission
     },
 
     createRule(request) {
+      // P1-3: `permission_rules` is the persistent policy store. Ephemeral
+      // grants ('once' / 'session') live in the in-memory sessionDecisions of
+      // `recordDecision`; a persisted row with a non-persistent scope would
+      // silently apply forever — the exact opposite of what the scope
+      // promises — so it is rejected here and `listApplicableRules` ignores
+      // any legacy rows.
+      if (request.scope !== 'persistent') {
+        return fail(
+          invalid(
+            `Permission rules can only be created with scope "persistent"; use a permission decision (allow-once / allow-session) for ephemeral grants.`,
+            `createRule scope=${JSON.stringify(request.scope)}`,
+          ),
+        )
+      }
       if (request.agentType !== undefined && deps.registry.get(request.agentType) === undefined) {
         return fail(
           invalid(
@@ -295,6 +360,16 @@ export function createPermissionManager(deps: PermissionManagerDeps): Permission
     },
 
     updateRule(request) {
+      // P1-3: same scope invariant as createRule — a stored rule may never
+      // become ephemeral; use recordDecision for 'once' / 'session' grants.
+      if (request.scope !== undefined && request.scope !== 'persistent') {
+        return fail(
+          invalid(
+            `Permission rules can only have scope "persistent"; use a permission decision (allow-once / allow-session) for ephemeral grants.`,
+            `updateRule scope=${JSON.stringify(request.scope)}`,
+          ),
+        )
+      }
       const { ruleId, ...patch } = request
       return deps.permissions.updateRule(ruleId, patch)
     },
@@ -386,8 +461,10 @@ export function createPermissionManager(deps: PermissionManagerDeps): Permission
 
     dispose() {
       stopAudit()
+      for (const stop of stopAuditFlush) stop()
       sessionDecisions.clear()
       auditedCommands.clear()
+      extractors.clear()
     },
   }
 

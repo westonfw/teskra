@@ -11,9 +11,19 @@ import type { ErrorCode, PublicAppError } from '@teskra/contracts'
  */
 export interface InternalAppError {
   code: ErrorCode
-  /** User-facing message, safe to display. */
+  /** User-facing message, safe to display. Fallback when messageKey cannot be resolved. */
   message: string
   retryable: boolean
+  /**
+   * Renderer dictionary key (`errorMessage.*` in en-US / zh-CN). New
+   * user-facing errors SHOULD set this so localized UIs can translate the
+   * message; every key used in src/main is asserted against both dictionaries
+   * by src/error-message-keys.test.ts, so adding a key without dictionary
+   * entries fails the test suite.
+   */
+  messageKey?: string
+  /** Interpolation params for messageKey — string/number values only. */
+  params?: Record<string, string | number>
   /** Paths, command lines, stderr — log only, never sent to the Renderer. */
   detail?: string
   /** Original exception — log only, never sent to the Renderer. */
@@ -51,5 +61,13 @@ export function toPublicError(error: InternalAppError, correlationId?: string): 
     },
     error.message,
   )
-  return { code: error.code, message: error.message, retryable: error.retryable }
+  return {
+    code: error.code,
+    message: error.message,
+    retryable: error.retryable,
+    // Optional i18n fields are only attached when present, so errors without
+    // a messageKey keep the exact legacy shape over IPC.
+    ...(error.messageKey === undefined ? {} : { messageKey: error.messageKey }),
+    ...(error.params === undefined ? {} : { params: error.params }),
+  }
 }

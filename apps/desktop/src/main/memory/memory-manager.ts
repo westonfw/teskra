@@ -73,8 +73,8 @@ export interface MemoryManagerDeps {
   readonly memory: MemoryRepository
   readonly workspaces: WorkspaceRepository
   readonly paths: TeskraPaths
-  readonly createId?: () => string
-  readonly now?: () => string
+  readonly createId?: (() => string) | undefined
+  readonly now?: (() => string) | undefined
   /** File read seam for tests; defaults to node:fs (utf-8, throws ENOENT). */
   readonly readFile?: (path: string) => string
   /** Directory listing seam for tests; defaults to node:fs (throws ENOENT). */
@@ -142,8 +142,7 @@ export function createMemoryManager(deps: MemoryManagerDeps): MemoryManager {
   const now = deps.now ?? (() => new Date().toISOString())
   const readFile = deps.readFile ?? ((path: string) => readFileSync(path, 'utf8'))
   const listDir = deps.listDir ?? ((path: string) => readdirSync(path))
-  const modifiedAt =
-    deps.modifiedAt ?? ((path: string) => statSync(path).mtime.toISOString())
+  const modifiedAt = deps.modifiedAt ?? ((path: string) => statSync(path).mtime.toISOString())
 
   const requireWorkspace = (workspaceId: string): IpcResult<Workspace> => {
     const workspace = deps.workspaces.getById(workspaceId)
@@ -250,7 +249,10 @@ export function createMemoryManager(deps: MemoryManagerDeps): MemoryManager {
       if (containsSecretValue(content)) {
         return secretRefusal('create')
       }
-      return deps.memory.create({ id: createId(), workspaceId, type, content, source: 'manual' }, now())
+      return deps.memory.create(
+        { id: createId(), workspaceId, type, content, source: 'manual' },
+        now(),
+      )
     },
 
     update({ id, type, content }) {

@@ -26,7 +26,8 @@ function mockCipher(available = true): CredentialCipher {
       if (!available) throw new Error('cipher unavailable')
       return `enc:${Buffer.from(plaintext, 'utf8').toString('base64')}`
     },
-    decrypt: (ciphertext) => Buffer.from(ciphertext.slice('enc:'.length), 'base64').toString('utf8'),
+    decrypt: (ciphertext) =>
+      Buffer.from(ciphertext.slice('enc:'.length), 'base64').toString('utf8'),
   }
 }
 

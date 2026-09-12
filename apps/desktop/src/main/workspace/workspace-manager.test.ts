@@ -212,7 +212,8 @@ describe('WorkspaceManager.validate', () => {
   })
 })
 
-describe('WorkspaceManager.remove / listRecent', () => {  it('removes a workspace and reports unknown ids', () => {
+describe('WorkspaceManager.remove / listRecent', () => {
+  it('removes a workspace and reports unknown ids', () => {
     const dir = makeTempDir('project')
     const opened = manager.open({ runtime: nativeRuntime, path: dir })
     if (!opened.ok) throw new Error('open should succeed')
@@ -263,9 +264,8 @@ describe('WorkspaceManager env secret diversion (TASK-088)', () => {
   }
 
   function rawEnvJson(id: string): string | null {
-    const row = connection
-      .prepare('SELECT env_json FROM workspaces WHERE id = ?')
-      .get(id) as { env_json: string | null } | undefined
+    const row = connection.prepare('SELECT env_json FROM workspaces WHERE id = ?').get(id) as
+      { env_json: string | null } | undefined
     return row?.env_json ?? null
   }
 
@@ -332,5 +332,91 @@ describe('WorkspaceManager env secret diversion (TASK-088)', () => {
     expect(created.ok).toBe(true)
     if (!created.ok) return
     expect(created.data.env).toEqual({ PLAIN_VAR: 'visible' })
+  })
+
+  it('remove() deletes the workspace Credential Store entries (P2-5)', () => {
+    const { manager: secureManager, store } = managerWithCredentials()
+    const first = secureManager.create({
+      name: 'One',
+      runtime: { kind: 'wsl', distro: 'Ubuntu-24.04' },
+      path: '/home/user/one',
+      env: { OPENAI_API_KEY: 'sk-test-secret-123' },
+    })
+    const second = secureManager.create({
+      name: 'Two',
+      runtime: { kind: 'wsl', distro: 'Ubuntu-24.04' },
+      path: '/home/user/two',
+      env: { OPENAI_API_KEY: 'sk-test-secret-456' },
+    })
+    if (!first.ok || !second.ok) throw new Error('create should succeed')
+
+    expect(secureManager.remove(first.data.id)).toEqual({ ok: true, data: true })
+    // Only the removed workspace's entries are gone; the survivor's stay.
+    expect(store.list()).toEqual({
+      ok: true,
+      data: [`workspace/${second.data.id}/OPENAI_API_KEY`],
+    })
+    // Removing an unknown id touches nothing.
+    expect(secureManager.remove('no-such-id')).toEqual({ ok: true, data: false })
+    expect(store.list()).toEqual({
+      ok: true,
+      data: [`workspace/${second.data.id}/OPENAI_API_KEY`],
+    })
+  })
+
+  it('rolls back partially written secrets when a later diversion write fails (P2-5)', () => {
+    const paths = createTeskraPaths()
+    let encryptions = 0
+    const flakyCipher: CredentialCipher = {
+      isAvailable: () => true,
+      encrypt: (plaintext) => {
+        encryptions += 1
+        if (encryptions === 2) throw new Error('cipher blew up mid-write')
+        return `enc:${Buffer.from(plaintext, 'utf8').toString('base64')}`
+      },
+      decrypt: (ciphertext) =>
+        Buffer.from(ciphertext.slice('enc:'.length), 'base64').toString('utf8'),
+    }
+    const store = createCredentialStore({ paths, cipher: flakyCipher })
+    const flakyManager = createWorkspaceManager(createWorkspaceRepository(connection), {
+      now: () => `2026-09-09T10:00:${String(tick++).padStart(2, '0')}.000Z`,
+      credentials: store,
+    })
+
+    const created = flakyManager.create({
+      name: 'Flaky',
+      runtime: { kind: 'wsl', distro: 'Ubuntu-24.04' },
+      path: '/home/user/flaky',
+      env: { FIRST_API_KEY: 'sk-test-secret-123', SECOND_API_KEY: 'sk-test-secret-456' },
+    })
+    expect(created.ok).toBe(false)
+    // The first secret was written before the failure; the rollback removed
+    // it, so no half-written credentials survive.
+    expect(store.list()).toEqual({ ok: true, data: [] })
+    expect(flakyManager.listRecent(10)).toEqual({ ok: true, data: [] })
+  })
+
+  it('drops diverted secrets when the workspace insert itself fails (P2-5)', () => {
+    const { manager: secureManager, store } = managerWithCredentials()
+    connection
+      .prepare(
+        `CREATE TRIGGER fail_workspace_insert BEFORE INSERT ON workspaces
+         BEGIN SELECT RAISE(FAIL, 'insert blocked by test'); END`,
+      )
+      .run()
+    try {
+      const created = secureManager.create({
+        name: 'Doomed',
+        runtime: { kind: 'wsl', distro: 'Ubuntu-24.04' },
+        path: '/home/user/doomed',
+        env: { OPENAI_API_KEY: 'sk-test-secret-123' },
+      })
+      expect(created.ok).toBe(false)
+      // The INSERT failed after the secret was diverted; the orphaned
+      // credential must not survive.
+      expect(store.list()).toEqual({ ok: true, data: [] })
+    } finally {
+      connection.prepare('DROP TRIGGER fail_workspace_insert').run()
+    }
   })
 })

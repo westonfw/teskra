@@ -40,7 +40,7 @@ export type CommandOutputEncoding = 'utf8' | 'utf16le'
 export interface CommandRequest {
   readonly command: string
   readonly args?: readonly string[]
-  readonly cwd?: string
+  readonly cwd?: string | undefined
   /**
    * REQUIRED (plan §150): hard ceiling for the whole command. On expiry the
    * process tree is killed and the result is a COMMAND_TIMEOUT error.
@@ -77,7 +77,9 @@ export interface CommandRunner {
 
 export interface CommandRunnerDeps {
   /** Kill-semantics switch; defaults to process.platform (tests override). */
-  readonly hostPlatform?: string
+  readonly hostPlatform?: string | undefined
+  /** Tree-kill seam for tests; defaults to the platform killProcessTree. */
+  readonly killTree?: (child: ChildProcess, hostPlatform: string) => void
 }
 
 export const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024
@@ -130,16 +132,22 @@ function killProcessTree(child: ChildProcess, hostPlatform: string): void {
 
 interface ActiveChild {
   child: ChildProcess
+  /** P2-6: the tree-kill itself must be idempotent — settle() already is. */
+  killed: boolean
   settle(outcome: IpcResult<CommandResult>): void
 }
 
 export function createCommandRunner(deps: CommandRunnerDeps = {}): CommandRunner {
   const hostPlatform = deps.hostPlatform ?? process.platform
+  const killTree = deps.killTree ?? killProcessTree
   const logger = getLogger('process')
 
   /** Kill the tree exactly once and settle with the given error. */
   const terminate = (active: ActiveChild, error: InternalAppError): void => {
-    killProcessTree(active.child, hostPlatform)
+    if (!active.killed) {
+      active.killed = true
+      killTree(active.child, hostPlatform)
+    }
     active.settle({ ok: false, error: toPublicError(error) })
   }
 
@@ -173,6 +181,7 @@ export function createCommandRunner(deps: CommandRunnerDeps = {}): CommandRunner
         let settled = false
         const active: ActiveChild = {
           child: undefined as unknown as ChildProcess,
+          killed: false,
           settle(outcome) {
             if (settled) {
               return

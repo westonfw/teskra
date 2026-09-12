@@ -20,7 +20,8 @@ let connection: Database.Database | undefined
 afterEach(() => {
   connection?.close()
   connection = undefined
-  for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  for (const home of homes.splice(0))
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 interface Fixture {

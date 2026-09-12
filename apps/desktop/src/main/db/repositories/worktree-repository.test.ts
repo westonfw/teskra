@@ -139,10 +139,7 @@ describe('WorktreeRepository', () => {
     const visible = repo.listByWorkspace('ws-1')
     expect(visible.ok && visible.data.map((wt) => wt.id)).toEqual(['wt-1'])
     const withArchived = repo.listByWorkspace('ws-1', undefined, true)
-    expect(withArchived.ok && withArchived.data.map((wt) => wt.id).sort()).toEqual([
-      'wt-1',
-      'wt-2',
-    ])
+    expect(withArchived.ok && withArchived.data.map((wt) => wt.id).sort()).toEqual(['wt-1', 'wt-2'])
     // The state filter composes with the archive filter.
     const archivedReady = repo.listByWorkspace('ws-1', 'ready', true)
     expect(archivedReady.ok && archivedReady.data.length).toBe(2)

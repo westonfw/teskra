@@ -56,7 +56,7 @@ describe('PermissionRepository', () => {
 
   it('listApplicableRules matches global + workspace + agent wildcards', () => {
     setup()
-    repo.createRule({ id: 'g-1', commandPattern: 'sudo *', action: 'ask', scope: 'once' })
+    repo.createRule({ id: 'g-1', commandPattern: 'sudo *', action: 'ask', scope: 'persistent' })
     repo.createRule({
       id: 'w-1',
       workspaceId: 'ws-1',
@@ -70,7 +70,7 @@ describe('PermissionRepository', () => {
       agentType: 'codex',
       commandPattern: 'git push',
       action: 'audit',
-      scope: 'session',
+      scope: 'persistent',
     })
     repo.createRule({
       id: 'other-ws',
@@ -88,6 +88,36 @@ describe('PermissionRepository', () => {
 
     const globals = repo.listApplicableRules()
     expect(globals.ok && globals.data.map((rule) => rule.id)).toEqual(['g-1'])
+  })
+
+  it('listApplicableRules only returns persistent rules (P1-3: ephemeral grants never come from this table)', () => {
+    setup()
+    // Non-persistent rows can still exist (written before the P1-3 fix); they
+    // must be inert rather than apply forever.
+    repo.createRule({
+      id: 'legacy-once',
+      commandPattern: 'npm test',
+      action: 'allow',
+      scope: 'once',
+    })
+    repo.createRule({
+      id: 'legacy-session',
+      commandPattern: 'git push',
+      action: 'allow',
+      scope: 'session',
+    })
+    repo.createRule({
+      id: 'current',
+      commandPattern: 'npm run build',
+      action: 'allow',
+      scope: 'persistent',
+    })
+
+    const listed = repo.listApplicableRules('ws-1', 'codex')
+    expect(listed.ok && listed.data.map((rule) => rule.id)).toEqual(['current'])
+    // The legacy rows are still stored and readable by id — only their
+    // applicability changed.
+    expect(repo.getRuleById('legacy-once').ok).toBe(true)
   })
 
   it('updates and deletes rules', () => {

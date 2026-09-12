@@ -8,6 +8,7 @@ import {
   type WorkbenchEventEnvelope,
 } from '@teskra/contracts'
 import { createRendererEventSubscriptions } from './event-subscriptions'
+import { APP_VERSION } from '../main/build-info'
 
 // The preload bundle is self-contained under sandbox:true. Renderer code gets
 // domain methods only — never ipcRenderer and never a generic exec(channel).
@@ -24,7 +25,7 @@ const eventSubscriptions = createRendererEventSubscriptions((listener) => {
 
 const bridge: TeskraBridge = {
   appName: 'Teskra',
-  appVersion: '0.1.0',
+  appVersion: APP_VERSION,
   ping: () => invoke(IPC_CHANNELS.ping),
   workspace: {
     create: (request) => invoke(IPC_CHANNELS.workspaceCreate, request),
@@ -121,6 +122,7 @@ const bridge: TeskraBridge = {
     log: (request) => invoke(IPC_CHANNELS.gitLog, request),
     commit: (request) => invoke(IPC_CHANNELS.gitCommit, request),
     changes: (request) => invoke(IPC_CHANNELS.gitChanges, request),
+    filePatch: (request) => invoke(IPC_CHANNELS.gitFilePatch, request),
     openFile: (request) => invoke(IPC_CHANNELS.gitOpenFile, request),
   },
   worktree: {

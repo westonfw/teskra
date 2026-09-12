@@ -317,6 +317,11 @@ describe('RetentionService (TASK-069)', () => {
     const kinds = report.entries.map((entry) => [entry.item.runId, entry.action])
     expect(kinds).toEqual([['run-old', 'deleted']])
 
+    // P2-17: the audit detail names the collected files by basename — on
+    // Windows a POSIX-split would leak the whole path into the audit entry.
+    expect(report.entries[0]?.detail).toBe('removed events.jsonl + terminal.log')
+    expect(report.entries[0]?.detail).not.toContain(old.runDir)
+
     expect(existsSync(old.files.events)).toBe(false)
     expect(existsSync(old.files.terminal)).toBe(false)
     expect(existsSync(old.files.manifest)).toBe(true)
@@ -421,6 +426,25 @@ describe('RetentionService (TASK-069)', () => {
     expect(requireOk(fixture.service.cancel())).toBe(false)
   })
 
+  it('dispose aborts the in-flight run and waits for it to settle (P2-1)', async () => {
+    const fixture = await setup()
+    createRunRecord(fixture, 'run-1', { finishedDaysAgo: 40 })
+
+    const pending = fixture.service.run({})
+    await fixture.service.dispose()
+
+    const report = requireOk(await pending)
+    expect(report.cancelled).toBe(true)
+    // The abort landed before the first item: nothing was collected.
+    expect(report.entries.every((entry) => entry.action === 'skipped')).toBe(true)
+
+    // Shutdown is idempotent and leaves the service reusable.
+    await fixture.service.dispose()
+    expect(requireOk(fixture.service.cancel())).toBe(false)
+    const rerun = requireOk(await fixture.service.run({}))
+    expect(rerun.cancelled).toBe(false)
+  })
+
   it('audits every deletion (what, why, when) and is idempotent', async () => {
     const fixture = await setup()
     const worktree = await createWorktreeWithCommit(fixture, 'run-1', 'a.txt')
@@ -477,6 +501,88 @@ describe('RetentionService (TASK-069)', () => {
     ])
     expect(existsSync(old.files.events)).toBe(true)
     expect(existsSync(old.files.terminal)).toBe(true)
+  })
+
+  it('never recursively deletes a run directory outside <dataRoot>/runs (P1-7)', async () => {
+    const fixture = await setup()
+    const worktree = await createWorktreeWithCommit(fixture, 'run-foreign', 'foreign.txt')
+    // A runDir pointing outside the Teskra data root — e.g. a row created
+    // under a different TESKRA_HOME, or a hand-edited DB value.
+    const foreignDir = join(fixture.repoDir, '..', 'foreign-run-dir')
+    mkdirSync(foreignDir, { recursive: true })
+    writeFileSync(join(foreignDir, 'keep-me.txt'), 'precious\n')
+    const created = fixture.runs.create({
+      id: 'run-foreign',
+      workspaceId: WORKSPACE_ID,
+      agentType: 'fake-agent',
+      executionMode: 'attended',
+      runDir: foreignDir,
+      status: 'cancelled',
+      startedAt: daysAgo(40),
+    })
+    if (!created.ok) throw new Error(created.error.message)
+    requireOk(fixture.runs.update('run-foreign', { finishedAt: daysAgo(40) }, daysAgo(40)))
+    requireOk(await fixture.manager.discard({ worktreeId: worktree.id, confirm: true }))
+    requireOk(
+      fixture.worktrees.update(worktree.id, { discardedAt: daysAgo(40) }, new Date().toISOString()),
+    )
+
+    const report = requireOk(await fixture.service.run())
+    const entry = report.entries.find(
+      (candidate) =>
+        candidate.item.runId === 'run-foreign' && candidate.item.kind === 'discarded-run',
+    )
+    // The foreign directory survives; the audit entry says why.
+    expect(existsSync(join(foreignDir, 'keep-me.txt'))).toBe(true)
+    expect(entry?.detail).toContain('outside the Teskra data root')
+
+    // A legitimate run directory under <dataRoot>/runs is still collected.
+    const worktreeLocal = await createWorktreeWithCommit(fixture, 'run-local', 'local.txt')
+    createRunRecord(fixture, 'run-local', { status: 'cancelled', finishedDaysAgo: 40 })
+    requireOk(await fixture.manager.discard({ worktreeId: worktreeLocal.id, confirm: true }))
+    requireOk(
+      fixture.worktrees.update(
+        worktreeLocal.id,
+        { discardedAt: daysAgo(40) },
+        new Date().toISOString(),
+      ),
+    )
+
+    const second = requireOk(await fixture.service.run())
+    const localEntry = second.entries.find(
+      (candidate) =>
+        candidate.item.runId === 'run-local' && candidate.item.kind === 'discarded-run',
+    )
+    expect(localEntry?.action).toBe('deleted')
+    expect(localEntry?.detail).toContain('run directory')
+    expect(existsSync(join(fixture.dataRoot, 'runs', 'run-local'))).toBe(false)
+  })
+
+  it('skips log GC when the run directory is outside the data root (P1-7)', async () => {
+    const fixture = await setup()
+    const foreignDir = join(fixture.repoDir, '..', 'foreign-logs')
+    mkdirSync(foreignDir, { recursive: true })
+    writeFileSync(join(foreignDir, 'events.jsonl'), '{"seq":1}\n')
+    writeFileSync(join(foreignDir, 'terminal.log'), 'terminal-bytes\n')
+    const created = fixture.runs.create({
+      id: 'run-foreign-logs',
+      workspaceId: WORKSPACE_ID,
+      agentType: 'fake-agent',
+      executionMode: 'attended',
+      runDir: foreignDir,
+      status: 'completed',
+      startedAt: daysAgo(45),
+    })
+    if (!created.ok) throw new Error(created.error.message)
+    requireOk(fixture.runs.update('run-foreign-logs', { finishedAt: daysAgo(45) }, daysAgo(45)))
+
+    const report = requireOk(await fixture.service.run())
+    expect(report.entries.map((entry) => [entry.item.runId, entry.action])).toEqual([
+      ['run-foreign-logs', 'skipped'],
+    ])
+    expect(report.entries[0]?.detail).toContain('outside the Teskra data root')
+    expect(existsSync(join(foreignDir, 'events.jsonl'))).toBe(true)
+    expect(existsSync(join(foreignDir, 'terminal.log'))).toBe(true)
   })
 
   it('respects per-call workspace scoping and retention thresholds', async () => {

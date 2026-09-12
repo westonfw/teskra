@@ -22,7 +22,8 @@ const homes: string[] = []
 
 afterEach(() => {
   for (const database of databases.splice(0)) database.close()
-  for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  for (const home of homes.splice(0))
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 interface Fixture {
@@ -65,13 +66,11 @@ function setup(): Fixture {
   const paths = createTeskraPaths({ TESKRA_HOME: join(home, 'data') })
   const runs = createAgentRunRepository(database)
   const worktrees = createWorktreeRepository(database)
-  const resume = vi.fn(
-    async (): Promise<IpcResult<AgentRun>> => {
-      const run = runs.getById('run-1')
-      if (!run.ok || run.data === null) throw new Error('fixture run missing')
-      return { ok: true, data: run.data }
-    },
-  )
+  const resume = vi.fn(async (): Promise<IpcResult<AgentRun>> => {
+    const run = runs.getById('run-1')
+    if (!run.ok || run.data === null) throw new Error('fixture run missing')
+    return { ok: true, data: run.data }
+  })
 
   const service: Fixture['service'] = (overrides = {}, branch = {}) =>
     createResumeService({
@@ -109,9 +108,7 @@ function setup(): Fixture {
     })
     if (!run.ok) throw new Error(run.error.message)
     const updated = runs.update('run-1', {
-      ...(overrides.status === undefined
-        ? {}
-        : { status: overrides.status as AgentRun['status'] }),
+      ...(overrides.status === undefined ? {} : { status: overrides.status as AgentRun['status'] }),
       ...(overrides.processId === undefined ? {} : { processId: overrides.processId }),
       ...(overrides.pid === undefined ? {} : { pid: overrides.pid }),
     })
@@ -280,7 +277,10 @@ describe('ResumeService (TASK-042)', () => {
 
     expect(result).toMatchObject({
       ok: false,
-      error: { code: 'VALIDATION_FAILED', message: 'The Run worktree is not in a resumable state.' },
+      error: {
+        code: 'VALIDATION_FAILED',
+        message: 'The Run worktree is not in a resumable state.',
+      },
     })
     expect(fixture.resume).not.toHaveBeenCalled()
   })

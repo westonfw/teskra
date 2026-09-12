@@ -131,10 +131,10 @@ export interface WorkspaceDraft {
   readonly name: string
   readonly runtime: WorkspaceRuntimeRef
   readonly path: string
-  readonly gitRoot?: string
-  readonly defaultBranch?: string
+  readonly gitRoot?: string | undefined
+  readonly defaultBranch?: string | undefined
   /** Non-sensitive env vars only; secrets go through the Credential Store. */
-  readonly env?: Record<string, string>
+  readonly env?: Record<string, string> | undefined
 }
 
 const workspaceDraftSchema = z.strictObject({

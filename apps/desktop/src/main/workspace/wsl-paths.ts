@@ -27,6 +27,9 @@ export function windowsPathToWsl(path: string): string | null {
     return null
   }
   const [, letter, rest] = drive
+  if (letter === undefined || rest === undefined) {
+    return null
+  }
   const suffix = rest.replaceAll('\\', '/').replace(/\/+$/, '')
   return suffix.length > 0
     ? `/mnt/${letter.toLowerCase()}/${suffix}`
@@ -40,6 +43,9 @@ export function wslPathToWindows(path: string): string | null {
     return null
   }
   const [, letter, rest] = mnt
+  if (letter === undefined) {
+    return null
+  }
   const drive = `${letter.toUpperCase()}:\\`
   return rest === undefined || rest.length === 0 ? drive : `${drive}${rest.replaceAll('/', '\\')}`
 }

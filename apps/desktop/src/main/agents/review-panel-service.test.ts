@@ -35,7 +35,8 @@ const directories: string[] = []
 
 afterEach(() => {
   for (const database of databases.splice(0)) database.close()
-  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  for (const directory of directories.splice(0))
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 function requireOk<T>(result: IpcResult<T>): T {
@@ -137,7 +138,7 @@ function setup(options: { policy?: ReviewAggregationPolicy } = {}): Fixture {
   let runTick = 0
   let clockTick = 0
   const service = createReviewPanelService({
-    registry: { get: (id: string) => (id === 'ghost' ? undefined : ({ id }) as never) },
+    registry: { get: (id: string) => (id === 'ghost' ? undefined : ({ id } as never)) },
     reviewer,
     agents: { cancel },
     runs,
@@ -156,7 +157,12 @@ function setup(options: { policy?: ReviewAggregationPolicy } = {}): Fixture {
     now: () => `2026-09-10T00:10:${String(clockTick++).padStart(2, '0')}.000Z`,
     ...(options.policy === undefined
       ? {}
-      : { resolvePolicy: () => ({ ok: true as const, data: options.policy as ReviewAggregationPolicy }) }),
+      : {
+          resolvePolicy: () => ({
+            ok: true as const,
+            data: options.policy as ReviewAggregationPolicy,
+          }),
+        }),
   })
 
   return { service, events, runs, reviews, handoffs, worktrees, reviewerCalls, cancel, failAgents }
@@ -623,10 +629,9 @@ describe('ReviewPanelService aggregation (TASK-061)', () => {
   })
 
   it('applies the configured medium threshold from the resolved policy', async () => {
-    const below = await runPanel(
-      setup({ policy: { mediumBlockThreshold: 2 } }),
-      [{ agent: 'claude', severity: 'medium', title: 'dup' }],
-    )
+    const below = await runPanel(setup({ policy: { mediumBlockThreshold: 2 } }), [
+      { agent: 'claude', severity: 'medium', title: 'dup' },
+    ])
     expect(below.panel.aggregate?.verdict).toBe('pass')
 
     const at = await runPanel(setup({ policy: { mediumBlockThreshold: 2 } }), [

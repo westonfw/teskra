@@ -213,8 +213,7 @@ export function createReviewerService(deps: ReviewerServiceDeps): ReviewerServic
           ? {}
           : { TESKRA_REVIEW_TARGET_RUN_ID: target.data.runId }),
       }
-      const environmentField =
-        Object.keys(environment).length === 0 ? {} : { environment }
+      const environmentField = Object.keys(environment).length === 0 ? {} : { environment }
 
       if (definition.capabilities.readOnlyMode) {
         const isolation = worktree === null ? 'shared-readonly' : 'worktree-readonly'

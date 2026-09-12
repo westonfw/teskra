@@ -5,6 +5,8 @@ import {
   createWorkspaceRuntime,
   quoteShellArg,
   resolveExecutableLookup,
+  resolveRuntimePath,
+  resolveSpawnEnv,
   supportsCdFlag,
   type WorkspaceRuntimeDeps,
 } from './runtime'
@@ -34,7 +36,6 @@ function stubPaths(): TeskraPaths {
         artifacts: `${HOST_HOME}/runs/${runId}/artifacts`,
       },
     }),
-    worktreeRoot: (wsId) => ({ ok: true, data: `${HOST_HOME}/worktrees/${wsId}` }),
     config: () => `${HOST_HOME}/config.json`,
     credentials: () => `${HOST_HOME}/credentials.json`,
     repoConfig: (repoRoot) => `${repoRoot}/.teskra/config.json`,
@@ -60,6 +61,82 @@ describe('supportsCdFlag', () => {
     expect(supportsCdFlag('0.50.2')).toBe(false)
     expect(supportsCdFlag(undefined)).toBe(false)
     expect(supportsCdFlag('not-a-version')).toBe(false)
+  })
+})
+
+describe('resolveRuntimePath / resolveSpawnEnv (P0-1)', () => {
+  function wslRuntime() {
+    const result = createWorkspaceRuntime(
+      { kind: 'wsl', distro: 'Ubuntu-24.04' },
+      deps({ wsl: { available: true, version: '2.4.11.0' } }),
+    )
+    if (!result.ok) throw new Error('expected WSL runtime')
+    return result.data
+  }
+
+  it('maps host drive-letter paths onto the WSL /mnt automount', () => {
+    const runtime = wslRuntime()
+    expect(resolveRuntimePath(runtime, 'C:\\Users\\u\\.teskra\\runs\\r1\\handoff.json')).toBe(
+      '/mnt/c/Users/u/.teskra/runs/r1/handoff.json',
+    )
+    // Already-runtime-side (or otherwise non-Windows) paths pass through.
+    expect(resolveRuntimePath(runtime, '/home/u/.teskra/runs/r1/handoff.json')).toBe(
+      '/home/u/.teskra/runs/r1/handoff.json',
+    )
+  })
+
+  it('passes paths through for host-native runtimes', () => {
+    const windows = createWorkspaceRuntime({ kind: 'windows' }, deps())
+    if (!windows.ok) throw new Error('expected Windows runtime')
+    expect(resolveRuntimePath(windows.data, 'C:\\Users\\u\\.teskra\\runs\\r1')).toBe(
+      'C:\\Users\\u\\.teskra\\runs\\r1',
+    )
+    const native = createWorkspaceRuntime(
+      { kind: 'wsl', distro: 'Ubuntu-24.04' },
+      deps({ hostPlatform: 'linux' }),
+    )
+    if (!native.ok) throw new Error('expected native runtime')
+    expect(resolveRuntimePath(native.data, '/home/u/.teskra/runs/r1')).toBe(
+      '/home/u/.teskra/runs/r1',
+    )
+  })
+
+  it('declares every env key in WSLENV for WSL-on-Windows', () => {
+    const runtime = wslRuntime()
+    expect(
+      resolveSpawnEnv(runtime, {
+        TESKRA_HANDOFF_PATH: '/mnt/c/u/.teskra/runs/r1/handoff.json',
+        TESKRA_RUN_ID: 'r1',
+      }),
+    ).toEqual({
+      TESKRA_HANDOFF_PATH: '/mnt/c/u/.teskra/runs/r1/handoff.json',
+      TESKRA_RUN_ID: 'r1',
+      WSLENV: 'TESKRA_HANDOFF_PATH:TESKRA_RUN_ID',
+    })
+  })
+
+  it('merges an inherited WSLENV declaration instead of clobbering it', () => {
+    const runtime = wslRuntime()
+    expect(resolveSpawnEnv(runtime, { TESKRA_RUN_ID: 'r1' }, 'USERPROFILE/p')).toEqual({
+      TESKRA_RUN_ID: 'r1',
+      WSLENV: 'USERPROFILE/p:TESKRA_RUN_ID',
+    })
+    // An explicit WSLENV in the request wins over the inherited one and is
+    // not re-declared as a value key.
+    expect(
+      resolveSpawnEnv(runtime, { WSLENV: 'FOO', TESKRA_RUN_ID: 'r1' }, 'USERPROFILE/p'),
+    ).toEqual({ WSLENV: 'FOO:TESKRA_RUN_ID', TESKRA_RUN_ID: 'r1' })
+  })
+
+  it('leaves env untouched (no WSLENV) for host-native runtimes and empty env', () => {
+    const runtime = wslRuntime()
+    expect(resolveSpawnEnv(runtime, {})).toEqual({})
+    const native = createWorkspaceRuntime(
+      { kind: 'wsl', distro: 'Ubuntu-24.04' },
+      deps({ hostPlatform: 'linux' }),
+    )
+    if (!native.ok) throw new Error('expected native runtime')
+    expect(resolveSpawnEnv(native.data, { FOO: 'bar' })).toEqual({ FOO: 'bar' })
   })
 })
 

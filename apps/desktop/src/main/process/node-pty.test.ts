@@ -19,7 +19,7 @@ describe('node-pty native integration (TASK-013)', () => {
       cols: 80,
       rows: 24,
       cwd: process.cwd(),
-      env: process.env as Record<string, string>,
+      env: process.env,
     })
 
     const result = await new Promise<{ output: string; exitCode: number }>((resolve, reject) => {

@@ -22,11 +22,7 @@ import {
   type CommandRunner,
 } from '../process/command-runner'
 import type { RuntimeStatus, WorkspaceRuntime } from '../workspace/runtime'
-import {
-  createShellStepExecutor,
-  shellArtifactType,
-  splitCommandLine,
-} from './shell-step-executor'
+import { createShellStepExecutor, shellArtifactType, splitCommandLine } from './shell-step-executor'
 import {
   createWorkflowEngine,
   type WorkflowExecutionContext,
@@ -308,7 +304,7 @@ describe('createShellStepExecutor (TASK-058)', () => {
     )
 
     const pending = executor.execute({ ...execution, context: REAL_CONTEXT })
-    executor.cancel?.(execution.step.id)
+    await executor.cancel?.(execution.step.id)
     const completion = await pending
 
     expect(completion.outcome).toBe('failure')

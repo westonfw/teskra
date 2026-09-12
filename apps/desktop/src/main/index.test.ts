@@ -13,9 +13,14 @@ const electron = vi.hoisted(() => {
       return [...MockBrowserWindow.windows]
     }
 
+    readonly webContentsListeners = new Map<string, (event: unknown) => void>()
     readonly webContents = {
       isDestroyed: vi.fn(() => false),
       send: vi.fn(),
+      setWindowOpenHandler: vi.fn(),
+      on: vi.fn((name: string, listener: (event: unknown) => void) => {
+        this.webContentsListeners.set(name, listener)
+      }),
     }
     readonly show = vi.fn()
     readonly focus = vi.fn()
@@ -51,6 +56,7 @@ const electron = vi.hoisted(() => {
     on: vi.fn(),
     quit: vi.fn(),
     setPath: vi.fn(),
+    disableHardwareAcceleration: vi.fn(),
     requestSingleInstanceLock: vi.fn(() => true),
     isPackaged: true,
     getVersion: () => '0.0.0-test',
@@ -130,6 +136,43 @@ describe('main process entry point', () => {
       expect(setPathOrder).toBeLessThan(lockOrder)
     } finally {
       delete process.env['TESKRA_HOME']
+    }
+  })
+
+  it('disables hardware acceleration on WSL unless TESKRA_GPU=1 (WSLg cannot host the GPU process under --inspect)', async () => {
+    const wslDistro = process.env['WSL_DISTRO_NAME']
+    const teskraGpu = process.env['TESKRA_GPU']
+    process.env['WSL_DISTRO_NAME'] = 'Ubuntu'
+    delete process.env['TESKRA_GPU']
+    try {
+      await importEntryPoint()
+      expect(electron.app.disableHardwareAcceleration).toHaveBeenCalledOnce()
+    } finally {
+      if (wslDistro === undefined) delete process.env['WSL_DISTRO_NAME']
+      else process.env['WSL_DISTRO_NAME'] = wslDistro
+      if (teskraGpu === undefined) delete process.env['TESKRA_GPU']
+      else process.env['TESKRA_GPU'] = teskraGpu
+    }
+  })
+
+  it('keeps hardware acceleration off WSL, or on WSL with TESKRA_GPU=1', async () => {
+    const wslDistro = process.env['WSL_DISTRO_NAME']
+    const teskraGpu = process.env['TESKRA_GPU']
+    try {
+      delete process.env['WSL_DISTRO_NAME']
+      await importEntryPoint()
+      expect(electron.app.disableHardwareAcceleration).not.toHaveBeenCalled()
+
+      vi.clearAllMocks()
+      process.env['WSL_DISTRO_NAME'] = 'Ubuntu'
+      process.env['TESKRA_GPU'] = '1'
+      await importEntryPoint()
+      expect(electron.app.disableHardwareAcceleration).not.toHaveBeenCalled()
+    } finally {
+      if (wslDistro === undefined) delete process.env['WSL_DISTRO_NAME']
+      else process.env['WSL_DISTRO_NAME'] = wslDistro
+      if (teskraGpu === undefined) delete process.env['TESKRA_GPU']
+      else process.env['TESKRA_GPU'] = teskraGpu
     }
   })
 

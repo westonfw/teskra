@@ -159,6 +159,32 @@ describe('CommandRunner (TASK-012)', () => {
     expect(await eventually(() => !pidAlive(childPid as number))).toBe(true)
   })
 
+  it('kills the process tree exactly once when chunks keep arriving after the overflow (P2-6)', async () => {
+    // The overflow path settles on the first over-limit chunk, but the child
+    // keeps producing output until the kill lands — every trailing chunk
+    // re-enters the terminate path and must NOT spawn another taskkill.
+    const killCalls: number[] = []
+    const spyingRunner = createCommandRunner({
+      killTree: (child) => {
+        killCalls.push(child.pid as number)
+        // Not killing on purpose: the script below exits by itself, and the
+        // trailing chunks are what exercise the repeat-terminate path.
+      },
+    })
+    const result = await spyingRunner.run({
+      command: NODE,
+      args: nodeArgs('for (let i = 0; i < 64; i++) process.stdout.write("x".repeat(4096))'),
+      timeoutMs: 30_000,
+      maxBuffer: 16 * 1024,
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.message).toContain('output limit')
+    // Let the child run to completion so every trailing chunk has fired.
+    await new Promise((r) => setTimeout(r, 500))
+    expect(killCalls).toHaveLength(1)
+  })
+
   it('applies maxBuffer per stream, not to the combined stdout+stderr volume', async () => {
     // 5 MiB per stream, 8 MiB ceiling: each stream fits, so the command must
     // complete even though the combined 10 MiB exceeds the ceiling. The

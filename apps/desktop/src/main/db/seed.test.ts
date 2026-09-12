@@ -44,9 +44,9 @@ describe('seedDatabase (TASK-090)', () => {
     expect(count(db, 'review_panels')).toBe(1)
 
     // Task belongs to the workspace; workflow run belongs to the task.
-    expect(
-      db.prepare('SELECT workspace_id FROM tasks WHERE id = ?').get(graph.taskId),
-    ).toEqual({ workspace_id: graph.workspaceId })
+    expect(db.prepare('SELECT workspace_id FROM tasks WHERE id = ?').get(graph.taskId)).toEqual({
+      workspace_id: graph.workspaceId,
+    })
     expect(
       db.prepare('SELECT task_id FROM workflow_runs WHERE id = ?').get(graph.workflowRunId),
     ).toEqual({ task_id: graph.taskId })
@@ -71,9 +71,9 @@ describe('seedDatabase (TASK-090)', () => {
 
     // The worktree back-pointer matches the authoritative agent_runs.worktree_id
     // direction (§139.1 循环引用处理).
-    expect(
-      db.prepare('SELECT run_id FROM worktrees WHERE id = ?').get(graph.worktreeId),
-    ).toEqual({ run_id: graph.implementerRunId })
+    expect(db.prepare('SELECT run_id FROM worktrees WHERE id = ?').get(graph.worktreeId)).toEqual({
+      run_id: graph.implementerRunId,
+    })
 
     // Review panel is fully wired: task, workflow run, target artifact, criteria.
     expect(
@@ -112,15 +112,19 @@ describe('seedDatabase (TASK-090)', () => {
     expect(count(db, 'permission_audit')).toBe(1)
 
     expect(
-      db.prepare('SELECT criterion_id FROM review_findings WHERE id = ?').get(graph.reviewFindingId),
+      db
+        .prepare('SELECT criterion_id FROM review_findings WHERE id = ?')
+        .get(graph.reviewFindingId),
     ).toEqual({ criterion_id: graph.criterionIds[0] })
     expect(
-      db.prepare('SELECT criterion_id FROM criterion_scores WHERE id = ?').get(graph.criterionScoreId),
+      db
+        .prepare('SELECT criterion_id FROM criterion_scores WHERE id = ?')
+        .get(graph.criterionScoreId),
     ).toEqual({ criterion_id: graph.criterionIds[0] })
     expect(
-      db.prepare('SELECT matched_rule_id FROM permission_audit WHERE id = ?').get(
-        graph.permissionAuditId,
-      ),
+      db
+        .prepare('SELECT matched_rule_id FROM permission_audit WHERE id = ?')
+        .get(graph.permissionAuditId),
     ).toEqual({ matched_rule_id: graph.permissionRuleId })
   })
 

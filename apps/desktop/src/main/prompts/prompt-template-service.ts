@@ -160,7 +160,12 @@ export function createPromptTemplateService(
       if (override.data !== null) {
         return {
           ok: true,
-          data: { name, source: 'repo-local', path: override.data.path, content: override.data.content },
+          data: {
+            name,
+            source: 'repo-local',
+            path: override.data.path,
+            content: override.data.content,
+          },
         }
       }
     }

@@ -3,5 +3,11 @@
   "compilerOptions": {
     "types": ["node"]
   },
-  "include": ["electron.vite.config.ts", "src/main", "src/preload"]
+  "include": [
+    "electron.vite.config.ts",
+    "src/main",
+    "src/preload",
+    "src/security",
+    "src/error-message-keys.test.ts"
+  ]
 }

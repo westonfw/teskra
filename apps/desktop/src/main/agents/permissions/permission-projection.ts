@@ -142,5 +142,7 @@ export function prepareAgentPermission(options: {
   } catch (cause) {
     return { ok: false, error: toPublicError(permissionWriteFailed(configPath, cause)) }
   }
+  // The returned path is host-side (runDir is); the CliAgentAdapter translates
+  // it into the runtime's path form before putting it on the CLI command line.
   return { ok: true, data: { profile, configPath } }
 }

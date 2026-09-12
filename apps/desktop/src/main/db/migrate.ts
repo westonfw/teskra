@@ -136,7 +136,8 @@ export function runMigrations(
     }
   }
 
-  const codeVersion = sorted.length > 0 ? sorted[sorted.length - 1].version : 0
+  const latest = sorted[sorted.length - 1]
+  const codeVersion = latest === undefined ? 0 : latest.version
   if (fromVersion > codeVersion) {
     return {
       ok: false,

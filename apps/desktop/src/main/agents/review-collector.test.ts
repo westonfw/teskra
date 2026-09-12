@@ -8,10 +8,7 @@ import { migrateDatabase } from '../db/migrations'
 import { createAgentRunRepository } from '../db/repositories/agent-run-repository'
 import { createCriteriaRepository } from '../db/repositories/criteria-repository'
 import type { Handoff } from '../db/repositories/handoff-repository'
-import {
-  createReviewRepository,
-  type ReviewRepository,
-} from '../db/repositories/review-repository'
+import { createReviewRepository, type ReviewRepository } from '../db/repositories/review-repository'
 import { createReviewCollector, type ReviewCollector } from './review-collector'
 
 const AT = '2026-09-10T00:00:00.000Z'
@@ -342,7 +339,9 @@ describe('ReviewCollector criterion scores (TASK-054)', () => {
 
   it('skips scoring when the run has no confirmed criteria set', () => {
     setup()
-    connection.prepare("UPDATE acceptance_criteria_sets SET status = 'draft' WHERE id = 'cs-1'").run()
+    connection
+      .prepare("UPDATE acceptance_criteria_sets SET status = 'draft' WHERE id = 'cs-1'")
+      .run()
     collector.ingest(
       'run-1',
       handoff(

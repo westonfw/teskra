@@ -8,6 +8,7 @@ import { FUTURE_RUNTIME_PORTS, type WorkspaceRuntimeRef } from '@teskra/contract
 import { buildHandoffContext } from '@teskra/shared'
 
 import { createTeskraPaths } from '../paths'
+import { APP_VERSION } from '../build-info'
 import type { CommandRunner } from '../process/command-runner'
 import { composeTeskraRuntime } from './compose'
 import { requireRuntimePort, type TeskraRuntime } from './facade'
@@ -15,12 +16,12 @@ import { requireRuntimePort, type TeskraRuntime } from './facade'
 const tempHomes: string[] = []
 const runtimes: TeskraRuntime[] = []
 
-afterEach(() => {
+afterEach(async () => {
   // Dispose before deleting the home dir: on Windows an open SQLite handle
   // makes the unlink fail with EBUSY even when a test bailed out early.
   // dispose() is idempotent, so runtimes the test already disposed are fine.
   for (const runtime of runtimes.splice(0)) {
-    runtime.dispose()
+    await runtime.dispose()
   }
   for (const path of tempHomes.splice(0)) {
     // Windows cannot unlink an open SQLite file (EBUSY); give handles a
@@ -128,8 +129,8 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       data: { databaseAvailable: true, wslAvailable: true, issues: [] },
     })
 
-    expect(runtime.dispose()).toEqual({ ok: true, data: undefined })
-    expect(runtime.dispose()).toEqual({ ok: true, data: undefined })
+    expect(await runtime.dispose()).toEqual({ ok: true, data: undefined })
+    expect(await runtime.dispose()).toEqual({ ok: true, data: undefined })
   })
 
   it('mounts WSL list/read/write operations on the system port', async () => {
@@ -157,7 +158,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       ok: true,
       data: 'Debian',
     })
-    composed.data.dispose()
+    await composed.data.dispose()
   })
 
   it('mounts Settings config writes and the injected folder opener', async () => {
@@ -210,7 +211,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       { ok: true, data: '/selected/repo' },
     )
     expect(selectDirectory).toHaveBeenCalledOnce()
-    composed.data.dispose()
+    await composed.data.dispose()
   })
 
   it('mounts the Credential Store port with an explicit unavailable degrade (TASK-088)', async () => {
@@ -242,7 +243,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     })
     expect(workspace.ok).toBe(false)
     if (!workspace.ok) expect(workspace.error.code).toBe('CAPABILITY_NOT_AVAILABLE')
-    composed.data.dispose()
+    await composed.data.dispose()
   })
 
   it('stores and resolves credentials through an injected cipher (TASK-088)', async () => {
@@ -263,20 +264,20 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     runtimes.push(composed.data)
 
     expect(composed.data.credential.status()).toEqual({ ok: true, data: { available: true } })
-    expect(composed.data.credential.set({ key: 'OPENAI_API_KEY', value: 'sk-compose-secret' })).toEqual({
+    expect(
+      composed.data.credential.set({ key: 'OPENAI_API_KEY', value: 'sk-compose-secret' }),
+    ).toEqual({
       ok: true,
       data: undefined,
     })
     // list exposes key names only; no get channel exists on the facade.
     expect(composed.data.credential.list()).toEqual({ ok: true, data: ['OPENAI_API_KEY'] })
-    expect(readFileSync(join(home, 'credentials.json'), 'utf8')).not.toContain(
-      'sk-compose-secret',
-    )
+    expect(readFileSync(join(home, 'credentials.json'), 'utf8')).not.toContain('sk-compose-secret')
     expect(composed.data.credential.delete({ key: 'OPENAI_API_KEY' })).toEqual({
       ok: true,
       data: true,
     })
-    composed.data.dispose()
+    await composed.data.dispose()
   })
 
   it('runs the repository Fake Agent through the composed Agent lifecycle', async () => {
@@ -378,7 +379,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       expect(rendered.data.content).toContain('Fake Agent completed the requested work.')
     }
 
-    composed.data.dispose()
+    await composed.data.dispose()
   })
 
   it('degrades gracefully when the Fake Agent writes a malformed handoff (TASK-051)', async () => {
@@ -450,7 +451,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       )
     }
 
-    composed.data.dispose()
+    await composed.data.dispose()
   })
 
   it('renders prompt templates through the facade, honoring repo-local overrides (TASK-079)', async () => {
@@ -514,7 +515,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     expect(runtime.prompts.render({ name: 'plan', workspaceId: 'missing', context })).toMatchObject(
       { ok: false, error: { code: 'WORKSPACE_NOT_FOUND' } },
     )
-    runtime.dispose()
+    await runtime.dispose()
   })
 
   it('previews the ContextBuilder output through the facade (TASK-067/068)', async () => {
@@ -587,7 +588,24 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       expect(rendered.data.content).toContain('Use Conventional Commits.')
       expect(rendered.data.content).not.toMatch(/\{\{[^{}]*\}\}/)
     }
-    runtime.dispose()
+    await runtime.dispose()
+  })
+
+  it('falls back to the build-time APP_VERSION when no appVersion is injected (P2-16)', async () => {
+    const composed = await composeTeskraRuntime({
+      paths: createTeskraPaths({ TESKRA_HOME: makeHome() }),
+      commands: wslCommands(),
+      hostPlatform: 'linux',
+      initializeLogs: false,
+    })
+    if (!composed.ok) throw new Error('expected runtime')
+    runtimes.push(composed.data)
+
+    expect(composed.data.system.info()).toMatchObject({
+      ok: true,
+      data: { appVersion: APP_VERSION },
+    })
+    await composed.data.dispose()
   })
 
   it('reports every not-yet-mounted port as CAPABILITY_NOT_AVAILABLE', async () => {
@@ -614,6 +632,6 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     }
     // TASK-055: the workflow port is mounted (repo-local definition loading).
     expect(requireRuntimePort(composed.data, 'workflow').ok).toBe(true)
-    composed.data.dispose()
+    await composed.data.dispose()
   })
 })

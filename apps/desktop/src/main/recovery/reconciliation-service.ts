@@ -1,6 +1,12 @@
 import { existsSync } from 'node:fs'
 
-import type { IpcResult, PublicAppError, WorkbenchEvents, Workspace } from '@teskra/contracts'
+import type {
+  AgentRun,
+  IpcResult,
+  PublicAppError,
+  WorkbenchEvents,
+  Workspace,
+} from '@teskra/contracts'
 
 import type { AgentEventRepository } from '../db/repositories/agent-event-repository'
 import type { AgentRunRepository } from '../db/repositories/agent-run-repository'
@@ -10,6 +16,7 @@ import type { WorkspaceRepository } from '../db/repositories/workspace-repositor
 import type { EventBus } from '../events/event-bus'
 import { getLogger } from '../logger'
 import type { CommandRunner } from '../process/command-runner'
+import type { HostProcessControl } from '../process/host-processes'
 import type { ProcessManager } from '../process/process-manager'
 import type { RunLogStore } from '../agents/run-log-store'
 import type { WorkspaceRuntime } from '../workspace/runtime'
@@ -34,6 +41,17 @@ export interface ReconciliationReport {
   readonly missingWorkspaceIds: readonly string[]
   readonly brokenWorktrees: readonly BrokenWorktree[]
   readonly interruptedRunIds: readonly string[]
+  /**
+   * P0-2: runs whose previous-instance process was still alive on the host
+   * and was terminated before the run was marked interrupted.
+   */
+  readonly terminatedSurvivorRunIds: readonly string[]
+  /**
+   * P0-2: runs whose process survived AND could not be terminated. These are
+   * deliberately left in their active status — interrupting them while the
+   * Agent keeps writing would invite a double-write on resume.
+   */
+  readonly survivingRunIds: readonly string[]
 }
 
 export interface ReconciliationService {
@@ -48,6 +66,13 @@ export interface ReconciliationServiceDeps {
   readonly tasks: TaskRepository
   readonly processes: Pick<ProcessManager, 'list'>
   readonly commands: CommandRunner
+  /**
+   * P0-2: host-side pid probe/terminate. The in-process registry (`processes`)
+   * is empty after a restart, so without this every previously-running run
+   * looks dead even while its Agent process is still alive on the host.
+   * Optional so existing tests keep registry-only semantics by default.
+   */
+  readonly hostProcesses?: HostProcessControl
   readonly events: EventBus<WorkbenchEvents>
   readonly runLogs: RunLogStore
   readonly resolveRuntime: (workspace: Workspace) => IpcResult<WorkspaceRuntime>
@@ -57,7 +82,7 @@ export interface ReconciliationServiceDeps {
 
 interface WorkspaceHealth {
   readonly workspace: Workspace
-  readonly runtime?: WorkspaceRuntime
+  readonly runtime?: WorkspaceRuntime | undefined
   readonly exists: boolean
 }
 
@@ -166,6 +191,42 @@ export function createReconciliationService(
       )
       const interruptedRunIds: string[] = []
       const interruptedTaskIds = new Set<string>()
+      const terminatedSurvivorRunIds: string[] = []
+      const survivingRunIds: string[] = []
+
+      /**
+       * P0-2: the in-process registry is empty after a restart, so probe the
+       * recorded pid before declaring a run's process dead. A live survivor
+       * cannot be re-adopted (its PTY handle died with the previous
+       * instance), so it is terminated — resuming onto a worktree a live
+       * Agent still writes to would double-write.
+       */
+      const terminateSurvivor = async (run: AgentRun): Promise<'none' | 'terminated' | 'alive'> => {
+        if (deps.hostProcesses === undefined || run.pid === undefined) return 'none'
+        const probe = await deps.hostProcesses.probe(run.pid)
+        if (!probe.ok) {
+          logger.warn(
+            { runId: run.id, pid: run.pid, error: probe.error },
+            'Host pid probe failed; treating the process as dead.',
+          )
+          return 'none'
+        }
+        if (!probe.data) return 'none'
+        const terminated = await deps.hostProcesses.terminate(run.pid)
+        if (terminated.ok) {
+          logger.warn(
+            { runId: run.id, pid: run.pid },
+            'Terminated a surviving Agent process from a previous instance.',
+          )
+          return 'terminated'
+        }
+        logger.error(
+          { runId: run.id, pid: run.pid, error: terminated.error },
+          "A previous instance's Agent process is still alive and could not be terminated; the run is left active.",
+        )
+        survivingRunIds.push(run.id)
+        return 'alive'
+      }
 
       for (const run of active.data) {
         let reason: InterruptionReason | undefined
@@ -183,7 +244,15 @@ export function createReconciliationService(
             live !== undefined &&
             (run.processId === undefined || live.id === run.processId) &&
             (run.pid === undefined || live.pid === run.pid)
-          if (!processMatches) reason = 'process_dead'
+          if (!processMatches) {
+            const survivor = await terminateSurvivor(run)
+            // A survivor we failed to kill keeps its active status — flipping
+            // it to interrupted while the Agent keeps running is exactly the
+            // silent double-write P0-2 forbids.
+            if (survivor === 'alive') continue
+            if (survivor === 'terminated') terminatedSurvivorRunIds.push(run.id)
+            reason = 'process_dead'
+          }
         }
         if (reason === undefined) continue
 
@@ -232,6 +301,12 @@ export function createReconciliationService(
             logger.error({ runId: run.id, error: manifest.error }, 'Run manifest recovery failed.')
           }
         }
+        // P1-1: interruption is a lifecycle transition — force an fsync so the
+        // file authority can never trail the DB status across another crash.
+        const flushed = deps.runLogs.flush(run.id)
+        if (!flushed.ok) {
+          logger.error({ runId: run.id, error: flushed.error }, 'Run log flush failed.')
+        }
         deps.events.emit('agent.interrupted', { runId: run.id, reason })
         interruptedRunIds.push(run.id)
         if (run.taskId !== undefined) interruptedTaskIds.add(run.taskId)
@@ -260,6 +335,8 @@ export function createReconciliationService(
           missingWorkspaceIds: missingWorkspaceIds.sort(),
           brokenWorktrees: brokenWorktrees.sort((left, right) => left.id.localeCompare(right.id)),
           interruptedRunIds: interruptedRunIds.sort(),
+          terminatedSurvivorRunIds: terminatedSurvivorRunIds.sort(),
+          survivingRunIds: survivingRunIds.sort(),
         },
       }
     },

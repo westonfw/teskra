@@ -54,8 +54,13 @@ export interface AgentManager {
   cancel(runId: string): Promise<IpcResult<AgentRun>>
   get(runId: string): IpcResult<AgentRun | null>
   list(request?: ListAgentRunsRequest): IpcResult<AgentRun[]>
-  getOutput(runId: string): IpcResult<string>
-  dispose(): void
+  /**
+   * The run's full terminal output, or only its last `tailBytes` bytes when
+   * the option is set (P1-6 — long runs no longer require a full read).
+   */
+  getOutput(runId: string, options?: { tailBytes?: number }): IpcResult<string>
+  /** Stops every active run (P0-2 shutdown), then detaches from the EventBus. */
+  dispose(): Promise<void>
 }
 
 export interface AgentManagerDeps {
@@ -96,10 +101,19 @@ function fail<T>(error: InternalAppError): IpcResult<T> {
   return { ok: false, error: toPublicError(error) }
 }
 
-function missing(kind: string, id: string): IpcResult<never> {
+const MISSING_MESSAGE_KEYS = {
+  'Agent run': 'errorMessage.agentRunNotFound',
+  workspace: 'errorMessage.workspaceNotFound',
+  task: 'errorMessage.taskNotFound',
+  worktree: 'errorMessage.worktreeNotFound',
+} as const
+
+function missing(kind: keyof typeof MISSING_MESSAGE_KEYS, id: string): IpcResult<never> {
   return fail({
     code: kind === 'workspace' ? 'WORKSPACE_NOT_FOUND' : 'VALIDATION_FAILED',
     message: `${kind[0]?.toUpperCase() ?? ''}${kind.slice(1)} "${id}" was not found.`,
+    messageKey: MISSING_MESSAGE_KEYS[kind],
+    params: { id },
     retryable: false,
     detail: `AgentManager could not resolve ${kind} id=${JSON.stringify(id)}`,
   })
@@ -191,10 +205,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
    * through untouched.
    */
   const resolveLaunchWorkspace = (workspace: Workspace): IpcResult<Workspace> => {
-    if (
-      workspace.env === undefined ||
-      !Object.values(workspace.env).some(isWorkspaceSecretRef)
-    ) {
+    if (workspace.env === undefined || !Object.values(workspace.env).some(isWorkspaceSecretRef)) {
       return { ok: true, data: workspace }
     }
     const env = resolveEnvReferences(workspace.env, deps.credentials)
@@ -234,6 +245,19 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
   }
 
   /**
+   * P1-1: durability checkpoint for terminal lifecycle transitions — forces an
+   * fsync of the run's throttle-deferred log writes (so a crash can never lose
+   * a terminal status the DB already recorded) and releases the file handles
+   * so RetentionService (TASK-069) can collect the logs of finished runs.
+   */
+  const closeRunLogs = (runId: string): void => {
+    const closed = deps.runLogs.dispose(runId)
+    if (!closed.ok) {
+      logger.error({ runId, error: closed.error }, 'Failed to flush and close Run logs.')
+    }
+  }
+
+  /**
    * ADR-0004: handoff collection is best-effort — a collector failure is
    * logged and the Run keeps its terminal status either way.
    */
@@ -265,9 +289,10 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     const updated = deps.runs.update(runId, { lastOutputAt: timestamp }, timestamp)
     if (!updated.ok) {
       logger.error({ runId, error: updated.error }, 'Failed to update Agent output time.')
-    } else if (updated.data !== null) {
-      persistRunManifest(updated.data)
     }
+    // P1-1: the manifest is deliberately NOT rewritten per output batch —
+    // run.json follows lifecycle transitions only, so its lastOutputAt may lag
+    // behind SQLite (the authoritative read path) until the next transition.
     deps.events.emit('agent.output', { runId, data })
   })
 
@@ -314,6 +339,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     )
     activeAdapters.delete(runId)
     if (updated.ok && updated.data !== null) persistRunManifest(updated.data)
+    closeRunLogs(runId)
     deps.events.emit('agent.failed', { runId, error })
     if (!updated.ok) return updated
     if (updated.data === null) return missing('Agent run', runId)
@@ -435,11 +461,20 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     })
   }
 
-  const readOutput = (runId: string): IpcResult<string> => {
+  const readOutput = (runId: string, tailBytes?: number): IpcResult<string> => {
     outputBatcher.flush(runId)
     const run = deps.runs.getById(runId)
     if (!run.ok) return run
     if (run.data === null) return missing('Agent run', runId)
+    // P1-6: terminal.log already holds the exact concatenation of the redacted
+    // agent.output payloads — read it (in full, or just the tail) instead of
+    // rebuilding one giant string out of every SQLite event row.
+    const log = deps.runLogs.readTerminalTail(runId, tailBytes ?? Number.MAX_SAFE_INTEGER)
+    if (!log.ok) return log
+    if (log.data !== null) return { ok: true, data: log.data }
+    // RetentionService (TASK-069) collects terminal.log for old terminal runs
+    // but keeps the agent_events rows; only that case falls back to the
+    // SQLite reconstruction.
     const history = deps.agentEvents.listByRun(runId)
     if (!history.ok) return history
     return {
@@ -464,7 +499,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
   const preparePermission = (options: {
     definition: AgentDefinition
     workspaceId: string
-    role?: AgentRun['role']
+    role?: AgentRun['role'] | undefined
     approvalMode: NonNullable<AgentRun['approvalMode']>
     runDir: string
   }) => {
@@ -514,6 +549,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       persistRunManifest(updated.data)
       synchronizeTaskStatus(updated.data)
     }
+    closeRunLogs(agentRunId)
     collectHandoff(agentRunId)
     if (status === 'completed') {
       deps.events.emit('agent.completed', { runId: agentRunId, exitCode })
@@ -525,7 +561,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     scheduleQueueAdvance()
   })
 
-  return {
+  const manager: AgentManager = {
     async start(request) {
       const definition = deps.registry.get(request.agentType)
       const adapter = adapters.get(request.agentType)
@@ -533,6 +569,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         return fail({
           code: 'VALIDATION_FAILED',
           message: `Agent "${request.agentType}" is not registered.`,
+          messageKey: 'errorMessage.agentNotRegistered',
+          params: { agentType: request.agentType },
           retryable: false,
           detail: `registry=${String(definition !== undefined)} adapter=${String(adapter !== undefined)}`,
         })
@@ -542,6 +580,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         return fail({
           code: 'VALIDATION_FAILED',
           message: 'Orchestrated Agent runs require an isolated worktree.',
+          messageKey: 'errorMessage.orchestratedRequiresWorktree',
           retryable: false,
           detail: `agent=${request.agentType} workspace=${request.workspaceId} missing worktreeId`,
         })
@@ -558,6 +597,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         return fail({
           code: 'AGENT_NOT_INSTALLED',
           message: `${definition.name} is not installed in this workspace runtime.`,
+          messageKey: 'errorMessage.agentNotInstalled',
+          params: { agent: definition.name },
           retryable: false,
           detail: `agent=${definition.id} runtime=${JSON.stringify(workspace.data.runtime)}`,
         })
@@ -572,6 +613,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           return fail({
             code: 'VALIDATION_FAILED',
             message: 'The selected task belongs to a different workspace.',
+            messageKey: 'errorMessage.taskWorkspaceMismatch',
             retryable: false,
             detail: `task workspace=${found.data.workspaceId} run workspace=${workspace.data.id}`,
           })
@@ -588,6 +630,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           return fail({
             code: 'VALIDATION_FAILED',
             message: 'The selected worktree belongs to a different workspace.',
+            messageKey: 'errorMessage.worktreeWorkspaceMismatch',
             retryable: false,
             detail: `worktree workspace=${found.data.workspaceId} run workspace=${workspace.data.id}`,
           })
@@ -600,6 +643,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         return fail({
           code: 'CAPABILITY_NOT_AVAILABLE',
           message: `${definition.name} does not support ${mode} mode.`,
+          messageKey: 'errorMessage.agentModeUnsupported',
+          params: { agent: definition.name, mode },
           retryable: false,
           detail: `AgentDefinition ${definition.id} capability ${mode}=false`,
         })
@@ -622,6 +667,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         return fail({
           code: 'VALIDATION_FAILED',
           message: `Agent run "${conflict.id}" is already modifying this workspace directly. Stop it before starting another writable Agent, or use an isolated worktree.`,
+          messageKey: 'errorMessage.attendedRunConflict',
+          params: { runId: conflict.id },
           retryable: true,
           detail: `workspace=${workspace.data.id} conflicting run=${conflict.id}`,
         })
@@ -737,6 +784,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         return fail({
           code: 'VALIDATION_FAILED',
           message: 'Only interrupted Agent runs can be resumed.',
+          messageKey: 'errorMessage.onlyInterruptedResumable',
           retryable: false,
           detail: `run=${run.id} status=${run.status}`,
         })
@@ -748,6 +796,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         return fail({
           code: 'VALIDATION_FAILED',
           message: `Agent "${run.agentType}" is not registered.`,
+          messageKey: 'errorMessage.agentNotRegistered',
+          params: { agentType: run.agentType },
           retryable: false,
           detail: `resume run=${run.id}`,
         })
@@ -763,6 +813,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         return fail({
           code: 'AGENT_NOT_INSTALLED',
           message: `${definition.name} is not installed in this workspace runtime.`,
+          messageKey: 'errorMessage.agentNotInstalled',
+          params: { agent: definition.name },
           retryable: false,
           detail: `resume run=${run.id} agent=${definition.id}`,
         })
@@ -782,6 +834,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         return fail({
           code: 'VALIDATION_FAILED',
           message: 'Only interrupted Agent runs can be resumed.',
+          messageKey: 'errorMessage.onlyInterruptedResumable',
           retryable: false,
           detail: `resume run=${run.id} status=${recheck.data.status} after detection`,
         })
@@ -812,6 +865,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         return fail({
           code: 'VALIDATION_FAILED',
           message: `Agent run "${conflict.id}" is already modifying this workspace directly.`,
+          messageKey: 'errorMessage.attendedRunConflictResume',
+          params: { runId: conflict.id },
           retryable: true,
           detail: `resume run=${run.id} conflict=${conflict.id}`,
         })
@@ -827,7 +882,11 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           : undefined
       let prompt = request.prompt
       if (resumeSession === undefined) {
-        const output = readOutput(run.id)
+        // P1-6: the resume context only keeps the last
+        // RESUME_OUTPUT_CONTEXT_CHARS characters, so read a bounded tail of
+        // terminal.log (4 bytes/char covers the worst UTF-8 case) instead of
+        // reconstructing the run's entire output first.
+        const output = readOutput(run.id, RESUME_OUTPUT_CONTEXT_CHARS * 4)
         if (!output.ok) return output
         const handoff = deps.handoffs.getByRunId(run.id)
         if (!handoff.ok) return handoff
@@ -843,7 +902,9 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       if (!runFiles.ok) return runFiles
       // TASK-077: re-project the persisted approval mode on resume so the
       // relaunched process gets the same CLI-side policy as the original run.
-      const resumeDefaultApproval = approvalModeSchema.safeParse(definition.defaults.permissionProfile)
+      const resumeDefaultApproval = approvalModeSchema.safeParse(
+        definition.defaults.permissionProfile,
+      )
       const resumeApprovalMode =
         run.approvalMode ?? (resumeDefaultApproval.success ? resumeDefaultApproval.data : 'manual')
       const resumePermission = preparePermission({
@@ -922,6 +983,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         return fail({
           code: 'PROCESS_NOT_FOUND',
           message: `Agent run "${runId}" is not active.`,
+          messageKey: 'errorMessage.agentRunNotActive',
+          params: { runId },
           retryable: false,
           detail: 'No active Adapter binding exists for run input.',
         })
@@ -943,6 +1006,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         return fail({
           code: 'PROCESS_NOT_FOUND',
           message: `Agent run "${runId}" is not active.`,
+          messageKey: 'errorMessage.agentRunNotActive',
+          params: { runId },
           retryable: false,
           detail: 'No active Adapter binding exists for run resize.',
         })
@@ -962,6 +1027,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         appendEvent(runId, 'agent.cancelled', {})
         const updated = deps.runs.update(runId, { status: 'cancelled', finishedAt }, finishedAt)
         if (updated.ok && updated.data !== null) persistRunManifest(updated.data)
+        closeRunLogs(runId)
         deps.events.emit('agent.cancelled', { runId })
         if (updated.ok && updated.data !== null) synchronizeTaskStatus(updated.data)
         scheduleQueueAdvance()
@@ -975,6 +1041,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         return fail({
           code: 'PROCESS_NOT_FOUND',
           message: `Agent run "${runId}" has no active process.`,
+          messageKey: 'errorMessage.agentRunNoActiveProcess',
+          params: { runId },
           retryable: false,
           detail: 'Persisted active run is missing its Adapter binding.',
         })
@@ -999,6 +1067,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       cancelRequested.delete(runId)
       activeAdapters.delete(runId)
       if (updated.ok && updated.data !== null) persistRunManifest(updated.data)
+      closeRunLogs(runId)
       collectHandoff(runId)
       deps.events.emit('agent.cancelled', { runId })
       if (updated.ok && updated.data !== null) synchronizeTaskStatus(updated.data)
@@ -1008,7 +1077,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
 
     get: (runId) => deps.runs.getById(runId),
 
-    getOutput: readOutput,
+    getOutput: (runId, options) => readOutput(runId, options?.tailBytes),
 
     list(request = {}) {
       if (request.activeOnly === true) {
@@ -1035,6 +1104,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         return fail({
           code: 'VALIDATION_FAILED',
           message: 'A workspace is required when listing historical Agent runs.',
+          messageKey: 'errorMessage.workspaceRequiredForRunHistory',
           retryable: false,
           detail: 'list({ activeOnly: false }) omitted workspaceId',
         })
@@ -1042,14 +1112,38 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       return deps.runs.listByWorkspace(request.workspaceId)
     },
 
-    dispose() {
+    async dispose() {
+      outputBatcher.flushAll()
+      // P0-2: quitting must not leak Agent processes. Cancel every run with a
+      // live Adapter binding; the process.exited path settles each run's
+      // terminal status (cancelled) and collects its handoff while the event
+      // subscriptions are still in place. Queued runs never launched a
+      // process, so startup reconciliation owns their fate.
+      await Promise.all(
+        [...activeAdapters.keys()].map(async (runId) => {
+          const cancelled = await manager.cancel(runId)
+          if (!cancelled.ok) {
+            logger.error(
+              { runId, error: cancelled.error },
+              'Failed to stop an Agent run during shutdown.',
+            )
+          }
+        }),
+      )
       stopOutput()
       stopCommand()
       stopExited()
-      outputBatcher.flushAll()
       activeAdapters.clear()
       pendingRuns.clear()
       cancelRequested.clear()
+      // P1-1: final durability checkpoint — fsync anything the throttle left
+      // dirty and release every log handle before the data root is touched.
+      const closed = deps.runLogs.disposeAll()
+      if (!closed.ok) {
+        logger.error({ error: closed.error }, 'Failed to flush Run logs during shutdown.')
+      }
     },
   }
+
+  return manager
 }

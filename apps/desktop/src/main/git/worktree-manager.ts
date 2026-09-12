@@ -115,6 +115,8 @@ function missingWorktree<T>(id: string): IpcResult<T> {
   return fail({
     code: 'VALIDATION_FAILED',
     message: `Worktree "${id}" was not found.`,
+    messageKey: 'errorMessage.worktreeNotFound',
+    params: { id },
     retryable: false,
     detail: `WorktreeManager could not resolve worktree id=${JSON.stringify(id)}`,
   })
@@ -132,6 +134,8 @@ function invalidSegment<T>(kind: string, value: string): IpcResult<T> {
   return fail({
     code: 'VALIDATION_FAILED',
     message: `Invalid ${kind} for a worktree.`,
+    messageKey: 'errorMessage.invalidWorktreeSegment',
+    params: { kind },
     retryable: false,
     detail: `${kind} must be a single safe path/ref segment, got ${JSON.stringify(value)}`,
   })
@@ -164,6 +168,8 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
       return fail({
         code: 'WORKSPACE_NOT_FOUND',
         message: `Workspace "${workspaceId}" was not found.`,
+        messageKey: 'errorMessage.workspaceNotFound',
+        params: { id: workspaceId },
         retryable: false,
         detail: `WorktreeManager could not resolve workspace id=${JSON.stringify(workspaceId)}`,
       })
@@ -203,16 +209,11 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
   }
 
   /** ADR-0003: worktree directory inside THIS runtime's data root. */
-  const worktreePathFor = (
-    runtime: WorkspaceRuntime,
-    workspaceId: string,
-    runId: string,
-  ): string => runtime.resolveCwd(`${runtime.resolveDataRoot()}/worktrees/${workspaceId}/${runId}`)
+  const worktreePathFor = (runtime: WorkspaceRuntime, workspaceId: string, runId: string): string =>
+    runtime.resolveCwd(`${runtime.resolveDataRoot()}/worktrees/${workspaceId}/${runId}`)
 
-  const hostPathFor = (
-    runtime: WorkspaceRuntime,
-    runtimePath: string,
-  ): IpcResult<string> => runtime.resolveHostPath(runtime.resolveCwd(runtimePath))
+  const hostPathFor = (runtime: WorkspaceRuntime, runtimePath: string): IpcResult<string> =>
+    runtime.resolveHostPath(runtime.resolveCwd(runtimePath))
 
   /** Idempotent .git/info/exclude append; returns the host/runtime path used. */
   const ensureExcludeEntries = async (context: WorktreeContext): Promise<IpcResult<string>> => {
@@ -276,6 +277,7 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
       : fail({
           code: 'VALIDATION_FAILED',
           message: 'The repository is on a detached HEAD; pass baseBranch explicitly.',
+          messageKey: 'errorMessage.detachedHead',
           retryable: false,
           detail: `WorktreeManager could not detect a base branch in ${context.repoCwd}`,
         })
@@ -300,6 +302,8 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
         return fail({
           code: 'VALIDATION_FAILED',
           message: `A worktree already exists for run "${request.runId}".`,
+          messageKey: 'errorMessage.worktreeExistsForRun',
+          params: { runId: request.runId },
           retryable: false,
           detail: `worktree id=${duplicate.data.id} already points at run=${request.runId}`,
         })
@@ -368,21 +372,27 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
       return { ok: true, data: ready.data }
     },
 
-    async list(request) {
+    list(request) {
       const workspace = deps.workspaces.getById(request.workspaceId)
-      if (!workspace.ok) return workspace
+      if (!workspace.ok) return Promise.resolve(workspace)
       if (workspace.data === null) {
-        return fail({
-          code: 'WORKSPACE_NOT_FOUND',
-          message: `Workspace "${request.workspaceId}" was not found.`,
-          retryable: false,
-          detail: `WorktreeManager could not resolve workspace id=${JSON.stringify(request.workspaceId)}`,
-        })
+        return Promise.resolve(
+          fail({
+            code: 'WORKSPACE_NOT_FOUND',
+            message: `Workspace "${request.workspaceId}" was not found.`,
+            messageKey: 'errorMessage.workspaceNotFound',
+            params: { id: request.workspaceId },
+            retryable: false,
+            detail: `WorktreeManager could not resolve workspace id=${JSON.stringify(request.workspaceId)}`,
+          }),
+        )
       }
-      return deps.worktrees.listByWorkspace(
-        request.workspaceId,
-        request.state,
-        request.includeArchived === true,
+      return Promise.resolve(
+        deps.worktrees.listByWorkspace(
+          request.workspaceId,
+          request.state,
+          request.includeArchived === true,
+        ),
       )
     },
 
@@ -423,7 +433,14 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
       const status = await git(
         context.data,
         'status',
-        ['status', '--porcelain', '--', '.', ':(exclude)node_modules', ':(exclude)**/node_modules/**'],
+        [
+          'status',
+          '--porcelain',
+          '--',
+          '.',
+          ':(exclude)node_modules',
+          ':(exclude)**/node_modules/**',
+        ],
         worktreeCwd,
       )
       if (!status.ok) return status
@@ -438,6 +455,7 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
           code: 'VALIDATION_FAILED',
           message:
             'Discarding a worktree permanently deletes its uncommitted changes; rerun with confirm: true to proceed.',
+          messageKey: 'errorMessage.worktreeDiscardNeedsConfirm',
           retryable: false,
           detail: `discard(${JSON.stringify(worktreeId)}) called without confirm: true`,
         })
@@ -478,6 +496,8 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
             return fail({
               code: 'VALIDATION_FAILED',
               message: `Branch "${record.branch}" is not merged into "${record.baseBranch}"; unmerged branches are never deleted. Discard without deleteBranch to keep it.`,
+              messageKey: 'errorMessage.branchNotMergedDelete',
+              params: { branch: record.branch, baseBranch: record.baseBranch },
               retryable: false,
               detail: `refused deleteBranch for unmerged branch=${record.branch} base=${record.baseBranch}`,
             })
@@ -508,11 +528,7 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
       if (deleteBranch === true && branchExists) {
         // `git branch -d` (never -D): the merged check above already passed,
         // so a failure here means git disagrees — surface it, don't force.
-        const deleted = await git(context.data, 'branch-delete', [
-          'branch',
-          '-d',
-          record.branch,
-        ])
+        const deleted = await git(context.data, 'branch-delete', ['branch', '-d', record.branch])
         if (!deleted.ok) return deleted
       }
 
@@ -528,16 +544,20 @@ export function createWorktreeManager(deps: WorktreeManagerDeps): WorktreeManage
       return { ok: true, data: updated.data }
     },
 
-    async archive({ worktreeId }) {
+    archive({ worktreeId }) {
       // TASK-047: archive writes only the DB marker — no git state changes, no
       // state-machine transition; list() hides the record by default.
       const found = deps.worktrees.getById(worktreeId)
-      if (!found.ok) return found
-      if (found.data === null) return missingWorktree(worktreeId)
-      if (found.data.archivedAt !== undefined) return { ok: true, data: found.data }
+      if (!found.ok) return Promise.resolve(found)
+      if (found.data === null) return Promise.resolve(missingWorktree(worktreeId))
+      if (found.data.archivedAt !== undefined) {
+        return Promise.resolve({ ok: true, data: found.data })
+      }
       const updated = deps.worktrees.update(worktreeId, { archivedAt: now() }, now())
-      if (!updated.ok) return updated
-      return updated.data === null ? missingWorktree(worktreeId) : { ok: true, data: updated.data }
+      if (!updated.ok) return Promise.resolve(updated)
+      return Promise.resolve(
+        updated.data === null ? missingWorktree(worktreeId) : { ok: true, data: updated.data },
+      )
     },
 
     async cleanup({ workspaceId }) {

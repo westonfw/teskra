@@ -4,11 +4,13 @@ import {
   DEFAULT_ITERATION_POLICY,
   type DiffFile,
   type DiffFileStatus,
-  type DiffResult,
+  type DiffPatchResult,
   type FullWorkflowRunSummary,
   type FullWorkflowStartResult,
   type IpcResult,
+  type IterationPolicy,
   type StartFullWorkflowRequest,
+  type WorkflowIterateResult,
   type Worktree,
 } from '@teskra/contracts'
 import { computeCriteriaReviewOutcome } from '@teskra/shared'
@@ -75,6 +77,13 @@ export interface FullWorkflowService {
   start(request: StartFullWorkflowRequest): Promise<IpcResult<FullWorkflowStartResult>>
   /** On-demand completion view: steps, worktree, branch diff, criteria result. */
   summary(request: { runId: string }): Promise<IpcResult<FullWorkflowRunSummary>>
+  /**
+   * Shutdown (P2-1): disposes every controller created for an in-flight
+   * start() (cancelling its loop's WorkflowRun) and waits for the starts to
+   * settle, so their trailing DB writes never land on an already-closed
+   * database.
+   */
+  dispose(): Promise<void>
 }
 
 export interface FullWorkflowServiceDeps {
@@ -115,8 +124,8 @@ function lineStats(patch: string): { additions: number; deletions: number } {
   return { additions, deletions }
 }
 
-/** Splits a unified multi-file patch into DiffResult files (DiffService shape). */
-export function parseDiffPatch(patch: string): DiffResult {
+/** Splits a unified multi-file patch into DiffPatchResult files (workflow summary shape). */
+export function parseDiffPatch(patch: string): DiffPatchResult {
   const files: DiffFile[] = []
   for (const chunk of patch.split(/^diff --git /mu).slice(1)) {
     const header = chunk.split('\n', 1)[0] ?? ''
@@ -135,6 +144,10 @@ export function parseDiffPatch(patch: string): DiffResult {
 export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWorkflowService {
   const logger = getLogger('runtime')
   const createAgentRunId = deps.createAgentRunId ?? randomUUID
+  /** Controllers driving in-flight start() calls, for dispose() (P2-1). */
+  const activeControllers = new Set<IterationController>()
+  /** In-flight start() promises, so dispose() can wait them out (P2-1). */
+  const inFlightStarts = new Set<Promise<IpcResult<FullWorkflowStartResult>>>()
 
   /**
    * Config precedence: explicit request override → repo-local `full`
@@ -155,121 +168,131 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
     return extractFullWorkflowConfig(override.definition)
   }
 
-  return {
-    async start(request) {
-      const task = deps.tasks.getById(request.taskId)
-      if (!task.ok) return task
-      if (task.data === null) {
+  const executeStart = async (
+    request: StartFullWorkflowRequest,
+  ): Promise<IpcResult<FullWorkflowStartResult>> => {
+    const task = deps.tasks.getById(request.taskId)
+    if (!task.ok) return task
+    if (task.data === null) {
+      return invalid(
+        `Task "${request.taskId}" was not found.`,
+        `FullWorkflowService could not resolve task id=${JSON.stringify(request.taskId)}`,
+      )
+    }
+    if (task.data.workspaceId !== request.workspaceId) {
+      return invalid(
+        'The task belongs to a different workspace.',
+        `task workspace=${task.data.workspaceId} full-workflow workspace=${request.workspaceId}`,
+      )
+    }
+    const workspace = deps.workspaces.getById(request.workspaceId)
+    if (!workspace.ok) return workspace
+    if (workspace.data === null) {
+      return invalid(
+        `Workspace "${request.workspaceId}" was not found.`,
+        `FullWorkflowService could not resolve workspace id=${JSON.stringify(request.workspaceId)}`,
+      )
+    }
+
+    // Step 1 of the default flow: Acceptance Criteria — the loop anchors to
+    // the task's confirmed set, so one must exist before launch.
+    const sets = deps.criteria.listSetsByTask(request.taskId)
+    if (!sets.ok) return sets
+    const confirmed = sets.data
+      .filter((set) => set.status === 'confirmed')
+      .sort((a, b) => b.version - a.version)[0]
+    if (confirmed === undefined) {
+      return invalid(
+        'The default full workflow requires a confirmed acceptance criteria set; confirm one first.',
+        `task id=${JSON.stringify(request.taskId)} has no confirmed criteria set`,
+      )
+    }
+
+    const merged: {
+      implementer?: string | undefined
+      reviewers?: readonly string[] | undefined
+      testCommand?: string | undefined
+    } = {
+      ...(request.implementer === undefined ? {} : { implementer: request.implementer }),
+      ...(request.reviewers === undefined ? {} : { reviewers: request.reviewers }),
+      ...(request.testCommand === undefined ? {} : { testCommand: request.testCommand }),
+    }
+    if (merged.implementer === undefined || merged.reviewers === undefined) {
+      const override = resolveConfig(workspace.data.path)
+      if (!override.ok) return override
+      merged.implementer ??= override.data?.implementer
+      merged.reviewers ??= override.data?.reviewers
+      merged.testCommand ??= override.data?.testCommand
+    }
+    let config: FullWorkflowConfig
+    if (merged.implementer !== undefined && merged.reviewers !== undefined) {
+      config = {
+        implementer: merged.implementer,
+        reviewers: merged.reviewers,
+        testCommand: merged.testCommand ?? DEFAULT_FULL_TEST_COMMAND,
+      }
+    } else {
+      const defaults = resolveDefaultFullWorkflowConfig(deps.registry.list())
+      if (!defaults.ok) return defaults
+      config = {
+        implementer: merged.implementer ?? defaults.data.implementer,
+        reviewers: merged.reviewers ?? defaults.data.reviewers,
+        testCommand: merged.testCommand ?? defaults.data.testCommand,
+      }
+    }
+    for (const agentId of [config.implementer, ...config.reviewers]) {
+      if (deps.registry.get(agentId) === undefined) {
         return invalid(
-          `Task "${request.taskId}" was not found.`,
-          `FullWorkflowService could not resolve task id=${JSON.stringify(request.taskId)}`,
+          `Agent "${agentId}" is not registered.`,
+          `FullWorkflowService could not resolve agent=${JSON.stringify(agentId)}`,
         )
       }
-      if (task.data.workspaceId !== request.workspaceId) {
-        return invalid(
-          'The task belongs to a different workspace.',
-          `task workspace=${task.data.workspaceId} full-workflow workspace=${request.workspaceId}`,
-        )
-      }
-      const workspace = deps.workspaces.getById(request.workspaceId)
-      if (!workspace.ok) return workspace
-      if (workspace.data === null) {
-        return invalid(
-          `Workspace "${request.workspaceId}" was not found.`,
-          `FullWorkflowService could not resolve workspace id=${JSON.stringify(request.workspaceId)}`,
-        )
-      }
+    }
 
-      // Step 1 of the default flow: Acceptance Criteria — the loop anchors to
-      // the task's confirmed set, so one must exist before launch.
-      const sets = deps.criteria.listSetsByTask(request.taskId)
-      if (!sets.ok) return sets
-      const confirmed = sets.data
-        .filter((set) => set.status === 'confirmed')
-        .sort((a, b) => b.version - a.version)[0]
-      if (confirmed === undefined) {
-        return invalid(
-          'The default full workflow requires a confirmed acceptance criteria set; confirm one first.',
-          `task id=${JSON.stringify(request.taskId)} has no confirmed criteria set`,
-        )
-      }
+    const policy: IterationPolicy = {
+      maxRoundsPerCriteriaVersion:
+        request.policy?.maxRoundsPerCriteriaVersion ??
+        DEFAULT_ITERATION_POLICY.maxRoundsPerCriteriaVersion,
+      maxTotalRounds: request.policy?.maxTotalRounds ?? DEFAULT_ITERATION_POLICY.maxTotalRounds,
+    }
+    const firstAgentRunId = createAgentRunId()
+    const worktree = await deps.worktreeManager.create({
+      workspaceId: request.workspaceId,
+      runId: firstAgentRunId,
+      taskId: request.taskId,
+      agentId: config.implementer,
+      ...(request.isolation === undefined ? {} : { isolation: request.isolation }),
+    })
+    if (!worktree.ok) return worktree
 
-      const merged: {
-        implementer?: string
-        reviewers?: readonly string[]
-        testCommand?: string
-      } = {
-        ...(request.implementer === undefined ? {} : { implementer: request.implementer }),
-        ...(request.reviewers === undefined ? {} : { reviewers: request.reviewers }),
-        ...(request.testCommand === undefined ? {} : { testCommand: request.testCommand }),
-      }
-      if (merged.implementer === undefined || merged.reviewers === undefined) {
-        const override = resolveConfig(workspace.data.path)
-        if (!override.ok) return override
-        merged.implementer ??= override.data?.implementer
-        merged.reviewers ??= override.data?.reviewers
-        merged.testCommand ??= override.data?.testCommand
-      }
-      let config: FullWorkflowConfig
-      if (merged.implementer !== undefined && merged.reviewers !== undefined) {
-        config = {
-          implementer: merged.implementer,
-          reviewers: merged.reviewers,
-          testCommand: merged.testCommand ?? DEFAULT_FULL_TEST_COMMAND,
-        }
-      } else {
-        const defaults = resolveDefaultFullWorkflowConfig(deps.registry.list())
-        if (!defaults.ok) return defaults
-        config = {
-          implementer: merged.implementer ?? defaults.data.implementer,
-          reviewers: merged.reviewers ?? defaults.data.reviewers,
-          testCommand: merged.testCommand ?? defaults.data.testCommand,
-        }
-      }
-      for (const agentId of [config.implementer, ...config.reviewers]) {
-        if (deps.registry.get(agentId) === undefined) {
-          return invalid(
-            `Agent "${agentId}" is not registered.`,
-            `FullWorkflowService could not resolve agent=${JSON.stringify(agentId)}`,
-          )
-        }
-      }
+    const discardWorktree = (): void => {
+      void deps.worktreeManager
+        .discard({ worktreeId: worktree.data.id, confirm: true })
+        .catch((cause: unknown) => {
+          logger.error({ worktreeId: worktree.data.id, cause }, 'Worktree discard threw.')
+        })
+    }
 
-      const policy = { ...DEFAULT_ITERATION_POLICY, ...request.policy }
-      const firstAgentRunId = createAgentRunId()
-      const worktree = await deps.worktreeManager.create({
-        workspaceId: request.workspaceId,
-        runId: firstAgentRunId,
-        taskId: request.taskId,
-        agentId: config.implementer,
-        ...(request.isolation === undefined ? {} : { isolation: request.isolation }),
-      })
-      if (!worktree.ok) return worktree
+    const created = deps.runs.createRun({
+      definition: buildDefaultFullWorkflowDefinition(config),
+      taskId: request.taskId,
+      totalIterations: policy.maxTotalRounds,
+      criteriaSetId: confirmed.id,
+    })
+    if (!created.ok) {
+      discardWorktree()
+      return created
+    }
+    const run = created.data.run
 
-      const discardWorktree = (): void => {
-        void deps.worktreeManager
-          .discard({ worktreeId: worktree.data.id, confirm: true })
-          .catch((cause: unknown) => {
-            logger.error({ worktreeId: worktree.data.id, cause }, 'Worktree discard threw.')
-          })
-      }
-
-      const created = deps.runs.createRun({
-        definition: buildDefaultFullWorkflowDefinition(config),
-        taskId: request.taskId,
-        totalIterations: policy.maxTotalRounds,
-        criteriaSetId: confirmed.id,
-      })
-      if (!created.ok) {
-        discardWorktree()
-        return created
-      }
-      const run = created.data.run
-
-      // The controller drives the loop (TASK-062 caps included); the runId
-      // resume path executes the persisted full-workflow snapshot round by
-      // round inside the pre-created worktree.
-      const iterated = await deps.createController(firstAgentRunId).iterate({
+    // The controller drives the loop (TASK-062 caps included); the runId
+    // resume path executes the persisted full-workflow snapshot round by
+    // round inside the pre-created worktree.
+    const controller = deps.createController(firstAgentRunId)
+    activeControllers.add(controller)
+    let iterated: IpcResult<WorkflowIterateResult>
+    try {
+      iterated = await controller.iterate({
         workspaceId: request.workspaceId,
         taskId: request.taskId,
         runId: run.id,
@@ -277,21 +300,35 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
         policy,
         ...(request.model === undefined ? {} : { model: request.model }),
       })
-      if (!iterated.ok) {
-        const failedRun = deps.runs.setRunStatus(run.id, 'failed')
-        if (!failedRun.ok) return failedRun
-        return iterated
-      }
+    } finally {
+      activeControllers.delete(controller)
+    }
+    if (!iterated.ok) {
+      const failedRun = deps.runs.setRunStatus(run.id, 'failed')
+      if (!failedRun.ok) return failedRun
+      return iterated
+    }
 
-      return {
-        ok: true,
-        data: {
-          run: iterated.data.run,
-          worktree: worktree.data,
-          rounds: iterated.data.rounds,
-          stopReason: iterated.data.stopReason,
-        },
+    return {
+      ok: true,
+      data: {
+        run: iterated.data.run,
+        worktree: worktree.data,
+        rounds: iterated.data.rounds,
+        stopReason: iterated.data.stopReason,
+      },
+    }
+  }
+
+  return {
+    start(request) {
+      const promise = executeStart(request)
+      inFlightStarts.add(promise)
+      const cleanup = (): void => {
+        inFlightStarts.delete(promise)
       }
+      void promise.then(cleanup, cleanup)
+      return promise
     },
 
     async summary({ runId }) {
@@ -326,7 +363,7 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
       // Diff target: worktree branch vs its base branch (three-dot: only what
       // the branch changed). A missing base (deleted branch) yields no diff —
       // logged, never fatal.
-      let diff: DiffResult | null = null
+      let diff: DiffPatchResult | null = null
       if (worktree !== null) {
         const patch = await deps.git.diffRefs({
           workspaceId: worktree.workspaceId,
@@ -366,6 +403,13 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
         ok: true,
         data: { run, steps, worktree, diff, criteria, criterionScores, criteriaOutcome },
       }
+    },
+
+    async dispose() {
+      // Dispose each in-flight controller first (its engine cancel settles
+      // the loop promptly), then wait out the trailing finalization writes.
+      await Promise.allSettled([...activeControllers].map((controller) => controller.dispose()))
+      await Promise.allSettled([...inFlightStarts])
     },
   }
 }

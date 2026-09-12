@@ -66,8 +66,9 @@ describe('openDatabase (TASK-005)', () => {
     db.connection.exec(
       'CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL REFERENCES parent(id))',
     )
-    expect(() => db.connection.prepare('INSERT INTO child (parent_id) VALUES (?)').run(999))
-      .toThrow(/FOREIGN KEY/)
+    expect(() =>
+      db.connection.prepare('INSERT INTO child (parent_id) VALUES (?)').run(999),
+    ).toThrow(/FOREIGN KEY/)
   })
 
   it('supports in-memory databases for tests', () => {

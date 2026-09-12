@@ -8,6 +8,7 @@ import type {
   AgentDetectionResult,
   AgentRun,
   AgentRunIdRequest,
+  AgentRunOutputRequest,
   AgentHealth,
   AgentExecutableOverrideRequest,
   ArchiveTaskRequest,
@@ -36,6 +37,7 @@ import type {
   GitCommitRequest,
   GitCommitResult,
   GitDiffRequest,
+  GitFilePatchRequest,
   GitLogRequest,
   GitOpenFileRequest,
   GitRawDiff,
@@ -293,6 +295,7 @@ export interface GitPort {
   log(request: GitLogRequest): Promise<IpcResult<readonly GitCommit[]>>
   commit(request: GitCommitRequest): Promise<IpcResult<GitCommitResult>>
   changes(request: GitWorkspaceRequest): Promise<IpcResult<DiffResult>>
+  filePatch(request: GitFilePatchRequest): Promise<IpcResult<GitRawDiff>>
   openFile(request: GitOpenFileRequest): Promise<IpcResult<void>>
 }
 
@@ -314,7 +317,7 @@ export interface AgentCatalogPort {
   cancel(request: AgentRunIdRequest): Promise<IpcResult<AgentRun>>
   get(request: AgentRunIdRequest): IpcResult<AgentRun | null>
   list(request?: ListAgentRunsRequest): IpcResult<readonly AgentRun[]>
-  getOutput(request: AgentRunIdRequest): IpcResult<string>
+  getOutput(request: AgentRunOutputRequest): IpcResult<string>
 }
 
 export interface WorktreePort {
@@ -348,6 +351,11 @@ export interface WorkflowPort {
   loadDefinition(request: LoadWorkflowDefinitionRequest): IpcResult<WorkflowDefinition>
   listRuns(request?: ListWorkflowRunsRequest): IpcResult<readonly WorkflowRun[]>
   getRun(request: WorkflowRunIdRequest): IpcResult<WorkflowRunDetail | null>
+  /**
+   * P0-4: resolves with the run snapshot as soon as the pass is running —
+   * suspended steps (checkpoint / criteria-gate / review-panel) do NOT keep
+   * the invoke pending; progress flows through workflow.* events.
+   */
   startRun(request: WorkflowRunStartRequest): Promise<IpcResult<WorkflowRunDetail>>
   cancelRun(request: WorkflowRunIdRequest): Promise<IpcResult<WorkflowRun>>
   resolveStep(request: WorkflowStepResolveRequest): IpcResult<WorkflowStep>
@@ -395,7 +403,8 @@ export interface TeskraRuntime {
   readonly maintenance: MaintenancePort
   readonly workflow: WorkflowPort
   readonly recovery: RecoveryPort
-  dispose(): IpcResult<void>
+  /** P0-2: async — stops Agent/Terminal child processes before closing the DB. */
+  dispose(): Promise<IpcResult<void>>
 }
 
 /** The Typed IPC router uses this instead of dereferencing an absent port. */

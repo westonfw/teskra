@@ -107,7 +107,11 @@ describe('ContextBuilder (TASK-068)', () => {
   it('packs everything within the default budget when it fits', () => {
     setup()
     seedMemory('architecture', 'Layered runtime.')
-    const built = builder.buildContext({ workspaceId: 'ws-1', taskId: 'task-1', role: 'implementer' })
+    const built = builder.buildContext({
+      workspaceId: 'ws-1',
+      taskId: 'task-1',
+      role: 'implementer',
+    })
     expect(built.ok).toBe(true)
     if (!built.ok) return
     expect(built.data.budgetChars).toBe(DEFAULT_CONTEXT_BUDGET_CHARS)
@@ -251,7 +255,9 @@ describe('ContextBuilder (TASK-068)', () => {
     const built = builder.buildContext({ workspaceId: 'ws-1' })
     expect(built.ok).toBe(true)
     if (!built.ok) return
-    const prompts = createPromptTemplateService({ paths: createTeskraPaths({ TESKRA_HOME: '/tmp/x' }) })
+    const prompts = createPromptTemplateService({
+      paths: createTeskraPaths({ TESKRA_HOME: '/tmp/x' }),
+    })
     const rendered = prompts.render({
       name: 'implement',
       context: {

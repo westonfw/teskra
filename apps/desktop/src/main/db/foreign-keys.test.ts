@@ -191,9 +191,9 @@ describe('ON DELETE CASCADE (§139.1)', () => {
     // ADR-0008: criteria sets get task_id SET NULL; sweeping unreferenced
     // orphans is TaskRepository.delete's job, not the FK's.
     expect(count(db, 'acceptance_criteria_sets')).toBe(1)
-    expect(db.prepare('SELECT task_id FROM acceptance_criteria_sets WHERE id = ?').get('cs1')).toEqual(
-      { task_id: null },
-    )
+    expect(
+      db.prepare('SELECT task_id FROM acceptance_criteria_sets WHERE id = ?').get('cs1'),
+    ).toEqual({ task_id: null })
     for (const table of ['review_panels', 'artifacts']) {
       expect(count(db, table), table).toBe(0)
     }

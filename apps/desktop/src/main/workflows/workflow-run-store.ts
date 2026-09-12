@@ -48,8 +48,8 @@ export interface CreateWorkflowRunRequest {
 }
 
 export interface ListWorkflowRunsFilter {
-  readonly taskId?: string
-  readonly status?: WorkflowRunStatus
+  readonly taskId?: string | undefined
+  readonly status?: WorkflowRunStatus | undefined
 }
 
 export interface TransitionStepOptions {

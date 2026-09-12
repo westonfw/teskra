@@ -1,4 +1,5 @@
-import { existsSync, rmSync } from 'node:fs'
+import { existsSync, realpathSync, rmSync } from 'node:fs'
+import { basename, join, resolve, sep } from 'node:path'
 
 import type {
   AgentRun,
@@ -68,6 +69,12 @@ export interface RetentionService {
   run(request?: RetentionRunRequest, signal?: AbortSignal): Promise<IpcResult<RetentionReport>>
   /** Aborts the in-flight run between items; false when nothing was running. */
   cancel(): IpcResult<boolean>
+  /**
+   * Shutdown (P2-1): aborts the in-flight run (if any) and waits for it to
+   * settle, so a GC in progress cannot keep deleting rows and files after
+   * the composition root closed the database.
+   */
+  dispose(): Promise<void>
 }
 
 export interface RetentionServiceDeps {
@@ -125,6 +132,36 @@ export function createRetentionService(deps: RetentionServiceDeps): RetentionSer
   const pathExists = deps.pathExists ?? existsSync
   const now = deps.now ?? (() => new Date())
   let active: AbortController | null = null
+  /** The in-flight run()'s promise, so dispose() can wait it out (P2-1). */
+  let activeRun: Promise<IpcResult<RetentionReport>> | null = null
+
+  /**
+   * P1-7 ownership gate. `agent_runs.run_dir` is a DB column: a migration, a
+   * manual edit, or a row created under a different TESKRA_HOME can point it
+   * anywhere on the host. Recursive deletion only ever touches directories
+   * below <home>/runs; anything else is skipped and audited. Real paths are
+   * compared when they resolve (artifact-store pattern) so a symlinked runs
+   * root or run directory cannot escape the check; a missing path falls back
+   * to the lexical comparison.
+   */
+  const ownsRunDir = (runDir: string): boolean => {
+    let root = resolve(join(deps.paths.home(), 'runs'))
+    let target = resolve(runDir)
+    try {
+      root = realpathSync(root)
+      target = realpathSync(runDir)
+    } catch {
+      // Missing directory: the lexical check below still applies.
+    }
+    return target !== root && target.startsWith(root + sep)
+  }
+
+  const foreignRunDirWarn = (runId: string, runDir: string): void => {
+    getLogger('runtime').warn(
+      { runId, runDir, runsRoot: join(deps.paths.home(), 'runs') },
+      'Retention refused to delete a run directory outside the Teskra data root.',
+    )
+  }
 
   const git = async (
     context: WorkspaceContext,
@@ -386,6 +423,13 @@ export function createRetentionService(deps: RetentionServiceDeps): RetentionSer
     if (!LOG_COLLECTABLE_STATUSES.has(run.data.status)) {
       return okEntry('skipped', `run is ${run.data.status} again; live logs are never collected`)
     }
+    if (!ownsRunDir(run.data.runDir)) {
+      foreignRunDirWarn(runId, run.data.runDir)
+      return okEntry(
+        'skipped',
+        'run directory is outside the Teskra data root; log files left untouched',
+      )
+    }
     const logFiles = deps.paths.runLogFiles(run.data.runDir)
     const removed: string[] = []
     try {
@@ -406,7 +450,7 @@ export function createRetentionService(deps: RetentionServiceDeps): RetentionSer
     }
     return removed.length === 0
       ? okEntry('skipped', 'log files already gone')
-      : okEntry('deleted', `removed ${removed.map((file) => file.split('/').pop()).join(' + ')}`)
+      : okEntry('deleted', `removed ${removed.map((file) => basename(file)).join(' + ')}`)
   }
 
   const executeDiscardedRun = async (
@@ -441,19 +485,25 @@ export function createRetentionService(deps: RetentionServiceDeps): RetentionSer
       deps.events.emit('git.changed', { workspaceId: worktree.data.workspaceId })
     }
 
+    let runDirNote = ''
     if (pathExists(run.data.runDir)) {
-      try {
-        rmSync(run.data.runDir, { recursive: true, force: true })
-      } catch (cause) {
-        return fail({
-          code: 'UNKNOWN',
-          message: 'Failed to delete the run directory.',
-          retryable: true,
-          detail: `run directory GC failed for ${run.data.runDir}`,
-          cause,
-        })
+      if (!ownsRunDir(run.data.runDir)) {
+        foreignRunDirWarn(runId, run.data.runDir)
+        runDirNote = '; run directory left untouched (outside the Teskra data root)'
+      } else {
+        try {
+          rmSync(run.data.runDir, { recursive: true, force: true })
+        } catch (cause) {
+          return fail({
+            code: 'UNKNOWN',
+            message: 'Failed to delete the run directory.',
+            retryable: true,
+            detail: `run directory GC failed for ${run.data.runDir}`,
+            cause,
+          })
+        }
+        removedParts.push('run directory')
       }
-      removedParts.push('run directory')
     }
 
     // Handoff DB records are kept by default: they are the post-hoc audit
@@ -464,11 +514,11 @@ export function createRetentionService(deps: RetentionServiceDeps): RetentionSer
       const deletedRun = deps.runs.delete(runId)
       if (!deletedRun.ok) return deletedRun
       removedParts.push('run record')
-      return okEntry('deleted', `removed ${removedParts.join(' + ')}`)
+      return okEntry('deleted', `removed ${removedParts.join(' + ')}${runDirNote}`)
     }
     return okEntry(
       'deleted',
-      `removed ${removedParts.join(' + ')}; run record kept (handoff retained)`,
+      `removed ${removedParts.join(' + ')}; run record kept (handoff retained)${runDirNote}`,
     )
   }
 
@@ -502,6 +552,87 @@ export function createRetentionService(deps: RetentionServiceDeps): RetentionSer
     }
   }
 
+  const executeRun = async (
+    request: RetentionRunRequest,
+    signal?: AbortSignal,
+  ): Promise<IpcResult<RetentionReport>> => {
+    // The guard must be set synchronously, before the first await —
+    // otherwise a concurrent run() slips through the check in run() while
+    // this one is suspended in collect().
+    const controller = new AbortController()
+    active = controller
+    const abortFromCaller = (): void => controller.abort()
+    if (signal !== undefined) {
+      if (signal.aborted) controller.abort()
+      else signal.addEventListener('abort', abortFromCaller, { once: true })
+    }
+    try {
+      const startedAt = now().toISOString()
+      const collected = await collect(request.workspaceId)
+      if (!collected.ok) return collected
+      const { policy, items, contexts } = collected.data
+
+      const entries: RetentionAuditEntry[] = []
+      let cancelled = false
+      const dryRun = request.dryRun === true
+      for (const item of items) {
+        deps.onItemStart?.(item)
+        if (controller.signal.aborted) {
+          cancelled = true
+          entries.push(
+            audit({
+              item,
+              action: 'skipped',
+              detail: 'cancelled before this item',
+              at: now().toISOString(),
+            }),
+          )
+          continue
+        }
+        if (dryRun) {
+          entries.push(
+            audit({ item, action: 'skipped', detail: 'dry-run', at: now().toISOString() }),
+          )
+          continue
+        }
+        const executed = await executeItem(contexts, item)
+        if (!executed.ok) {
+          entries.push(
+            audit({
+              item,
+              action: 'failed',
+              detail: executed.error.message,
+              at: now().toISOString(),
+            }),
+          )
+          continue
+        }
+        entries.push(
+          audit({
+            item,
+            action: executed.data.action,
+            detail: executed.data.detail,
+            at: now().toISOString(),
+          }),
+        )
+      }
+      return {
+        ok: true,
+        data: {
+          startedAt,
+          finishedAt: now().toISOString(),
+          dryRun: request.dryRun === true,
+          cancelled,
+          policy,
+          entries,
+        },
+      }
+    } finally {
+      active = null
+      signal?.removeEventListener('abort', abortFromCaller)
+    }
+  }
+
   return {
     async plan(request = {}) {
       const collected = await collect(request.workspaceId)
@@ -516,96 +647,40 @@ export function createRetentionService(deps: RetentionServiceDeps): RetentionSer
       }
     },
 
-    async run(request = {}, signal) {
+    run(request = {}, signal) {
       if (active !== null) {
-        return fail({
-          code: 'UNKNOWN',
-          message: 'A retention run is already in progress.',
-          retryable: true,
-          detail: 'RetentionService.run called while another run is active',
-        })
+        return Promise.resolve(
+          fail<RetentionReport>({
+            code: 'UNKNOWN',
+            message: 'A retention run is already in progress.',
+            retryable: true,
+            detail: 'RetentionService.run called while another run is active',
+          }),
+        )
       }
-      // The guard must be set synchronously, before the first await —
-      // otherwise a concurrent run() slips through the check above while
-      // this one is suspended in collect().
-      const controller = new AbortController()
-      active = controller
-      const abortFromCaller = (): void => controller.abort()
-      if (signal !== undefined) {
-        if (signal.aborted) controller.abort()
-        else signal.addEventListener('abort', abortFromCaller, { once: true })
+      const promise = executeRun(request, signal)
+      activeRun = promise
+      const clear = (): void => {
+        if (activeRun === promise) activeRun = null
       }
-      try {
-        const startedAt = now().toISOString()
-        const collected = await collect(request.workspaceId)
-        if (!collected.ok) return collected
-        const { policy, items, contexts } = collected.data
-
-        const entries: RetentionAuditEntry[] = []
-        let cancelled = false
-        const dryRun = request.dryRun === true
-        for (const item of items) {
-          deps.onItemStart?.(item)
-          if (controller.signal.aborted) {
-            cancelled = true
-            entries.push(
-              audit({
-                item,
-                action: 'skipped',
-                detail: 'cancelled before this item',
-                at: now().toISOString(),
-              }),
-            )
-            continue
-          }
-          if (dryRun) {
-            entries.push(
-              audit({ item, action: 'skipped', detail: 'dry-run', at: now().toISOString() }),
-            )
-            continue
-          }
-          const executed = await executeItem(contexts, item)
-          if (!executed.ok) {
-            entries.push(
-              audit({
-                item,
-                action: 'failed',
-                detail: executed.error.message,
-                at: now().toISOString(),
-              }),
-            )
-            continue
-          }
-          entries.push(
-            audit({
-              item,
-              action: executed.data.action,
-              detail: executed.data.detail,
-              at: now().toISOString(),
-            }),
-          )
-        }
-        return {
-          ok: true,
-          data: {
-            startedAt,
-            finishedAt: now().toISOString(),
-            dryRun: request.dryRun === true,
-            cancelled,
-            policy,
-            entries,
-          },
-        }
-      } finally {
-        active = null
-        signal?.removeEventListener('abort', abortFromCaller)
-      }
+      void promise.then(clear, clear)
+      return promise
     },
 
     cancel() {
       if (active === null) return { ok: true, data: false }
       active.abort()
       return { ok: true, data: true }
+    },
+
+    async dispose() {
+      const inFlight = activeRun
+      if (inFlight === null) return
+      active?.abort()
+      await inFlight.then(
+        () => undefined,
+        () => undefined,
+      )
     },
   }
 }

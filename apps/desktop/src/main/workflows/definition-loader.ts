@@ -3,6 +3,7 @@ import { join } from 'node:path'
 
 import type { IpcResult, WorkflowDefinition, WorkflowDefinitionFileInfo } from '@teskra/contracts'
 import { validateWorkflowDefinition } from '@teskra/shared'
+import { parse as parseYaml } from 'yaml'
 
 import { type InternalAppError, toPublicError } from '../errors'
 import type { TeskraPaths } from '../paths'
@@ -15,10 +16,11 @@ import type { TeskraPaths } from '../paths'
  * written back by the UI. Both `.yaml` / `.yml` and `.json` files are
  * accepted.
  *
- * YAML support: the dependency tree has no YAML parser, and adding one is a
- * deliberate, separate decision. JSON is a subset of YAML 1.2, so a `.yaml`
- * file whose content is JSON parses today; full YAML block syntax is
- * rejected with a precise error until the `yaml` package is adopted.
+ * Parsing is dispatched by extension: `.yaml` / `.yml` go through the `yaml`
+ * package (YAML 1.2 core schema, duplicate keys rejected), while `.json`
+ * keeps `JSON.parse` so existing JSON files see unchanged parsing behavior
+ * and error messages. A `.yaml` file whose content is JSON still parses
+ * (JSON is a subset of YAML 1.2).
  *
  * Every candidate file goes through `validateWorkflowDefinition`
  * (@teskra/shared): shape, duplicate ids, dangling dependsOn, acyclicity,
@@ -73,25 +75,30 @@ export function createWorkflowDefinitionLoader(
       })
     }
 
-    let json: unknown
+    let parsed: unknown
     try {
-      json = JSON.parse(raw)
+      parsed = path.endsWith('.json') ? JSON.parse(raw) : parseYaml(raw)
     } catch (cause) {
       return fail({
         code: 'VALIDATION_FAILED',
         message: `Workflow definition file "${path}" is not parseable.`,
+        messageKey: 'errorMessage.workflowDefinitionUnparseable',
+        params: { path },
         retryable: false,
-        detail: `parse ${path}: only the JSON subset of YAML is supported (no YAML parser dependency yet)`,
+        detail: `parse ${path}`,
         cause,
       })
     }
 
-    const validated = validateWorkflowDefinition(json)
+    const validated = validateWorkflowDefinition(parsed)
     if (!validated.ok) {
       // Best-effort id so `load` can name the invalid file by definition id.
       const id =
-        typeof json === 'object' && json !== null && 'id' in json && typeof json.id === 'string'
-          ? json.id
+        typeof parsed === 'object' &&
+        parsed !== null &&
+        'id' in parsed &&
+        typeof parsed.id === 'string'
+          ? parsed.id
           : undefined
       return {
         ok: true,
@@ -168,6 +175,8 @@ export function createWorkflowDefinitionLoader(
         return fail({
           code: 'VALIDATION_FAILED',
           message: `Workflow definition "${definitionId}" is invalid and cannot be loaded.`,
+          messageKey: 'errorMessage.workflowDefinitionInvalid',
+          params: { id: definitionId },
           retryable: false,
           detail: `${invalidMatch.path}: ${invalidMatch.issues.join('; ')}`,
         })
@@ -175,6 +184,8 @@ export function createWorkflowDefinitionLoader(
       return fail({
         code: 'VALIDATION_FAILED',
         message: `Workflow definition "${definitionId}" was not found.`,
+        messageKey: 'errorMessage.workflowDefinitionNotFound',
+        params: { id: definitionId },
         retryable: false,
         detail: `${deps.paths.repoWorkflowsDir(repoRoot)} contains no definition with id ${JSON.stringify(definitionId)}`,
       })

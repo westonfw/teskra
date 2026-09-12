@@ -88,8 +88,7 @@ function packCandidates(
   budgetChars: number,
 ): { parts: ContextPart[]; omittedCount: number } {
   const ordered = [...candidates].sort(
-    (left, right) =>
-      right.priority - left.priority || right.tiebreak.localeCompare(left.tiebreak),
+    (left, right) => right.priority - left.priority || right.tiebreak.localeCompare(left.tiebreak),
   )
   const included: Candidate[] = []
   let used = 0

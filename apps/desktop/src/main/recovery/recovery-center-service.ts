@@ -66,7 +66,9 @@ function issue(base: Omit<RecoveryIssue, 'id'>): RecoveryIssue {
  * is dispatched by the Renderer through the owning port (agent.resume,
  * worktree.validate/discard, page navigation).
  */
-export function createRecoveryCenterService(deps: RecoveryCenterServiceDeps): RecoveryCenterService {
+export function createRecoveryCenterService(
+  deps: RecoveryCenterServiceDeps,
+): RecoveryCenterService {
   const pathExists = deps.pathExists ?? existsSync
   const now = deps.now ?? (() => new Date())
 

@@ -74,24 +74,38 @@ function toDomain(row: AgentEventRow): IpcResult<AgentEvent> {
 }
 
 export function createAgentEventRepository(connection: Database.Database): AgentEventRepository {
+  // P1-1: statements are prepared once per repository — agent.output events
+  // make `append` the hottest write path in the app, and re-preparing the
+  // same SQL per call dominated it.
+  const insertStatement = connection.prepare(
+    `INSERT INTO agent_events (run_id, seq, event_type, payload_json, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  )
+  const selectByIdStatement = connection.prepare('SELECT * FROM agent_events WHERE id = ?')
+  const listByRunStatement = connection.prepare(
+    'SELECT * FROM agent_events WHERE run_id = ? ORDER BY seq ASC',
+  )
+  const maxSeqStatement = connection.prepare(
+    'SELECT MAX(seq) AS max_seq FROM agent_events WHERE run_id = ?',
+  )
+
   return {
     append(input, now = nowIso()) {
       const inserted = execute(ENTITY, 'append', () => {
-        const result = connection
-          .prepare(
-            `INSERT INTO agent_events (run_id, seq, event_type, payload_json, created_at)
-             VALUES (?, ?, ?, ?, ?)`,
-          )
-          .run(input.runId, input.seq, input.eventType, encodeJson(input.payload) as string, now)
+        const result = insertStatement.run(
+          input.runId,
+          input.seq,
+          input.eventType,
+          encodeJson(input.payload),
+          now,
+        )
         return Number(result.lastInsertRowid)
       })
       if (!inserted.ok) {
         return inserted
       }
       const row = execute(ENTITY, 'read', () => {
-        return connection
-          .prepare('SELECT * FROM agent_events WHERE id = ?')
-          .get(inserted.data) as AgentEventRow
+        return selectByIdStatement.get(inserted.data) as AgentEventRow
       })
       if (!row.ok) {
         return row
@@ -101,9 +115,7 @@ export function createAgentEventRepository(connection: Database.Database): Agent
 
     listByRun(runId) {
       const rows = execute(ENTITY, 'listByRun', () => {
-        return connection
-          .prepare('SELECT * FROM agent_events WHERE run_id = ? ORDER BY seq ASC')
-          .all(runId) as AgentEventRow[]
+        return listByRunStatement.all(runId) as AgentEventRow[]
       })
       if (!rows.ok) {
         return rows
@@ -113,9 +125,7 @@ export function createAgentEventRepository(connection: Database.Database): Agent
 
     nextSeq(runId) {
       return execute(ENTITY, 'nextSeq', () => {
-        const row = connection
-          .prepare('SELECT MAX(seq) AS max_seq FROM agent_events WHERE run_id = ?')
-          .get(runId) as { max_seq: number | null }
+        const row = maxSeqStatement.get(runId) as { max_seq: number | null }
         return (row.max_seq ?? 0) + 1
       })
     },

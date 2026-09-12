@@ -34,7 +34,10 @@ function requireOk<T>(result: IpcResult<T>): T {
   return result.data
 }
 
-function panelResult(status: 'completed' | 'failed', consensus?: 'approve' | 'mixed'): ReviewPanelResult {
+function panelResult(
+  status: 'completed' | 'failed',
+  consensus?: 'approve' | 'mixed',
+): ReviewPanelResult {
   return {
     panel: {
       id: 'panel-1',
@@ -48,7 +51,9 @@ function panelResult(status: 'completed' | 'failed', consensus?: 'approve' | 'mi
   }
 }
 
-function setup(startPanel: (request: StartReviewPanelRequest) => Promise<IpcResult<ReviewPanelResult>>) {
+function setup(
+  startPanel: (request: StartReviewPanelRequest) => Promise<IpcResult<ReviewPanelResult>>,
+) {
   const connection = new Database(':memory:')
   connection.pragma('foreign_keys = ON')
   const migrated = migrateDatabase(connection)
@@ -101,7 +106,9 @@ describe('createReviewPanelStepExecutor', () => {
     const run = requireOk(
       store.createRun({ definition: DEFINITION, taskId: 'task-1', totalIterations: 1 }),
     )
-    const settled = requireOk(await engine.start(run.run.id, { workspaceId: 'ws-1', worktreeId: 'wt-1' }))
+    const settled = requireOk(
+      await engine.start(run.run.id, { workspaceId: 'ws-1', worktreeId: 'wt-1' }),
+    )
 
     expect(panel.startPanel).toHaveBeenCalledWith({
       workspaceId: 'ws-1',
@@ -112,7 +119,11 @@ describe('createReviewPanelStepExecutor', () => {
     })
     const step = settled.steps.find((entry) => entry.nodeId === 'panel')
     expect(step?.status).toBe('completed')
-    expect(step?.result).toMatchObject({ outcome: 'approve', panelId: 'panel-1', consensus: 'approve' })
+    expect(step?.result).toMatchObject({
+      outcome: 'approve',
+      panelId: 'panel-1',
+      consensus: 'approve',
+    })
   })
 
   it('maps a split panel (mixed) to changes_requested, never silently approving', async () => {

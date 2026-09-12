@@ -200,7 +200,7 @@ export function createWorkflowRunRepository(connection: Database.Database): Work
             input.id,
             input.taskId ?? null,
             input.workflowDefinitionId,
-            encodeJson(input.definition) as string,
+            encodeJson(input.definition),
             input.status ?? 'created',
             input.currentIteration ?? 0,
             input.totalIterations ?? 0,

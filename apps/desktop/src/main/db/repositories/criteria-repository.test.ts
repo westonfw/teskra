@@ -88,8 +88,8 @@ describe('CriteriaRepository', () => {
     expect(criteria.ok).toBe(true)
     if (!criteria.ok) return
     expect(criteria.data.map((c) => c.id)).toEqual(['c-1', 'c-2'])
-    expect(criteria.data[0].required).toBe(true)
-    expect(criteria.data[1].required).toBe(false)
+    expect(criteria.data[0]?.required).toBe(true)
+    expect(criteria.data[1]?.required).toBe(false)
   })
 
   it('updates and deletes criteria', () => {

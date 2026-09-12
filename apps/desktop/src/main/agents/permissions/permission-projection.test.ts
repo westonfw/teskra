@@ -31,7 +31,8 @@ function profile(approvalMode: TeskraPermissionProfile['approvalMode']): TeskraP
 }
 
 afterEach(() => {
-  for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  for (const home of homes.splice(0))
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 describe('built-in Agent permission capability declarations (TASK-077)', () => {
@@ -93,7 +94,10 @@ describe('Codex permission projection (TASK-077)', () => {
       profile: { ...profile('manual'), allow: ['git status'], deny: ['rm'] },
       runDir: runDir(),
     })
-    expect(prepared).toEqual({ ok: true, data: { profile: expect.objectContaining({ approvalMode: 'manual' }) } })
+    expect(prepared).toEqual({
+      ok: true,
+      data: { profile: expect.objectContaining({ approvalMode: 'manual' }) },
+    })
     if (prepared.ok) expect(prepared.data?.configPath).toBeUndefined()
   })
 })
@@ -115,12 +119,9 @@ describe('Claude Code permission projection (TASK-077)', () => {
   })
 
   it('links the generated settings file via --settings when a config path exists', () => {
-    expect(CLAUDE_PERMISSION_MAPPING.buildArgs?.(profile('manual'), '/run/permission-settings.json')).toEqual([
-      '--permission-mode',
-      'default',
-      '--settings',
-      '/run/permission-settings.json',
-    ])
+    expect(
+      CLAUDE_PERMISSION_MAPPING.buildArgs?.(profile('manual'), '/run/permission-settings.json'),
+    ).toEqual(['--permission-mode', 'default', '--settings', '/run/permission-settings.json'])
   })
 
   it('builds a settings.json permissions document matching the profile', () => {

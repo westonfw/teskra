@@ -64,8 +64,6 @@ export interface TeskraPaths {
    * resolution only, no I/O, so GC can probe without recreating directories.
    */
   runLogFiles(runDirectory: string): RunLogFiles
-  /** <home>/worktrees/<workspaceId>/ — created on demand. */
-  worktreeRoot(workspaceId: string): IpcResult<string>
   /** <home>/config.json — resolution only; the file may not exist. */
   config(): string
   /**
@@ -179,12 +177,6 @@ export function createTeskraPaths(env: NodeJS.ProcessEnv = process.env): TeskraP
           artifacts: artifacts.data,
         },
       }
-    },
-    worktreeRoot(workspaceId: string) {
-      if (!isValidSegment(workspaceId)) {
-        return { ok: false, error: toPublicError(invalidSegmentError('workspaceId', workspaceId)) }
-      }
-      return ensureDir(join(home(), 'worktrees', workspaceId))
     },
     config() {
       return join(home(), 'config.json')

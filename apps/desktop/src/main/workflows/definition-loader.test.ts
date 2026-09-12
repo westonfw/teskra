@@ -9,9 +9,9 @@ import { createWorkflowDefinitionLoader } from './definition-loader'
 
 /**
  * TASK-055 loader tests (ADR-0005): repo-local `<repo>/.teskra/workflows/`
- * files, loadable as `.json` or `.yaml` (JSON subset of YAML 1.2 — the
- * dependency tree has no YAML parser yet). Invalid files surface as
- * `status: 'invalid'` with reasons; they are never silently dropped.
+ * files, loadable as `.json` or `.yaml` / `.yml` (full YAML block syntax via
+ * the `yaml` package; JSON is a subset of YAML 1.2). Invalid files surface
+ * as `status: 'invalid'` with reasons; they are never silently dropped.
  */
 
 const tempDirs: string[] = []
@@ -131,11 +131,67 @@ describe('WorkflowDefinitionLoader (TASK-055)', () => {
     }
   })
 
-  it('rejects full YAML block syntax with a precise error (no YAML parser dependency)', () => {
+  it('loads full YAML block syntax (.yaml and .yml)', () => {
+    const paths = makePaths()
+    const dir = paths.repoWorkflowsDir('/repo')
+    const yamlBlock = [
+      'id: block-workflow',
+      'steps:',
+      '  - id: implement',
+      '    type: agent',
+      '    agent: codex',
+      '    runOn: first',
+      '  - id: gate',
+      '    type: criteria-gate',
+      '    dependsOn:',
+      '      - implement',
+      '',
+    ].join('\n')
+    const seam = fileSeam({
+      [join(dir, 'block.yaml')]: yamlBlock,
+      [join(dir, 'block.yml')]: yamlBlock.replace('block-workflow', 'block-workflow-yml'),
+    })
+    const loader = createWorkflowDefinitionLoader({ paths, ...seam })
+
+    const listed = loader.list('/repo')
+    expect(listed.ok).toBe(true)
+    if (!listed.ok) return
+    expect(listed.data.map((info) => info.id).sort()).toEqual([
+      'block-workflow',
+      'block-workflow-yml',
+    ])
+    expect(listed.data.every((info) => info.status === 'loaded')).toBe(true)
+
+    const loaded = loader.load('/repo', 'block-workflow')
+    expect(loaded.ok).toBe(true)
+    if (loaded.ok) {
+      const first = loaded.data.steps[0]
+      if (first?.type !== 'agent') throw new Error('expected the first step to be an agent step')
+      expect(first.agent).toBe('codex')
+      expect(loaded.data.steps[1]?.dependsOn).toEqual(['implement'])
+    }
+  })
+
+  it('rejects YAML syntax errors with a precise error', () => {
     const paths = makePaths()
     const dir = paths.repoWorkflowsDir('/repo')
     const seam = fileSeam({
-      [join(dir, 'block.yaml')]: 'id: block\nsteps:\n  - id: a\n    type: shell\n',
+      [join(dir, 'broken.yaml')]: 'id: broken\nsteps:\n  - id: a\n   type: shell\n',
+    })
+    const loader = createWorkflowDefinitionLoader({ paths, ...seam })
+    const listed = loader.list('/repo')
+    expect(listed.ok).toBe(false)
+    if (!listed.ok) {
+      expect(listed.error.code).toBe('VALIDATION_FAILED')
+      expect(listed.error.message).toContain('not parseable')
+    }
+  })
+
+  it('rejects invalid JSON syntax with a precise error', () => {
+    const paths = makePaths()
+    const dir = paths.repoWorkflowsDir('/repo')
+    const seam = fileSeam({
+      [join(dir, 'broken.json')]: '{"id": "broken", "steps": [}',
     })
     const loader = createWorkflowDefinitionLoader({ paths, ...seam })
     const listed = loader.list('/repo')

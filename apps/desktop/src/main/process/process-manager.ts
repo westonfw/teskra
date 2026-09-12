@@ -1,12 +1,16 @@
 import type { IPty } from 'node-pty'
 import { spawn as spawnPty } from 'node-pty'
 
-import type { IpcResult, WorkbenchEvents } from '@teskra/contracts'
+import type { IpcResult, PublicAppError, WorkbenchEvents } from '@teskra/contracts'
 
 import type { EventBus } from '../events/event-bus'
 import { type InternalAppError, toPublicError } from '../errors'
 import { getLogger } from '../logger'
-import type { ShellExecutionContext, WorkspaceRuntime } from '../workspace/runtime'
+import {
+  resolveSpawnEnv,
+  type ShellExecutionContext,
+  type WorkspaceRuntime,
+} from '../workspace/runtime'
 
 const DEFAULT_COLS = 120
 const DEFAULT_ROWS = 30
@@ -16,9 +20,9 @@ export interface ProcessStartRequest {
   readonly command: string
   readonly args?: readonly string[]
   readonly cwd?: string
-  readonly env?: Readonly<Record<string, string>>
-  readonly cols?: number
-  readonly rows?: number
+  readonly env?: Readonly<Record<string, string>> | undefined
+  readonly cols?: number | undefined
+  readonly rows?: number | undefined
   readonly terminalName?: string
   readonly workspaceId?: string
   readonly agentRunId?: string
@@ -28,8 +32,8 @@ export interface ProcessStartRequest {
 export interface ManagedProcess {
   readonly id: string
   readonly pid: number
-  readonly workspaceId?: string
-  readonly agentRunId?: string
+  readonly workspaceId?: string | undefined
+  readonly agentRunId?: string | undefined
   readonly startedAt: string
 }
 
@@ -56,6 +60,14 @@ export interface ProcessStopResult {
   readonly stage: 'interrupt' | 'terminate' | 'kill'
 }
 
+/** Outcome of ProcessManager.disposeAll (P0-2 shutdown cleanup). */
+export interface ProcessDisposeSummary {
+  /** Process ids stopped via the interrupt → terminate → kill ladder. */
+  readonly stopped: readonly ProcessStopResult[]
+  /** Processes that could not be stopped; disposal is best-effort and continues. */
+  readonly failed: readonly { readonly id: string; readonly error: PublicAppError }[]
+}
+
 export interface ProcessManager {
   start(request: ProcessStartRequest): IpcResult<ManagedProcess>
   write(processId: string, data: string): IpcResult<void>
@@ -64,6 +76,12 @@ export interface ProcessManager {
   terminate(processId: string): IpcResult<void>
   kill(processId: string): IpcResult<void>
   stop(processId: string, policy?: KillPolicy): Promise<IpcResult<ProcessStopResult>>
+  /**
+   * P0-2 shutdown: stops EVERY active process through the interrupt →
+   * terminate → kill ladder. Best-effort: per-process failures are reported
+   * in the summary, never thrown, and never block the remaining stops.
+   */
+  disposeAll(policy?: KillPolicy): Promise<IpcResult<ProcessDisposeSummary>>
   get(processId: string): ManagedProcess | undefined
   list(): readonly ManagedProcess[]
   waitForExit(processId: string): Promise<IpcResult<ProcessExit>>
@@ -73,7 +91,7 @@ export interface ProcessManagerDeps {
   readonly events: EventBus<WorkbenchEvents>
   /** Native seam for deterministic tests; production always uses node-pty. */
   readonly spawn?: typeof spawnPty
-  readonly hostPlatform?: NodeJS.Platform
+  readonly hostPlatform?: NodeJS.Platform | undefined
   readonly now?: () => string
 }
 
@@ -212,7 +230,14 @@ export function createProcessManager(deps: ProcessManagerDeps): ProcessManager {
           cols,
           rows,
           ...(context.cwd !== undefined ? { cwd: context.cwd } : {}),
-          env: { ...process.env, ...request.env },
+          // P0-1: for a WSL-on-Windows runtime the env is set on the wsl.exe
+          // host process; resolveSpawnEnv declares every key in WSLENV so the
+          // values (TESKRA_HANDOFF_PATH, workspace env, secrets) actually
+          // reach the Linux process. Host-native runtimes pass through.
+          env: {
+            ...process.env,
+            ...resolveSpawnEnv(request.runtime, request.env ?? {}, process.env['WSLENV']),
+          },
           useConpty: true,
         })
       } catch (cause) {
@@ -376,6 +401,26 @@ export function createProcessManager(deps: ProcessManagerDeps): ProcessManager {
 
     get(processId) {
       return active.get(processId)?.info
+    },
+
+    async disposeAll(policy = DEFAULT_KILL_POLICY) {
+      const stopped: ProcessStopResult[] = []
+      const failed: { id: string; error: PublicAppError }[] = []
+      await Promise.all(
+        [...active.keys()].map(async (processId) => {
+          const result = await manager.stop(processId, policy)
+          if (result.ok) {
+            stopped.push(result.data)
+          } else {
+            failed.push({ id: processId, error: result.error })
+            logger.error(
+              { processId, error: result.error },
+              'Process did not stop cleanly during shutdown.',
+            )
+          }
+        }),
+      )
+      return { ok: true, data: { stopped, failed } }
     },
 
     list() {

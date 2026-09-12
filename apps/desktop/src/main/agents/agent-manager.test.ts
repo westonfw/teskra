@@ -57,12 +57,13 @@ interface TestContext {
 const contexts: TestContext[] = []
 const homes: string[] = []
 
-afterEach(() => {
+afterEach(async () => {
   for (const context of contexts.splice(0)) {
-    context.manager.dispose()
+    await context.manager.dispose()
     context.connection.close()
   }
-  for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  for (const home of homes.splice(0))
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 function mockAdapter(
@@ -262,6 +263,26 @@ describe('AgentManager (TASK-028)', () => {
     expect(context.adapters.codex.start).not.toHaveBeenCalled()
   })
 
+  it('dispose cancels every active run instead of leaking its process (P0-2)', async () => {
+    const context = setup()
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'claude',
+      approvalMode: 'read-only',
+    })
+
+    await context.manager.dispose()
+
+    expect(context.adapters.codex.cancel).toHaveBeenCalledWith('run-1')
+    expect(context.adapters.claude.cancel).toHaveBeenCalledWith('run-2')
+    expect(context.manager.get('run-1')).toMatchObject({ ok: true, data: { status: 'cancelled' } })
+    expect(context.manager.get('run-2')).toMatchObject({ ok: true, data: { status: 'cancelled' } })
+    // A second dispose is a harmless no-op: nothing is cancelled twice.
+    await context.manager.dispose()
+    expect(context.adapters.codex.cancel).toHaveBeenCalledOnce()
+  })
+
   it('translates output/input events and saves a non-zero crash exit', async () => {
     const context = setup()
     const output = vi.fn()
@@ -360,7 +381,7 @@ describe('AgentManager (TASK-028)', () => {
       agentRunId: 'run-1',
       exitCode: 0,
     })
-    context.manager.dispose()
+    await context.manager.dispose()
 
     const registry = createBuiltInAgentRegistry()
     if (!registry.ok) throw new Error(registry.error.message)
@@ -391,7 +412,57 @@ describe('AgentManager (TASK-028)', () => {
       'agent.output',
       'agent.completed',
     ])
-    restarted.dispose()
+    await restarted.dispose()
+  })
+
+  it('serves getOutput tails from the terminal log without rebuilding from SQLite', async () => {
+    const context = setup()
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    for (const data of ['aaaa', 'bbbb']) {
+      context.events.emit('process.output', {
+        processId: 'codex:run-1',
+        agentRunId: 'run-1',
+        data,
+      })
+    }
+    context.events.emit('process.exited', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      exitCode: 0,
+    })
+
+    expect(context.manager.getOutput('run-1')).toEqual({ ok: true, data: 'aaaabbbb' })
+    expect(context.manager.getOutput('run-1', { tailBytes: 4 })).toEqual({
+      ok: true,
+      data: 'bbbb',
+    })
+  })
+
+  it('rewrites run.json at lifecycle transitions but not per output batch', async () => {
+    const context = setup()
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    const files = context.paths.runFiles('run-1')
+    if (!files.ok) throw new Error(files.error.message)
+    const launchedManifest = readFileSync(files.data.manifest, 'utf8')
+
+    context.events.emit('process.output', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      data: 'chunk',
+    })
+    // Flushing the batcher performs the SQLite lastOutputAt update...
+    expect(context.manager.getOutput('run-1')).toEqual({ ok: true, data: 'chunk' })
+    const run = context.runs.getById('run-1')
+    expect(run.ok && run.data?.lastOutputAt).toBe('2026-09-10T00:00:02.000Z')
+    // ...but the manifest keeps its launch-time content until a transition.
+    expect(readFileSync(files.data.manifest, 'utf8')).toBe(launchedManifest)
+
+    context.events.emit('process.exited', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      exitCode: 0,
+    })
+    expect(readFileSync(files.data.manifest, 'utf8')).not.toBe(launchedManifest)
   })
 
   it('keeps the raw JSONL and terminal log when SQLite event writes fail', async () => {
@@ -808,8 +879,7 @@ describe('AgentManager resume (TASK-042)', () => {
     expect(claude.resume).toHaveBeenCalledOnce()
     const history = context.agentEvents.listByRun('run-1')
     expect(
-      history.ok &&
-        history.data.filter(({ eventType }) => eventType === 'agent.resume_requested'),
+      history.ok && history.data.filter(({ eventType }) => eventType === 'agent.resume_requested'),
     ).toHaveLength(1)
     expect(
       history.ok && history.data.filter(({ eventType }) => eventType === 'agent.resumed'),
@@ -888,6 +958,29 @@ describe('AgentManager resume (TASK-042)', () => {
     expect(
       history.ok && history.data.find(({ eventType }) => eventType === 'agent.resumed')?.payload,
     ).toMatchObject({ nativeSession: false })
+  })
+
+  it('builds the resume context from a bounded terminal log tail (P1-6)', async () => {
+    const context = setup()
+    await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      prompt: 'Implement the feature',
+    })
+    context.events.emit('process.output', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      data: `${'y'.repeat(30_000)}TAIL-MARKER`,
+    })
+    interrupt(context, 'run-1')
+
+    const resumed = await context.manager.resume({ runId: 'run-1' })
+
+    expect(resumed).toMatchObject({ ok: true, data: { id: 'run-1', status: 'running' } })
+    const relaunched = vi.mocked(context.adapters.codex.start).mock.calls[1]?.[0]
+    // The context keeps the recent tail, not the run's entire 30KB output.
+    expect(relaunched?.prompt).toContain('TAIL-MARKER')
+    expect(relaunched?.prompt?.length ?? Number.MAX_SAFE_INTEGER).toBeLessThan(20_000)
   })
 })
 
@@ -1050,7 +1143,7 @@ describe('AgentManager handoff collection (TASK-051, ADR-0004)', () => {
 
   it('never blocks run completion even if handoff collection throws', async () => {
     const context = setup()
-    context.manager.dispose()
+    await context.manager.dispose()
     const registry = createBuiltInAgentRegistry()
     if (!registry.ok) throw new Error(registry.error.message)
     const manager = createAgentManager({

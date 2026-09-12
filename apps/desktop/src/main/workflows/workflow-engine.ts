@@ -139,6 +139,15 @@ export interface WorkflowEngine {
    */
   start(runId: string, context: WorkflowExecutionContext): Promise<IpcResult<WorkflowRunDetail>>
   /**
+   * P0-4: starts a pass WITHOUT awaiting it — resolves as soon as the pass is
+   * running (steps scheduled) with the current run snapshot. Pass progress
+   * flows through `workflow.run_updated` / `workflow.step_updated` events; the
+   * pass outcome is logged on failure. This is the entry point IPC handlers
+   * must use: `start()` parks on suspended steps (checkpoint / criteria-gate /
+   * review-panel), which would keep an ipcRenderer.invoke pending forever.
+   */
+  begin(runId: string, context: WorkflowExecutionContext): IpcResult<WorkflowRunDetail>
+  /**
    * Resolves a suspended step (checkpoint / criteria-gate / review-panel).
    * `outcome` must be one of the node type's allowed outcomes; checkpoint
    * nodes take no outcome.
@@ -148,10 +157,11 @@ export interface WorkflowEngine {
   cancel(runId: string): Promise<IpcResult<WorkflowRun>>
   /**
    * Best-effort shutdown (TASK-059): cancels every active pass so executors
-   * release their event subscriptions. Disposal of the composition root calls
-   * this before the EventBus is cleared.
+   * release their event subscriptions, and settles only once every cancel
+   * has finished — the composition root awaits this so a cancel's trailing
+   * writes never land on an already-closed database (P2-2).
    */
-  dispose(): void
+  dispose(): Promise<void>
 }
 
 export interface WorkflowEngineDeps {
@@ -202,10 +212,10 @@ interface NodeState {
   step: WorkflowStep
   terminal: boolean
   /** Effective outcome for conditional-edge evaluation; set once terminal. */
-  outcome?: string
+  outcome?: string | undefined
   /** Whether this node activates its UNCONDITIONAL out-edges. */
   activatesEdges: boolean
-  cancel?: () => void | Promise<void>
+  cancel?: (() => void | Promise<void>) | undefined
 }
 
 interface PassState {
@@ -256,7 +266,10 @@ function createConditionStepExecutor(): WorkflowStepExecutor {
       return Promise.resolve(
         node.type === 'condition'
           ? evaluateCondition(node.expression, upstreamOutcomes)
-          : { outcome: 'failure', result: { error: 'condition executor received a non-condition node' } },
+          : {
+              outcome: 'failure',
+              result: { error: 'condition executor received a non-condition node' },
+            },
       )
     },
   }
@@ -337,7 +350,10 @@ function createAgentStepExecutor(deps: {
           // subscriptions above are already in place, so the terminal event
           // the cancel provokes still settles this step.
           if (cancelRequested.delete(step.id)) {
-            void deps.agents.cancel(agentRunId).then(() => undefined, () => undefined)
+            void deps.agents.cancel(agentRunId).then(
+              () => undefined,
+              () => undefined,
+            )
           }
         })
       })()
@@ -356,11 +372,17 @@ function createAgentStepExecutor(deps: {
       try {
         const agentRunId = agentRuns.get(stepId)
         if (agentRunId !== undefined) {
-          await deps.agents.cancel(agentRunId).then(() => undefined, () => undefined)
+          await deps.agents.cancel(agentRunId).then(
+            () => undefined,
+            () => undefined,
+          )
         }
         // A launch interrupted mid-flight must finish settling — with the
         // cancellation routed — before the engine tears the pass down.
-        await inFlight.get(stepId)?.then(() => undefined, () => undefined)
+        await inFlight.get(stepId)?.then(
+          () => undefined,
+          () => undefined,
+        )
       } finally {
         cancelRequested.delete(stepId)
       }
@@ -541,7 +563,11 @@ export function createWorkflowEngine(deps: WorkflowEngineDeps): WorkflowEngine {
           (dependency) => state.nodes.get(dependency.node) as NodeState,
         )
         if (!upstreams.every((upstream) => upstream.terminal)) continue
-        if (dependencies.every((dependency, index) => edgeActivated(dependency, upstreams[index] as NodeState))) {
+        if (
+          dependencies.every((dependency, index) =>
+            edgeActivated(dependency, upstreams[index] as NodeState),
+          )
+        ) {
           startNode(state, ns)
         } else {
           ns.terminal = true
@@ -556,112 +582,143 @@ export function createWorkflowEngine(deps: WorkflowEngineDeps): WorkflowEngine {
     }
   }
 
+  /**
+   * Synchronous pass setup: validation, step creation, runOn filtering, and
+   * the first schedule() run. On success the pass is registered and the
+   * returned promise settles when it ends; callers choose to await it
+   * (start) or not (begin).
+   */
+  const beginPass = (
+    runId: string,
+    context: WorkflowExecutionContext,
+  ): IpcResult<Promise<IpcResult<WorkflowRunDetail>>> => {
+    const found = deps.runs.getRun(runId)
+    if (!found.ok) return found
+    if (found.data === null) {
+      return invalid(`Workflow run "${runId}" was not found.`, `engine start run=${runId}`)
+    }
+    const { run, steps } = found.data
+    if (TERMINAL_RUN_STATUSES.has(run.status)) {
+      return invalid(
+        `Workflow run "${runId}" is ${run.status}; no pass can start.`,
+        `engine start on terminal run ${runId}`,
+      )
+    }
+    if (passes.has(runId)) {
+      return invalid(
+        `Workflow run "${runId}" already has an active pass.`,
+        `duplicate engine start for run ${runId}`,
+      )
+    }
+    const iteration = run.currentIteration
+    // The store counts iterations 0-based (a fresh run's first pass has
+    // currentIteration 0 and steps are recorded with that number), while
+    // activeNodeIdsForIteration is 1-based (plan §153). The first pass of
+    // a run therefore executes at phase 1; TASK-062's IterationController
+    // advances the counter between passes.
+    const passPhase = iteration + 1
+    const inFlight = steps.filter(
+      (step) => step.iteration === iteration && step.status === 'running',
+    )
+    if (inFlight.length > 0) {
+      return invalid(
+        `Workflow run "${runId}" has in-flight steps from a previous pass; cancel it first.`,
+        `run ${runId} iteration ${String(iteration)} running steps: ${inFlight.map((step) => step.id).join(', ')}`,
+      )
+    }
+
+    const state: PassState = {
+      runId,
+      run,
+      context,
+      nodes: new Map(),
+      suspended: new Map(),
+      cancelling: false,
+      finish: () => undefined,
+    }
+    const promise = new Promise<IpcResult<WorkflowRunDetail>>((resolve) => {
+      state.finish = resolve
+    })
+
+    const existing = new Map(
+      steps.filter((step) => step.iteration === iteration).map((step) => [step.nodeId, step]),
+    )
+    for (const node of run.definition.steps) {
+      let step = existing.get(node.id)
+      if (step === undefined) {
+        const added = deps.runs.addStep(runId, node.id)
+        if (!added.ok) return added
+        step = added.data
+        emitStep(step)
+      }
+      state.nodes.set(node.id, {
+        node,
+        step,
+        terminal: TERMINAL_STEP_STATUSES.has(step.status),
+        activatesEdges: step.status === 'completed',
+      })
+    }
+    passes.set(runId, state)
+
+    // runOn filtering (plan §153「每轮的节点激活规则」): past-phase nodes
+    // count as completed so their out-edges activate; future-phase nodes
+    // activate nothing and propagate the skip.
+    const active = activeNodeIdsForIteration(run.definition, passPhase)
+    for (const ns of state.nodes.values()) {
+      if (ns.terminal || active.has(ns.node.id)) continue
+      const filteredPast = ns.node.runOn === 'first' && passPhase > 1
+      ns.terminal = true
+      ns.activatesEdges = filteredPast
+      ns.outcome = filteredPast ? POSITIVE_OUTCOMES[ns.node.type] : undefined
+      transition(state, ns, 'skipped', {
+        reason: 'runOn-filtered',
+        edgesActivated: filteredPast,
+      })
+    }
+
+    if (run.status !== 'running') {
+      const updated = deps.runs.setRunStatus(runId, 'running')
+      if (!updated.ok) {
+        passes.delete(runId)
+        return updated
+      }
+      state.run = updated.data
+      deps.events.emit('workflow.run_updated', { runId, status: 'running' })
+    }
+
+    schedule(state)
+    return { ok: true, data: promise }
+  }
+
   const engine: WorkflowEngine = {
     start(runId, context) {
-      const found = deps.runs.getRun(runId)
-      if (!found.ok) return Promise.resolve(found)
-      if (found.data === null) {
-        return Promise.resolve(
-          invalid(`Workflow run "${runId}" was not found.`, `engine start run=${runId}`),
-        )
-      }
-      const { run, steps } = found.data
-      if (TERMINAL_RUN_STATUSES.has(run.status)) {
-        return Promise.resolve(
-          invalid(
-            `Workflow run "${runId}" is ${run.status}; no pass can start.`,
-            `engine start on terminal run ${runId}`,
-          ),
-        )
-      }
-      if (passes.has(runId)) {
-        return Promise.resolve(
-          invalid(
-            `Workflow run "${runId}" already has an active pass.`,
-            `duplicate engine start for run ${runId}`,
-          ),
-        )
-      }
-      const iteration = run.currentIteration
-      // The store counts iterations 0-based (a fresh run's first pass has
-      // currentIteration 0 and steps are recorded with that number), while
-      // activeNodeIdsForIteration is 1-based (plan §153). The first pass of
-      // a run therefore executes at phase 1; TASK-062's IterationController
-      // advances the counter between passes.
-      const passPhase = iteration + 1
-      const inFlight = steps.filter(
-        (step) => step.iteration === iteration && step.status === 'running',
+      const begun = beginPass(runId, context)
+      if (!begun.ok) return Promise.resolve({ ok: false, error: begun.error })
+      return begun.data
+    },
+
+    begin(runId, context) {
+      const begun = beginPass(runId, context)
+      if (!begun.ok) return begun
+      void begun.data.then(
+        (result) => {
+          if (!result.ok) {
+            logger.error({ runId, error: result.error }, 'Workflow pass settled with an error.')
+          }
+        },
+        (cause: unknown) => {
+          logger.error({ runId, cause }, 'Workflow pass rejected.')
+        },
       )
-      if (inFlight.length > 0) {
-        return Promise.resolve(
-          invalid(
-            `Workflow run "${runId}" has in-flight steps from a previous pass; cancel it first.`,
-            `run ${runId} iteration ${String(iteration)} running steps: ${inFlight.map((step) => step.id).join(', ')}`,
-          ),
+      const snapshot = deps.runs.getRun(runId)
+      if (!snapshot.ok) return snapshot
+      if (snapshot.data === null) {
+        return invalid(
+          `Workflow run "${runId}" was not found.`,
+          `run ${runId} vanished right after its pass began`,
         )
       }
-
-      const state: PassState = {
-        runId,
-        run,
-        context,
-        nodes: new Map(),
-        suspended: new Map(),
-        cancelling: false,
-        finish: () => undefined,
-      }
-      const promise = new Promise<IpcResult<WorkflowRunDetail>>((resolve) => {
-        state.finish = resolve
-      })
-
-      const existing = new Map(
-        steps.filter((step) => step.iteration === iteration).map((step) => [step.nodeId, step]),
-      )
-      for (const node of run.definition.steps) {
-        let step = existing.get(node.id)
-        if (step === undefined) {
-          const added = deps.runs.addStep(runId, node.id)
-          if (!added.ok) return Promise.resolve(added)
-          step = added.data
-          emitStep(step)
-        }
-        state.nodes.set(node.id, {
-          node,
-          step,
-          terminal: TERMINAL_STEP_STATUSES.has(step.status),
-          activatesEdges: step.status === 'completed',
-        })
-      }
-      passes.set(runId, state)
-
-      // runOn filtering (plan §153「每轮的节点激活规则」): past-phase nodes
-      // count as completed so their out-edges activate; future-phase nodes
-      // activate nothing and propagate the skip.
-      const active = activeNodeIdsForIteration(run.definition, passPhase)
-      for (const ns of state.nodes.values()) {
-        if (ns.terminal || active.has(ns.node.id)) continue
-        const filteredPast = ns.node.runOn === 'first' && passPhase > 1
-        ns.terminal = true
-        ns.activatesEdges = filteredPast
-        ns.outcome = filteredPast ? POSITIVE_OUTCOMES[ns.node.type] : undefined
-        transition(state, ns, 'skipped', {
-          reason: 'runOn-filtered',
-          edgesActivated: filteredPast,
-        })
-      }
-
-      if (run.status !== 'running') {
-        const updated = deps.runs.setRunStatus(runId, 'running')
-        if (!updated.ok) {
-          passes.delete(runId)
-          return Promise.resolve(updated)
-        }
-        state.run = updated.data
-        deps.events.emit('workflow.run_updated', { runId, status: 'running' })
-      }
-
-      schedule(state)
-      return promise
+      return { ok: true, data: snapshot.data }
     },
 
     resolveStep(stepId, resolution = {}) {
@@ -721,7 +778,11 @@ export function createWorkflowEngine(deps: WorkflowEngineDeps): WorkflowEngine {
       state.cancelling = true
       for (const ns of state.nodes.values()) {
         if (ns.terminal) continue
-        if (ns.step.status === 'running' && !state.suspended.has(ns.step.id) && ns.cancel !== undefined) {
+        if (
+          ns.step.status === 'running' &&
+          !state.suspended.has(ns.step.id) &&
+          ns.cancel !== undefined
+        ) {
           await ns.cancel()
         }
         // The executor may have settled the step while we awaited its cancel.
@@ -742,10 +803,8 @@ export function createWorkflowEngine(deps: WorkflowEngineDeps): WorkflowEngine {
       return updated
     },
 
-    dispose() {
-      for (const runId of [...passes.keys()]) {
-        void engine.cancel(runId)
-      }
+    async dispose() {
+      await Promise.allSettled([...passes.keys()].map((runId) => engine.cancel(runId)))
     },
   }
 

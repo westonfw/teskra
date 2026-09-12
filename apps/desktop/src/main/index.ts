@@ -17,6 +17,16 @@ let rendererBridge: RendererEventBridge | undefined
 // separate single-writer SQLite databases, so they are safe to coexist.
 app.setPath('userData', join(createTeskraPaths().home(), 'userData'))
 
+// WSLg's GPU stack cannot launch Electron's GPU process when the main process
+// runs with --inspect (which electron-vite dev always adds): the inspector
+// flags leak into the GPU child process, it exits with error_code=1002, and
+// Chromium aborts with "GPU process isn't usable. Goodbye." Software
+// rendering is fine for a workbench UI (the E2E suite runs the same way);
+// TESKRA_GPU=1 opts back into hardware acceleration.
+if (process.env['WSL_DISTRO_NAME'] !== undefined && process.env['TESKRA_GPU'] !== '1') {
+  app.disableHardwareAcceleration()
+}
+
 // A second instance would share the single-writer SQLite database and the
 // ~/.teskra data root (ADR-0003) with the first, bypassing every in-process
 // guard (ProcessManager registry, active adapter map, concurrency checks) and
@@ -66,15 +76,39 @@ if (!app.requestSingleInstanceLock()) {
     })
   })
 
-  app.on('before-quit', () => {
+  let quitting = false
+  app.on('before-quit', (event) => {
+    if (quitting) {
+      return
+    }
+    quitting = true
     ipcRouter.dispose()
     rendererBridge?.dispose()
     rendererBridge = undefined
-    const disposed = runtime?.dispose()
-    if (disposed !== undefined && !disposed.ok) {
-      getLogger('app').error({ err: disposed.error }, 'Failed to dispose Teskra Runtime cleanly.')
-    }
+    const current = runtime
     runtime = undefined
+    if (current === undefined) {
+      return
+    }
+    // P0-2: dispose() is async — it stops Agent/Terminal child processes
+    // before closing the database, so the quit must wait for it. Re-invoking
+    // app.quit() fires before-quit again; the `quitting` flag lets it through.
+    event.preventDefault()
+    void current.dispose().then(
+      (disposed) => {
+        if (!disposed.ok) {
+          getLogger('app').error(
+            { err: disposed.error },
+            'Failed to dispose Teskra Runtime cleanly.',
+          )
+        }
+        app.quit()
+      },
+      (cause: unknown) => {
+        getLogger('app').error({ err: cause }, 'Teskra Runtime disposal threw; quitting anyway.')
+        app.quit()
+      },
+    )
   })
 
   app.on('window-all-closed', () => {

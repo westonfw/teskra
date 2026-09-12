@@ -231,7 +231,8 @@ describe('Memory type enum vs plan §139.1 SQL', () => {
       join(__dirname, '../db/migrations/004_artifacts_memory.sql'),
       'utf8',
     )
-    const comment = /--\s*architecture\|convention\|decision\|command\|known_issue\|preference\|summary/
+    const comment =
+      /--\s*architecture\|convention\|decision\|command\|known_issue\|preference\|summary/
     expect(migration).toMatch(comment)
     for (const type of MEMORY_TYPES) {
       expect(migration).toContain(type)

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { WorkbenchEvents } from '@teskra/contracts'
+import type { IpcResult, WorkbenchEvents } from '@teskra/contracts'
 
 import { createRunLogStore } from '../agents/run-log-store'
 import { migrateDatabase } from '../db/migrations'
@@ -27,7 +27,8 @@ const homes: string[] = []
 
 afterEach(() => {
   for (const database of databases.splice(0)) database.close()
-  for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  for (const home of homes.splice(0))
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 function setup(workspaceExists = true) {
@@ -70,6 +71,10 @@ function setup(workspaceExists = true) {
         startedAt: string
       }[]
     } = { list: () => [] },
+    hostProcesses?: {
+      probe(pid: number): Promise<IpcResult<boolean>>
+      terminate(pid: number): Promise<IpcResult<void>>
+    },
   ) =>
     createReconciliationService({
       runs,
@@ -79,6 +84,7 @@ function setup(workspaceExists = true) {
       tasks,
       processes,
       commands,
+      ...(hostProcesses === undefined ? {} : { hostProcesses }),
       events,
       runLogs: createRunLogStore({ paths }),
       resolveRuntime: (workspace) =>
@@ -222,6 +228,74 @@ describe('ReconciliationService (TASK-040)', () => {
       ok: true,
       data: { state: 'ready' },
     })
+  })
+
+  it('terminates a surviving previous-instance process before interrupting the run (P0-2)', async () => {
+    const context = setup()
+    context.createRunningRun()
+    const probe = vi.fn(async (): Promise<IpcResult<boolean>> => ({ ok: true, data: true }))
+    const terminate = vi.fn(async (): Promise<IpcResult<void>> => ({ ok: true, data: undefined }))
+    const service = context.service({ list: () => [] }, { probe, terminate })
+
+    expect(await service.reconcile()).toMatchObject({
+      ok: true,
+      data: {
+        scannedRuns: 1,
+        interruptedRunIds: ['run-1'],
+        terminatedSurvivorRunIds: ['run-1'],
+        survivingRunIds: [],
+      },
+    })
+    expect(probe).toHaveBeenCalledWith(4242)
+    expect(terminate).toHaveBeenCalledWith(4242)
+    expect(context.runs.getById('run-1')).toMatchObject({
+      ok: true,
+      data: { status: 'interrupted' },
+    })
+  })
+
+  it('does not terminate anything when the recorded pid is dead (P0-2)', async () => {
+    const context = setup()
+    context.createRunningRun()
+    const probe = vi.fn(async (): Promise<IpcResult<boolean>> => ({ ok: true, data: false }))
+    const terminate = vi.fn(async (): Promise<IpcResult<void>> => ({ ok: true, data: undefined }))
+    const service = context.service({ list: () => [] }, { probe, terminate })
+
+    expect(await service.reconcile()).toMatchObject({
+      ok: true,
+      data: {
+        interruptedRunIds: ['run-1'],
+        terminatedSurvivorRunIds: [],
+        survivingRunIds: [],
+      },
+    })
+    expect(probe).toHaveBeenCalledWith(4242)
+    expect(terminate).not.toHaveBeenCalled()
+  })
+
+  it('leaves the run active when a survivor cannot be terminated (P0-2)', async () => {
+    const context = setup()
+    context.createRunningRun()
+    const probe = vi.fn(async (): Promise<IpcResult<boolean>> => ({ ok: true, data: true }))
+    const terminate = vi.fn(async (): Promise<IpcResult<void>> => ({
+      ok: false,
+      error: { code: 'UNKNOWN', message: 'access denied', retryable: true },
+    }))
+    const interrupted = vi.fn()
+    context.events.subscribe('agent.interrupted', interrupted)
+    const service = context.service({ list: () => [] }, { probe, terminate })
+
+    expect(await service.reconcile()).toMatchObject({
+      ok: true,
+      data: {
+        interruptedRunIds: [],
+        terminatedSurvivorRunIds: [],
+        survivingRunIds: ['run-1'],
+      },
+    })
+    // No silent status flip while the Agent process is still writing.
+    expect(context.runs.getById('run-1')).toMatchObject({ ok: true, data: { status: 'running' } })
+    expect(interrupted).not.toHaveBeenCalled()
   })
 
   it('classifies absent and non-Git worktrees without mutating them twice', async () => {

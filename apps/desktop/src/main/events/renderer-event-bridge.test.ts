@@ -12,9 +12,14 @@ const electron = vi.hoisted(() => {
       return [...MockBrowserWindow.windows]
     }
 
+    readonly webContentsListeners = new Map<string, (event: unknown) => void>()
     readonly webContents = {
       isDestroyed: vi.fn(() => false),
       send: vi.fn(),
+      setWindowOpenHandler: vi.fn(),
+      on: vi.fn((name: string, listener: (event: unknown) => void) => {
+        this.webContentsListeners.set(name, listener)
+      }),
     }
     readonly show = vi.fn()
     readonly focus = vi.fn()
@@ -78,6 +83,57 @@ describe('RendererEventBridge', () => {
     window?.listeners.get('ready-to-show')?.()
     expect(window?.show).toHaveBeenCalledOnce()
     expect(bridge.hasWindows()).toBe(true)
+  })
+
+  it('denies window.open, blocks webviews, and gates navigation to the dev origin (P1-10)', () => {
+    const bridge = createRendererEventBridge(undefined, {
+      preloadPath: '/app/preload.js',
+      rendererHtmlPath: '/app/index.html',
+      rendererUrl: 'http://localhost:5173',
+    })
+    bridge.createWindow()
+    const window = electron.MockBrowserWindow.windows[0]
+    if (window === undefined) throw new Error('expected test window')
+
+    expect(window.webContents.setWindowOpenHandler).toHaveBeenCalledOnce()
+    const openHandler = window.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (details: {
+      url: string
+    }) => { action: string }
+    expect(openHandler({ url: 'https://example.com' })).toEqual({ action: 'deny' })
+    expect(openHandler({ url: 'http://localhost:5173/popup' })).toEqual({ action: 'deny' })
+
+    const attachWebview = window.webContentsListeners.get('will-attach-webview')
+    expect(attachWebview).toBeDefined()
+    const attachEvent = { preventDefault: vi.fn() }
+    attachWebview?.(attachEvent)
+    expect(attachEvent.preventDefault).toHaveBeenCalledOnce()
+
+    const willNavigate = window.webContentsListeners.get('will-navigate')
+    expect(willNavigate).toBeDefined()
+    const hmrReload = { url: 'http://localhost:5173/workspace', preventDefault: vi.fn() }
+    willNavigate?.(hmrReload)
+    expect(hmrReload.preventDefault).not.toHaveBeenCalled()
+    const external = { url: 'https://example.com/', preventDefault: vi.fn() }
+    willNavigate?.(external)
+    expect(external.preventDefault).toHaveBeenCalledOnce()
+  })
+
+  it('allows only file: navigation in the packaged window (P1-10)', () => {
+    const bridge = createRendererEventBridge(undefined, {
+      preloadPath: '/app/preload.js',
+      rendererHtmlPath: '/app/index.html',
+    })
+    bridge.createWindow()
+    const window = electron.MockBrowserWindow.windows[0]
+    if (window === undefined) throw new Error('expected test window')
+
+    const willNavigate = window.webContentsListeners.get('will-navigate')
+    const inApp = { url: 'file:///app/out/renderer/index.html', preventDefault: vi.fn() }
+    willNavigate?.(inApp)
+    expect(inApp.preventDefault).not.toHaveBeenCalled()
+    const remote = { url: 'http://localhost:5173/', preventDefault: vi.fn() }
+    willNavigate?.(remote)
+    expect(remote.preventDefault).toHaveBeenCalledOnce()
   })
 
   it('subscribes once and broadcasts typed events to each live window', () => {

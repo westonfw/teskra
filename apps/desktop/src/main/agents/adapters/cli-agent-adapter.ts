@@ -11,7 +11,7 @@ import { isWorkspaceSecretRef } from '@teskra/contracts'
 
 import { getLogger } from '../../logger'
 import type { ProcessManager, ProcessStartRequest } from '../../process/process-manager'
-import type { WorkspaceRuntime } from '../../workspace/runtime'
+import { resolveRuntimePath, type WorkspaceRuntime } from '../../workspace/runtime'
 import type { AgentDetector } from '../agent-detector'
 import type {
   AgentAdapterDetectionRequest,
@@ -77,12 +77,37 @@ function processEnvironment(
   }
 }
 
+/**
+ * P0-1: handoff / artifact / permission-config paths are HOST-side (the run
+ * directory lives in the host data root and the host collects from it), so a
+ * WSL-on-Windows agent cannot use them verbatim — translate them into the
+ * runtime's own path form (`C:\…` → `/mnt/c/…`) before building launch args
+ * and the process environment (ADR-0004). Host-native runtimes pass through.
+ */
+function runtimeScopedPaths(
+  runtime: WorkspaceRuntime,
+  request: AgentStartRequest,
+): AgentStartRequest {
+  return {
+    ...request,
+    ...(request.handoffPath === undefined
+      ? {}
+      : { handoffPath: resolveRuntimePath(runtime, request.handoffPath) }),
+    ...(request.artifactDir === undefined
+      ? {}
+      : { artifactDir: resolveRuntimePath(runtime, request.artifactDir) }),
+    ...(request.permissionConfigPath === undefined
+      ? {}
+      : { permissionConfigPath: resolveRuntimePath(runtime, request.permissionConfigPath) }),
+  }
+}
+
 /** Shared process plumbing; provider-specific argument construction stays in each Adapter. */
 export function createCliAgentAdapter(options: CliAgentAdapterOptions): CodingAgentAdapter {
-  const startProcess = async (
+  const startProcess = (
     request: AgentStartRequest,
-    launch: CliAgentLaunch,
-  ): Promise<IpcResult<AgentProcessHandle>> => {
+    buildLaunch: (request: AgentStartRequest) => CliAgentLaunch,
+  ): IpcResult<AgentProcessHandle> => {
     const runtime = options.resolveRuntime(request.workspace.runtime)
     if (!runtime.ok) return runtime
     const override = options.detector.getExecutableOverride({
@@ -91,6 +116,8 @@ export function createCliAgentAdapter(options: CliAgentAdapterOptions): CodingAg
     })
     if (!override.ok) return override
 
+    const scoped = runtimeScopedPaths(runtime.data, request)
+    const launch = buildLaunch(scoped)
     const startRequest: ProcessStartRequest = {
       id: agentProcessId(request.runId),
       command: override.data ?? options.definition.executable.command,
@@ -98,8 +125,8 @@ export function createCliAgentAdapter(options: CliAgentAdapterOptions): CodingAg
         ...(options.baseArgs ?? options.definition.executable.defaultArgs ?? []),
         ...launch.args,
       ],
-      cwd: request.worktreePath ?? request.workspace.path,
-      env: processEnvironment(request, launch),
+      cwd: scoped.worktreePath ?? scoped.workspace.path,
+      env: processEnvironment(scoped, launch),
       workspaceId: request.workspace.id,
       agentRunId: request.runId,
       runtime: runtime.data,
@@ -131,12 +158,12 @@ export function createCliAgentAdapter(options: CliAgentAdapterOptions): CodingAg
       })
     },
 
-    async start(request) {
-      return startProcess(request, options.buildLaunch(request))
+    start(request) {
+      return Promise.resolve(startProcess(request, options.buildLaunch))
     },
 
-    async send(runId, input) {
-      return options.processes.write(agentProcessId(runId), input)
+    send(runId, input) {
+      return Promise.resolve(options.processes.write(agentProcessId(runId), input))
     },
 
     resize(runId, cols, rows) {
@@ -151,7 +178,12 @@ export function createCliAgentAdapter(options: CliAgentAdapterOptions): CodingAg
 
   const buildResumeLaunch = options.buildResumeLaunch
   if (buildResumeLaunch !== undefined) {
-    adapter.resume = async (request) => startProcess(request, buildResumeLaunch(request))
+    adapter.resume = (request) =>
+      Promise.resolve(
+        startProcess(request, (scoped) => ({
+          ...buildResumeLaunch({ ...scoped, providerSession: request.providerSession }),
+        })),
+      )
   }
 
   return adapter

@@ -55,7 +55,9 @@ export function openDatabaseFile(filePath: string): IpcResult<TeskraDatabase> {
   } catch (cause) {
     return {
       ok: false,
-      error: toPublicError(dbError('Failed to open the Teskra database.', `open ${filePath}`, cause)),
+      error: toPublicError(
+        dbError('Failed to open the Teskra database.', `open ${filePath}`, cause),
+      ),
     }
   }
 

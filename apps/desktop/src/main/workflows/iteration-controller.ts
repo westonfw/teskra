@@ -92,6 +92,12 @@ export interface IterationController {
    * triggers a cap.
    */
   iterate(request: WorkflowIterateRequest): Promise<IpcResult<WorkflowIterateResult>>
+  /**
+   * Shutdown (P2-1): cancels every active loop's WorkflowRun and waits for
+   * the loops to settle, so their trailing DB writes never land on an
+   * already-closed database.
+   */
+  dispose(): Promise<void>
 }
 
 export interface IterationControllerDeps {
@@ -167,6 +173,8 @@ export function createIterationController(deps: IterationControllerDeps): Iterat
   const createAgentRunId = deps.createAgentRunId ?? randomUUID
   /** Run ids this controller is currently driving (concurrent-iterate guard). */
   const activeLoops = new Set<string>()
+  /** In-flight iterate() promises, so dispose() can wait them out (P2-1). */
+  const inFlightLoops = new Set<Promise<IpcResult<WorkflowIterateResult>>>()
 
   const emitRunStatus = (runId: string, status: WorkflowRun['status']): void => {
     deps.events.emit('workflow.run_updated', { runId, status })
@@ -261,7 +269,12 @@ export function createIterationController(deps: IterationControllerDeps): Iterat
 
   return {
     async iterate(request) {
-      const policy: IterationPolicy = { ...DEFAULT_ITERATION_POLICY, ...request.policy }
+      const policy: IterationPolicy = {
+        maxRoundsPerCriteriaVersion:
+          request.policy?.maxRoundsPerCriteriaVersion ??
+          DEFAULT_ITERATION_POLICY.maxRoundsPerCriteriaVersion,
+        maxTotalRounds: request.policy?.maxTotalRounds ?? DEFAULT_ITERATION_POLICY.maxTotalRounds,
+      }
 
       const task = deps.tasks.getById(request.taskId)
       if (!task.ok) return task
@@ -327,11 +340,24 @@ export function createIterationController(deps: IterationControllerDeps): Iterat
         )
       }
       activeLoops.add(run.id)
+      const loop = iterateLoop(request, run, task.data)
+      inFlightLoops.add(loop)
+      const cleanup = (): void => {
+        inFlightLoops.delete(loop)
+      }
+      void loop.then(cleanup, cleanup)
       try {
-        return await iterateLoop(request, run, task.data)
+        return await loop
       } finally {
         activeLoops.delete(run.id)
       }
+    },
+
+    async dispose() {
+      // Cancel first so a loop parked in engine.start settles promptly, then
+      // wait out the trailing cap/finalization writes.
+      await Promise.allSettled([...activeLoops].map((runId) => deps.engine.cancel(runId)))
+      await Promise.allSettled([...inFlightLoops])
     },
   }
 
@@ -344,7 +370,12 @@ export function createIterationController(deps: IterationControllerDeps): Iterat
     initialRun: WorkflowRun,
     taskRow: Task,
   ): Promise<IpcResult<WorkflowIterateResult>> {
-    const policy: IterationPolicy = { ...DEFAULT_ITERATION_POLICY, ...request.policy }
+    const policy: IterationPolicy = {
+      maxRoundsPerCriteriaVersion:
+        request.policy?.maxRoundsPerCriteriaVersion ??
+        DEFAULT_ITERATION_POLICY.maxRoundsPerCriteriaVersion,
+      maxTotalRounds: request.policy?.maxTotalRounds ?? DEFAULT_ITERATION_POLICY.maxTotalRounds,
+    }
     let run = initialRun
     // TASK-063: shell steps (Build/Test) need the workspace runtime and the
     // worktree cwd in the execution context; resolve them once per

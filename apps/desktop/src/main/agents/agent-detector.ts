@@ -157,10 +157,7 @@ export function createAgentDetector(deps: AgentDetectorDeps): AgentDetector {
 
       const version = await deps.commands.run({
         command: executable,
-        args: [
-          ...(found.data.executable.defaultArgs ?? []),
-          ...found.data.detection.versionArgs,
-        ],
+        args: [...(found.data.executable.defaultArgs ?? []), ...found.data.detection.versionArgs],
         timeoutMs: DETECTION_TIMEOUT_MS,
         runtime: runtime.data,
       })
@@ -186,15 +183,13 @@ export function createAgentDetector(deps: AgentDetectorDeps): AgentDetector {
 
     async list(request) {
       const results = await Promise.all(
-        deps.registry
-          .list()
-          .map((agent) =>
-            detector.detect({
-              agentId: agent.id,
-              runtime: request.runtime,
-              refresh: request.refresh,
-            }),
-          ),
+        deps.registry.list().map((agent) =>
+          detector.detect({
+            agentId: agent.id,
+            runtime: request.runtime,
+            refresh: request.refresh,
+          }),
+        ),
       )
       const failed = results.find((result) => !result.ok)
       if (failed !== undefined && !failed.ok) return failed

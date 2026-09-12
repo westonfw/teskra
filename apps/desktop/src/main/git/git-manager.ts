@@ -35,17 +35,31 @@ export interface GitDiffRefsRequest {
 
 const VALID_REF = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/u
 
+/**
+ * Batch line stats for one `git diff --numstat` run (P1-5). Binary files show
+ * `-` in numstat output and surface as 0/0.
+ */
+export interface GitNumstatEntry {
+  readonly path: string
+  readonly additions: number
+  readonly deletions: number
+}
+
 export interface GitManager {
   status(workspaceId: string): Promise<IpcResult<GitStatus>>
   branch(workspaceId: string): Promise<IpcResult<GitBranch>>
   diff(request: GitDiffRequest): Promise<IpcResult<GitRawDiff>>
   /** Main-internal (TASK-063): `git diff <baseRef>...<headRef>` raw patch. */
   diffRefs(request: GitDiffRefsRequest): Promise<IpcResult<GitRawDiff>>
+  /** Main-internal (P1-5): per-file line stats of the whole diff in one spawn. */
+  diffNumstat(request: GitDiffRequest): Promise<IpcResult<readonly GitNumstatEntry[]>>
   log(request: GitLogRequest): Promise<IpcResult<GitCommit[]>>
   commit(request: GitCommitRequest): Promise<IpcResult<GitCommitResult>>
   openFile(request: GitOpenFileRequest): Promise<IpcResult<void>>
   /** Internal DiffService primitive for files not yet tracked by Git. */
   untrackedDiff(workspaceId: string, path: string): Promise<IpcResult<GitRawDiff>>
+  /** Internal DiffService primitive: line stats of one untracked file. */
+  untrackedNumstat(workspaceId: string, path: string): Promise<IpcResult<GitNumstatEntry>>
 }
 
 export interface GitManagerDeps {
@@ -53,7 +67,7 @@ export interface GitManagerDeps {
   readonly workspaces: WorkspaceRepository
   readonly events: EventBus<WorkbenchEvents>
   readonly resolveRuntime: (workspace: Workspace) => IpcResult<WorkspaceRuntime>
-  readonly openPath?: (path: string) => Promise<string>
+  readonly openPath?: ((path: string) => Promise<string>) | undefined
 }
 
 interface GitContext {
@@ -122,6 +136,35 @@ function restAfterFields(record: string, count: number): string {
   return record.slice(position)
 }
 
+/**
+ * Parses `git diff --numstat -z` output. Records are NUL-separated
+ * `added\tdeleted\tpath`; a rename (or a `--no-index /dev/null <path>` pair)
+ * leaves the path field empty and follows with two NUL-separated paths —
+ * old then new — and the entry is keyed by the new path, matching how
+ * `status --porcelain=v2` reports renames.
+ */
+function parseNumstat(output: string): GitNumstatEntry[] {
+  const tokens = output.split('\0')
+  const entries: GitNumstatEntry[] = []
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index] as string
+    if (token === '') continue
+    const match = /^(\d+|-)\t(\d+|-)\t(.*)$/u.exec(token)
+    if (match === null) continue
+    const additions = match[1] === '-' ? 0 : Number(match[1])
+    const deletions = match[2] === '-' ? 0 : Number(match[2])
+    let path = match[3] as string
+    if (path === '') {
+      const newPath = tokens[index + 2]
+      index += 2
+      if (newPath === undefined || newPath === '') continue
+      path = newPath
+    }
+    entries.push({ path, additions, deletions })
+  }
+  return entries
+}
+
 function parseLog(output: string): GitCommit[] {
   return output
     .split('\x1e')
@@ -158,6 +201,8 @@ export function createGitManager(deps: GitManagerDeps): GitManager {
       return fail({
         code: 'WORKSPACE_NOT_FOUND',
         message: `Workspace "${workspaceId}" was not found.`,
+        messageKey: 'errorMessage.workspaceNotFound',
+        params: { id: workspaceId },
         retryable: false,
         detail: `GitManager could not resolve workspace id=${JSON.stringify(workspaceId)}`,
       })
@@ -290,6 +335,28 @@ export function createGitManager(deps: GitManagerDeps): GitManager {
       return result.ok ? { ok: true, data: { patch: result.data.stdout } } : result
     },
 
+    async diffNumstat(request) {
+      if (request.path !== undefined && !validRelativePath(request.path)) {
+        return fail({
+          code: 'VALIDATION_FAILED',
+          message: 'Git diff paths must stay inside the workspace.',
+          retryable: false,
+          detail: `rejected path=${JSON.stringify(request.path)}`,
+        })
+      }
+      const args = ['diff', '--no-ext-diff', '--no-color', '--numstat', '-z']
+      if (request.staged === true) args.push('--staged')
+      args.push(
+        '--',
+        request.path ?? '.',
+        ...(request.path === undefined
+          ? [':(exclude)node_modules', ':(exclude)**/node_modules/**']
+          : []),
+      )
+      const result = await run(request.workspaceId, 'diff-numstat', args)
+      return result.ok ? { ok: true, data: parseNumstat(result.data.stdout) } : result
+    },
+
     async log(request) {
       const result = await run(request.workspaceId, 'log', [
         'log',
@@ -382,6 +449,37 @@ export function createGitManager(deps: GitManagerDeps): GitManager {
         [0, 1],
       )
       return result.ok ? { ok: true, data: { patch: result.data.stdout } } : result
+    },
+
+    async untrackedNumstat(workspaceId, path) {
+      if (!validRelativePath(path)) {
+        return fail({
+          code: 'VALIDATION_FAILED',
+          message: 'Git diff paths must stay inside the workspace.',
+          retryable: false,
+          detail: `rejected path=${JSON.stringify(path)}`,
+        })
+      }
+      const result = await run(
+        workspaceId,
+        'diff-numstat',
+        [
+          'diff',
+          '--no-index',
+          '--no-ext-diff',
+          '--no-color',
+          '--numstat',
+          '-z',
+          '--',
+          '/dev/null',
+          path,
+        ],
+        READ_TIMEOUT_MS,
+        [0, 1],
+      )
+      if (!result.ok) return result
+      const entry = parseNumstat(result.data.stdout).find((candidate) => candidate.path === path)
+      return { ok: true, data: entry ?? { path, additions: 0, deletions: 0 } }
     },
   }
 }

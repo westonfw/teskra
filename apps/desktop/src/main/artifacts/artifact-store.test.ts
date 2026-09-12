@@ -16,11 +16,7 @@ import {
 } from '../db/repositories'
 import { createEventBus, type EventBus } from '../events/event-bus'
 import { createTeskraPaths } from '../paths'
-import {
-  createArtifactStore,
-  resolveArtifactPath,
-  type ArtifactStore,
-} from './artifact-store'
+import { createArtifactStore, resolveArtifactPath, type ArtifactStore } from './artifact-store'
 
 const NOW = '2026-09-10T00:00:00.000Z'
 
@@ -357,9 +353,11 @@ describe('ArtifactStore.scanRun (TASK-050)', () => {
 
     const scanned = store.scanRun({ runId: 'run-1' })
     if (!scanned.ok) throw new Error(scanned.error.message)
-    expect(
-      scanned.data.map(({ name, type }) => `${name}:${type}`).sort(),
-    ).toEqual(['impl.md:implementation', 'plan.md:plan', 'test-output.txt:test-result'])
+    expect(scanned.data.map(({ name, type }) => `${name}:${type}`).sort()).toEqual([
+      'impl.md:implementation',
+      'plan.md:plan',
+      'test-output.txt:test-result',
+    ])
     for (const artifact of scanned.data) {
       expect(artifact.taskId).toBe('task-1')
       expect(artifact.runId).toBe('run-1')

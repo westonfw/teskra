@@ -516,8 +516,9 @@ export function createReviewRepository(connection: Database.Database): ReviewRep
 
     deleteFindingsByRun(runId) {
       return execute(FINDING, 'deleteFindingsByRun', () => {
-        return connection.prepare('DELETE FROM review_findings WHERE run_id = ?').run(runId)
-          .changes > 0
+        return (
+          connection.prepare('DELETE FROM review_findings WHERE run_id = ?').run(runId).changes > 0
+        )
       })
     },
 

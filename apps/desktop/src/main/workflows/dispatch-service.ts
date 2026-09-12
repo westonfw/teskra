@@ -78,6 +78,12 @@ export interface DispatchService {
    * whatever handoff the collector produced).
    */
   dispatch(request: WorkflowDispatchRequest): Promise<IpcResult<WorkflowDispatchResult>>
+  /**
+   * Shutdown (P2-1): cancels every in-flight dispatch's WorkflowRun and waits
+   * for the dispatches to settle, so their trailing DB writes never land on
+   * an already-closed database.
+   */
+  dispose(): Promise<void>
 }
 
 export interface DispatchServiceDeps {
@@ -120,166 +126,169 @@ function invalid<T>(message: string, detail: string): IpcResult<T> {
 export function createDispatchService(deps: DispatchServiceDeps): DispatchService {
   const logger = getLogger('runtime')
   const createAgentRunId = deps.createAgentRunId ?? randomUUID
+  /** In-flight dispatch() promises, so dispose() can wait them out (P2-1). */
+  const inFlight = new Set<Promise<IpcResult<WorkflowDispatchResult>>>()
+  /** WorkflowRun ids of in-flight dispatches, for dispose()'s cancel pass. */
+  const activeRunIds = new Set<string>()
 
   const emitRunStatus = (runId: string, status: WorkflowRunStatus): void => {
     deps.events.emit('workflow.run_updated', { runId, status })
   }
 
-  return {
-    async dispatch(request) {
-      const agent = deps.registry.get(request.agent)
-      if (agent === undefined) {
-        return invalid(
-          `Agent "${request.agent}" is not registered.`,
-          `DispatchService could not resolve agent=${JSON.stringify(request.agent)}`,
-        )
-      }
-      const task = deps.tasks.getById(request.taskId)
-      if (!task.ok) return task
-      if (task.data === null) {
-        return invalid(
-          `Task "${request.taskId}" was not found.`,
-          `DispatchService could not resolve task id=${JSON.stringify(request.taskId)}`,
-        )
-      }
-      if (task.data.workspaceId !== request.workspaceId) {
-        return invalid(
-          'The task belongs to a different workspace.',
-          `task workspace=${task.data.workspaceId} dispatch workspace=${request.workspaceId}`,
-        )
-      }
-      const workspace = deps.workspaces.getById(request.workspaceId)
-      if (!workspace.ok) return workspace
-      if (workspace.data === null) {
-        return invalid(
-          `Workspace "${request.workspaceId}" was not found.`,
-          `DispatchService could not resolve workspace id=${JSON.stringify(request.workspaceId)}`,
-        )
-      }
+  const executeDispatch = async (
+    request: WorkflowDispatchRequest,
+  ): Promise<IpcResult<WorkflowDispatchResult>> => {
+    const agent = deps.registry.get(request.agent)
+    if (agent === undefined) {
+      return invalid(
+        `Agent "${request.agent}" is not registered.`,
+        `DispatchService could not resolve agent=${JSON.stringify(request.agent)}`,
+      )
+    }
+    const task = deps.tasks.getById(request.taskId)
+    if (!task.ok) return task
+    if (task.data === null) {
+      return invalid(
+        `Task "${request.taskId}" was not found.`,
+        `DispatchService could not resolve task id=${JSON.stringify(request.taskId)}`,
+      )
+    }
+    if (task.data.workspaceId !== request.workspaceId) {
+      return invalid(
+        'The task belongs to a different workspace.',
+        `task workspace=${task.data.workspaceId} dispatch workspace=${request.workspaceId}`,
+      )
+    }
+    const workspace = deps.workspaces.getById(request.workspaceId)
+    if (!workspace.ok) return workspace
+    if (workspace.data === null) {
+      return invalid(
+        `Workspace "${request.workspaceId}" was not found.`,
+        `DispatchService could not resolve workspace id=${JSON.stringify(request.workspaceId)}`,
+      )
+    }
 
-      const agentRunId = createAgentRunId()
-      const worktree = await deps.worktreeManager.create({
-        workspaceId: request.workspaceId,
-        runId: agentRunId,
-        taskId: request.taskId,
-        agentId: agent.id,
-        ...(request.isolation === undefined ? {} : { isolation: request.isolation }),
-      })
-      if (!worktree.ok) return worktree
+    const agentRunId = createAgentRunId()
+    const worktree = await deps.worktreeManager.create({
+      workspaceId: request.workspaceId,
+      runId: agentRunId,
+      taskId: request.taskId,
+      agentId: agent.id,
+      ...(request.isolation === undefined ? {} : { isolation: request.isolation }),
+    })
+    if (!worktree.ok) return worktree
 
-      // Compensating action for failures before the WorkflowRun exists:
-      // never leave an orphan worktree behind (ReviewerService pattern).
-      const discardWorktree = (): void => {
-        void deps.worktreeManager
-          .discard({ worktreeId: worktree.data.id, confirm: true })
-          .then((discarded) => {
-            if (!discarded.ok) {
-              logger.error(
-                { worktreeId: worktree.data.id, error: discarded.error },
-                'Failed to discard the dispatch worktree after a startup failure.',
-              )
-            }
-          })
-          .catch((cause: unknown) => {
+    // Compensating action for failures before the WorkflowRun exists:
+    // never leave an orphan worktree behind (ReviewerService pattern).
+    const discardWorktree = (): void => {
+      void deps.worktreeManager
+        .discard({ worktreeId: worktree.data.id, confirm: true })
+        .then((discarded) => {
+          if (!discarded.ok) {
             logger.error(
-              { worktreeId: worktree.data.id, cause },
-              'Dispatch worktree discard threw.',
+              { worktreeId: worktree.data.id, error: discarded.error },
+              'Failed to discard the dispatch worktree after a startup failure.',
             )
-          })
-      }
+          }
+        })
+        .catch((cause: unknown) => {
+          logger.error({ worktreeId: worktree.data.id, cause }, 'Dispatch worktree discard threw.')
+        })
+    }
 
-      const runFiles = deps.paths.runFiles(agentRunId)
-      if (!runFiles.ok) {
+    const runFiles = deps.paths.runFiles(agentRunId)
+    if (!runFiles.ok) {
+      discardWorktree()
+      return runFiles
+    }
+
+    let prompt = request.prompt
+    if (prompt === undefined) {
+      let criteria: string[] | undefined
+      const sets = deps.criteria.listSetsByTask(request.taskId)
+      if (!sets.ok) {
         discardWorktree()
-        return runFiles
+        return sets
       }
-
-      let prompt = request.prompt
-      if (prompt === undefined) {
-        let criteria: string[] | undefined
-        const sets = deps.criteria.listSetsByTask(request.taskId)
-        if (!sets.ok) {
+      const confirmed = sets.data
+        .filter((set) => set.status === 'confirmed')
+        .sort((a, b) => b.version - a.version)[0]
+      if (confirmed !== undefined) {
+        const rows = deps.criteria.listCriteria(confirmed.id)
+        if (!rows.ok) {
           discardWorktree()
-          return sets
+          return rows
         }
-        const confirmed = sets.data
-          .filter((set) => set.status === 'confirmed')
-          .sort((a, b) => b.version - a.version)[0]
-        if (confirmed !== undefined) {
-          const rows = deps.criteria.listCriteria(confirmed.id)
-          if (!rows.ok) {
-            discardWorktree()
-            return rows
-          }
-          criteria = rows.data.map((criterion) => criterion.description)
+        criteria = rows.data.map((criterion) => criterion.description)
+      }
+      // TASK-068: the {{memory}} variable carries the ContextBuilder-packed
+      // Workspace Memory section (budget-limited; empty workspace memory
+      // renders as an empty section).
+      let memory: string | undefined
+      if (deps.contextBuilder !== undefined) {
+        const built = deps.contextBuilder.buildContext({
+          workspaceId: request.workspaceId,
+          budgetChars: DISPATCH_MEMORY_BUDGET_CHARS,
+        })
+        if (!built.ok) {
+          discardWorktree()
+          return built
         }
-        // TASK-068: the {{memory}} variable carries the ContextBuilder-packed
-        // Workspace Memory section (budget-limited; empty workspace memory
-        // renders as an empty section).
-        let memory: string | undefined
-        if (deps.contextBuilder !== undefined) {
-          const built = deps.contextBuilder.buildContext({
-            workspaceId: request.workspaceId,
-            budgetChars: DISPATCH_MEMORY_BUDGET_CHARS,
-          })
-          if (!built.ok) {
-            discardWorktree()
-            return built
-          }
-          if (built.data.content.length > 0) {
-            memory = built.data.content
-          }
+        if (built.data.content.length > 0) {
+          memory = built.data.content
         }
-        const rendered = deps.promptTemplates.render(
-          {
-            name: 'implement',
-            context: {
-              task: {
-                title: task.data.title,
-                description: task.data.description ?? '',
-              },
-              ...(criteria === undefined ? {} : { criteria }),
-              ...(memory === undefined ? {} : { memory }),
-              role: 'implementer',
-              env: {
-                TESKRA_HANDOFF_PATH: runFiles.data.handoff,
-                TESKRA_ARTIFACT_DIR: runFiles.data.artifacts,
-              },
+      }
+      const rendered = deps.promptTemplates.render(
+        {
+          name: 'implement',
+          context: {
+            task: {
+              title: task.data.title,
+              description: task.data.description ?? '',
+            },
+            ...(criteria === undefined ? {} : { criteria }),
+            ...(memory === undefined ? {} : { memory }),
+            role: 'implementer',
+            env: {
+              TESKRA_HANDOFF_PATH: runFiles.data.handoff,
+              TESKRA_ARTIFACT_DIR: runFiles.data.artifacts,
             },
           },
-          workspace.data.path,
-        )
-        if (!rendered.ok) {
-          discardWorktree()
-          return rendered
-        }
-        prompt = rendered.data.content
-      }
-
-      const created = deps.runs.createRun({
-        definition: {
-          id: DISPATCH_DEFINITION_ID,
-          description: 'TASK-059 single-agent dispatch (Task → One Agent → Handoff).',
-          steps: [
-            {
-              id: DISPATCH_NODE_ID,
-              type: 'agent',
-              agent: agent.id,
-              role: 'implementer',
-              isolation: worktree.data.isolation,
-              runOn: 'always',
-            },
-          ],
         },
-        taskId: request.taskId,
-        totalIterations: 1,
-      })
-      if (!created.ok) {
+        workspace.data.path,
+      )
+      if (!rendered.ok) {
         discardWorktree()
-        return created
+        return rendered
       }
-      const run = created.data.run
+      prompt = rendered.data.content
+    }
 
+    const created = deps.runs.createRun({
+      definition: {
+        id: DISPATCH_DEFINITION_ID,
+        description: 'TASK-059 single-agent dispatch (Task → One Agent → Handoff).',
+        steps: [
+          {
+            id: DISPATCH_NODE_ID,
+            type: 'agent',
+            agent: agent.id,
+            role: 'implementer',
+            isolation: worktree.data.isolation,
+            runOn: 'always',
+          },
+        ],
+      },
+      taskId: request.taskId,
+      totalIterations: 1,
+    })
+    if (!created.ok) {
+      discardWorktree()
+      return created
+    }
+    const run = created.data.run
+    activeRunIds.add(run.id)
+    try {
       const settled = await deps.engine.start(run.id, {
         workspaceId: request.workspaceId,
         worktreeId: worktree.data.id,
@@ -330,6 +339,27 @@ export function createDispatchService(deps: DispatchServiceDeps): DispatchServic
           handoff: handoff.data,
         },
       }
+    } finally {
+      activeRunIds.delete(run.id)
+    }
+  }
+
+  return {
+    dispatch(request) {
+      const promise = executeDispatch(request)
+      inFlight.add(promise)
+      const cleanup = (): void => {
+        inFlight.delete(promise)
+      }
+      void promise.then(cleanup, cleanup)
+      return promise
+    },
+
+    async dispose() {
+      // Cancel first so a dispatch parked in engine.start settles promptly,
+      // then wait out the trailing finalization writes.
+      await Promise.allSettled([...activeRunIds].map((runId) => deps.engine.cancel(runId)))
+      await Promise.allSettled([...inFlight])
     },
   }
 }

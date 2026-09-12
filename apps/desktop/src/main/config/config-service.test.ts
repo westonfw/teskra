@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DEFAULT_CONFIG, type Workspace } from '@teskra/contracts'
 
 import type { TeskraPaths } from '../paths'
-import { createConfigService, type ConfigServiceDeps } from './config-service'
+import { createConfigService, deepMerge, type ConfigServiceDeps } from './config-service'
 
 // Warnings are asserted on the resolve() result; keep the file/stdout pino
 // logger quiet (getLogger reads this lazily, at first use).
@@ -37,7 +37,6 @@ function stubPaths(): TeskraPaths {
         artifacts: `/teskra-home/runs/${runId}/artifacts`,
       },
     }),
-    worktreeRoot: (wsId) => ({ ok: true, data: `/teskra-home/worktrees/${wsId}` }),
     config: () => GLOBAL_CONFIG_PATH,
     credentials: () => '/teskra-home/credentials.json',
     repoConfig: (repoRoot) => `${repoRoot}/.teskra/config.json`,
@@ -56,10 +55,11 @@ function enoent(path: string): Error {
 /** In-memory file map: path → file content; missing keys throw ENOENT. */
 function fakeReadFile(files: Record<string, string>): (path: string) => string {
   return (path) => {
-    if (!(path in files)) {
+    const content = files[path]
+    if (content === undefined) {
       throw enoent(path)
     }
-    return files[path]
+    return content
   }
 }
 
@@ -297,6 +297,81 @@ describe('ConfigService.resolve — repo-local secret scanning', () => {
   })
 })
 
+describe('ConfigService — global-only groups (P0-3)', () => {
+  it('strips the agents group from the workspace layer with a warning', () => {
+    const service = createConfigService(
+      makeDeps({
+        [`${REPO_ROOT}/.teskra/config.json`]: JSON.stringify({
+          agents: { executableOverrides: { 'codex:wsl': '/evil/codex' } },
+          concurrency: { maxGlobalRuns: 6 },
+        }),
+      }),
+    )
+    const resolved = service.resolve({ workspaceId: 'ws1' })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.data.warnings).toHaveLength(1)
+    expect(resolved.data.warnings[0]).toMatchObject({
+      layer: 'workspace',
+      fieldPath: 'agents',
+    })
+    // The hostile override never reaches the resolved config...
+    expect(resolved.data.config.agents.executableOverrides).toEqual({})
+    expect(resolved.data.sources['agents.executableOverrides']).toBeUndefined()
+    // ...while the sibling group from the same file still applies.
+    expect(resolved.data.config.concurrency.maxGlobalRuns).toBe(6)
+    expect(resolved.data.sources['concurrency.maxGlobalRuns']).toBe('workspace')
+  })
+
+  it('lets the private global layer set agents normally', () => {
+    const service = createConfigService(
+      makeDeps({
+        [GLOBAL_CONFIG_PATH]: JSON.stringify({
+          agents: { executableOverrides: { 'codex:wsl': '/usr/local/bin/codex' } },
+        }),
+      }),
+    )
+    const resolved = service.resolve({ workspaceId: 'ws1' })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.data.warnings).toEqual([])
+    expect(resolved.data.config.agents.executableOverrides).toEqual({
+      'codex:wsl': '/usr/local/bin/codex',
+    })
+  })
+
+  it('workspace agents never beats global agents, even merged per-field', () => {
+    const service = createConfigService(
+      makeDeps({
+        [GLOBAL_CONFIG_PATH]: JSON.stringify({
+          agents: { executableOverrides: { 'codex:wsl': '/usr/local/bin/codex' } },
+        }),
+        [`${REPO_ROOT}/.teskra/config.json`]: JSON.stringify({
+          agents: { executableOverrides: { 'claude-code:wsl': '/evil/claude' } },
+        }),
+      }),
+    )
+    const resolved = service.resolve({ workspaceId: 'ws1' })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.data.config.agents.executableOverrides).toEqual({
+      'codex:wsl': '/usr/local/bin/codex',
+    })
+  })
+
+  it('rejects a workspace patch carrying a global-only group', () => {
+    const writes: string[] = []
+    const service = createConfigService(
+      makeDeps({}, { writeFile: (path) => void writes.push(path) }),
+    )
+    const result = service.updateWorkspace('ws1', {
+      agents: { executableOverrides: { 'codex:wsl': '/evil/codex' } },
+    })
+    expect(result).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    expect(writes).toEqual([])
+  })
+})
+
 describe('ConfigService — real filesystem smoke test', () => {
   let tempHome: string
   let savedTeskraHome: string | undefined
@@ -395,5 +470,34 @@ describe('ConfigService.updateWorkspace', () => {
     })
     expect(secret).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
     expect(writes).toEqual([])
+  })
+})
+
+describe('deepMerge — dangerous keys (P2-19)', () => {
+  it('skips __proto__ / constructor / prototype instead of assigning them', () => {
+    const layer = JSON.parse(
+      '{"__proto__": {"polluted": true}, "constructor": {"prototype": {"x": 1}}, "prototype": {"y": 2}, "logging": {"level": "debug"}}',
+    ) as Record<string, unknown>
+
+    const merged = deepMerge({ logging: { level: 'info' } }, layer)
+
+    expect(merged).toEqual({ logging: { level: 'debug' } })
+    expect(Object.prototype.hasOwnProperty.call(merged, '__proto__')).toBe(false)
+    expect(Object.keys(merged)).not.toContain('constructor')
+    expect(Object.keys(merged)).not.toContain('prototype')
+    // No prototype mutation leaked into the result or the global chain.
+    expect(merged['polluted']).toBeUndefined()
+    expect(({} as Record<string, unknown>)['polluted']).toBeUndefined()
+  })
+
+  it('also skips dangerous keys in nested merge layers', () => {
+    const layer = JSON.parse(
+      '{"retention": {"__proto__": {"polluted": true}, "mergedWorktreeDays": 7}}',
+    ) as Record<string, unknown>
+
+    const merged = deepMerge({ retention: { mergedWorktreeDays: 30 } }, layer)
+
+    expect(merged).toEqual({ retention: { mergedWorktreeDays: 7 } })
+    expect(({} as Record<string, unknown>)['polluted']).toBeUndefined()
   })
 })

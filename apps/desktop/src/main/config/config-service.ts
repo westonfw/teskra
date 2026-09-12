@@ -27,7 +27,8 @@ import { containsSecretValue, looksLikeSecretKey } from '../redact'
  *
  *   default   DEFAULT_CONFIG (contracts)
  *   global    ~/.teskra/config.json         (private; Settings UI 回写)
- *   workspace <repo>/.teskra/config.json    (可提交 → secret-scanned)
+ *   workspace <repo>/.teskra/config.json    (可提交 → secret-scanned;
+ *                                             global-only groups stripped)
  *   override  Task / Run override, supplied by the caller
  *
  * This is the ONLY module that reads config files — Managers receive a
@@ -44,7 +45,7 @@ import { containsSecretValue, looksLikeSecretKey } from '../redact'
 
 export interface ResolveConfigOptions {
   /** Loads the workspace layer from the repo at this workspace's path. */
-  readonly workspaceId?: string
+  readonly workspaceId?: string | undefined
   /** Task / Run override layer (validated against teskraConfigLayerSchema). */
   readonly override?: unknown
 }
@@ -83,14 +84,28 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
-/** Deep merge: plain objects recurse; arrays and scalars replace wholesale. */
-function deepMerge(
+/**
+ * Keys a merge layer must never set. `result[key] = value` with key
+ * `__proto__` would mutate the result's prototype instead of adding an own
+ * property; `constructor` / `prototype` are skipped with it so a hostile or
+ * corrupted config JSON cannot smuggle prototype-chain keys through the
+ * merge. deepMerge already returns a fresh object (no global prototype
+ * pollution, P2-19) — skipping these keys makes that safety explicit instead
+ * of depending on non-obvious reasoning.
+ */
+const DANGEROUS_MERGE_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype'])
+
+/**
+ * Deep merge: plain objects recurse; arrays and scalars replace wholesale.
+ * Exported for direct unit tests (P2-19 dangerous-key guard).
+ */
+export function deepMerge(
   base: Record<string, unknown>,
   layer: Record<string, unknown>,
 ): Record<string, unknown> {
   const result: Record<string, unknown> = { ...base }
   for (const [key, value] of Object.entries(layer)) {
-    if (value === undefined) {
+    if (value === undefined || DANGEROUS_MERGE_KEYS.has(key)) {
       continue
     }
     const existing = result[key]
@@ -140,6 +155,16 @@ function setSourceForLeaves(
 }
 
 /**
+ * Config groups that only the private global layer (and caller overrides)
+ * may set. The workspace layer is a committable file controlled by the repo
+ * author: `agents.executableOverrides` points Agent executables at arbitrary
+ * paths, so loading it from `<repo>/.teskra/config.json` would be RCE on
+ * "open repo + run agent" (docs/code-review-2026-09-12.md P0-3). Other
+ * groups carry no executable/path references, so they stay workspace-writable.
+ */
+const GLOBAL_ONLY_GROUPS = ['agents'] as const
+
+/**
  * Strips secret-looking fields from raw repo-local config JSON (plan §152:
  * no API keys / tokens / session ids in a committable file). Returns the
  * sanitized object plus one warning per stripped field. Reuses TASK-004's
@@ -172,6 +197,32 @@ function stripSecrets(layer: Record<string, unknown>): {
   }
 
   return { sanitized: walk(layer, ''), warnings }
+}
+
+/**
+ * Removes global-only groups (see GLOBAL_ONLY_GROUPS) from raw repo-local
+ * config JSON. Runs alongside stripSecrets on the workspace layer so the
+ * resolved config can never take `agents.*` from a committable file — even
+ * if a future caller passes `resolve({ workspaceId })` to agent detection.
+ */
+function stripGlobalOnlyGroups(layer: Record<string, unknown>): {
+  sanitized: Record<string, unknown>
+  warnings: ConfigWarning[]
+} {
+  const warnings: ConfigWarning[] = []
+  const clean: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(layer)) {
+    if ((GLOBAL_ONLY_GROUPS as readonly string[]).includes(key)) {
+      warnings.push({
+        layer: 'workspace',
+        fieldPath: key,
+        message: `Group "${key}" is global-only and was not loaded from the repo-local config (it can point Agent executables at arbitrary paths; set it in the private global config instead).`,
+      })
+      continue
+    }
+    clean[key] = value
+  }
+  return { sanitized: clean, warnings }
 }
 
 export function createConfigService(deps: ConfigServiceDeps): ConfigService {
@@ -225,13 +276,18 @@ export function createConfigService(deps: ConfigServiceDeps): ConfigService {
     // Secret scanning runs on the RAW json, before schema validation:
     // a committable repo config smuggling `{"githubToken": "ghp_…"}` must
     // lose exactly that field (with a warning), not silently fall into the
-    // generic "unknown key" rejection.
+    // generic "unknown key" rejection. Global-only groups (agents.*) are
+    // stripped here too — same trust boundary, same warning mechanism.
     if (options.scanSecrets === true && isPlainObject(json)) {
       const { sanitized, warnings: secretWarnings } = stripSecrets(json)
       for (const warning of secretWarnings) {
         report(warnings, warning, { path })
       }
-      json = sanitized
+      const groups = stripGlobalOnlyGroups(sanitized)
+      for (const warning of groups.warnings) {
+        report(warnings, warning, { path })
+      }
+      json = groups.sanitized
     }
 
     const parsed = teskraConfigLayerSchema.safeParse(json)
@@ -258,6 +314,21 @@ export function createConfigService(deps: ConfigServiceDeps): ConfigService {
     patch: unknown,
   ): IpcResult<void> => {
     if (layer === 'workspace' && isPlainObject(patch)) {
+      const globalOnly = Object.keys(patch).filter((key) =>
+        (GLOBAL_ONLY_GROUPS as readonly string[]).includes(key),
+      )
+      if (globalOnly.length > 0) {
+        return {
+          ok: false,
+          error: toPublicError({
+            code: 'VALIDATION_FAILED',
+            message:
+              'Workspace config cannot contain global-only groups; set them in the global config instead.',
+            retryable: false,
+            detail: globalOnly.join(', '),
+          }),
+        }
+      }
       const scan = stripSecrets(patch)
       if (scan.warnings.length > 0) {
         return {
@@ -321,10 +392,7 @@ export function createConfigService(deps: ConfigServiceDeps): ConfigService {
       }
     }
 
-    const merged = deepMerge(
-      current as Record<string, unknown>,
-      parsedPatch.data as Record<string, unknown>,
-    )
+    const merged = deepMerge(current, parsedPatch.data)
     const validated = teskraConfigLayerSchema.safeParse(merged)
     if (!validated.success) {
       return {

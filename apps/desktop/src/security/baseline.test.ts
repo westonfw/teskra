@@ -55,6 +55,13 @@ describe('BrowserWindow webPreferences', () => {
     expect(bridgeSource).toContain("import { BrowserWindow } from 'electron'")
     expect(mainSource).not.toContain('BrowserWindow')
   })
+
+  it('hardens window/open, webview, and navigation handling (P1-10)', () => {
+    expect(bridgeSource).toContain('setWindowOpenHandler')
+    expect(bridgeSource).toContain("action: 'deny'")
+    expect(bridgeSource).toContain('will-attach-webview')
+    expect(bridgeSource).toContain('will-navigate')
+  })
 })
 
 describe('preload bridge', () => {
@@ -63,6 +70,11 @@ describe('preload bridge', () => {
   it('exposes the bridge as window.teskra via contextBridge', () => {
     expect(preloadSource).toContain('contextBridge.exposeInMainWorld')
     expect(preloadSource).toMatch(/exposeInMainWorld\(\s*['"]teskra['"]/)
+  })
+
+  it('sources appVersion from the build-time constant, never a hardcoded literal (P2-16)', () => {
+    expect(preloadSource).toContain('appVersion: APP_VERSION')
+    expect(preloadSource).not.toMatch(/appVersion:\s*['"]/)
   })
 
   it('requires only electron plus the bundle-time allow-list (sandbox: true forbids npm requires)', () => {

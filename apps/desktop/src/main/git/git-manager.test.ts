@@ -19,7 +19,8 @@ const directories: string[] = []
 
 afterEach(() => {
   for (const database of databases.splice(0)) database.close()
-  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  for (const directory of directories.splice(0))
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 function repository() {
@@ -132,7 +133,12 @@ describe('GitManager (TASK-035)', () => {
       if (!result.ok || result.data.exitCode !== 0) throw new Error('Git fixture setup failed')
     }
     writeFileSync(join(directory, 'a.txt'), 'a\n')
-    await commands.run({ command: 'git', args: ['add', '--all'], cwd: directory, timeoutMs: 15_000 })
+    await commands.run({
+      command: 'git',
+      args: ['add', '--all'],
+      cwd: directory,
+      timeoutMs: 15_000,
+    })
     await commands.run({
       command: 'git',
       args: ['commit', '--message', 'fixture'],
@@ -165,7 +171,8 @@ describe('GitManager (TASK-035)', () => {
       cwd: directory,
       timeoutMs: 15_000,
     })
-    if (!detached.ok || detached.data.exitCode !== 0) throw new Error('git checkout --detach failed')
+    if (!detached.ok || detached.data.exitCode !== 0)
+      throw new Error('git checkout --detach failed')
 
     const result = await manager.branch('workspace-1')
     expect(result).toMatchObject({
@@ -333,5 +340,65 @@ describe('GitManager (TASK-035)', () => {
     })
     expect(commands.run).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 15_000 }))
     expect(agentCancelled).not.toHaveBeenCalled()
+  })
+
+  it('parses batched numstat: renames keyed by new path, binaries as zero stats', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'teskra-git-numstat-'))
+    directories.push(directory)
+    const commands = createCommandRunner()
+    const runGit = async (...args: string[]): Promise<void> => {
+      const result = await commands.run({ command: 'git', args, cwd: directory, timeoutMs: 15_000 })
+      if (!result.ok || result.data.exitCode !== 0) {
+        throw new Error(`git ${args.join(' ')} failed`)
+      }
+    }
+    await runGit('init', '--initial-branch=main')
+    await runGit('config', 'user.name', 'Teskra Test')
+    await runGit('config', 'user.email', 'teskra@example.invalid')
+    writeFileSync(join(directory, 'old-name.txt'), 'a\nb\nc\n')
+    writeFileSync(join(directory, 'binary.dat'), Buffer.from([0, 1, 2, 3, 0, 255]))
+    await runGit('add', '--all')
+    await runGit('commit', '--message', 'fixture')
+    const workspaces = repository()
+    workspaces.create({
+      id: 'workspace-1',
+      name: 'Numstat fixture',
+      runtime: { kind: 'wsl' },
+      path: directory,
+    })
+    const manager = createGitManager({
+      commands,
+      workspaces,
+      events: createEventBus(),
+      resolveRuntime: (candidate) =>
+        createWorkspaceRuntime(candidate.runtime, { hostPlatform: 'linux' }),
+    })
+
+    await runGit('mv', 'old-name.txt', 'new-name.txt')
+    writeFileSync(join(directory, 'new-name.txt'), 'a\nb\nc\nd\n')
+    writeFileSync(join(directory, 'binary.dat'), Buffer.from([0, 1, 2, 3, 0, 254, 253]))
+
+    const staged = await manager.diffNumstat({ workspaceId: 'workspace-1', staged: true })
+    if (!staged.ok) throw new Error(staged.error.message)
+    // A staged rename is one entry keyed by the NEW path (status porcelain
+    // v2 reports the same path for its R entries), never a phantom old path.
+    expect(staged.data).toEqual([{ path: 'new-name.txt', additions: 0, deletions: 0 }])
+
+    const unstaged = await manager.diffNumstat({ workspaceId: 'workspace-1' })
+    if (!unstaged.ok) throw new Error(unstaged.error.message)
+    expect(unstaged.data).toContainEqual({ path: 'new-name.txt', additions: 1, deletions: 0 })
+    // Binary files show `-` in numstat output and surface as zero stats.
+    expect(unstaged.data).toContainEqual({ path: 'binary.dat', additions: 0, deletions: 0 })
+
+    writeFileSync(join(directory, 'untracked.txt'), 'n1\nn2\n')
+    const untracked = await manager.untrackedNumstat('workspace-1', 'untracked.txt')
+    expect(untracked).toEqual({
+      ok: true,
+      data: { path: 'untracked.txt', additions: 2, deletions: 0 },
+    })
+    expect(await manager.untrackedNumstat('workspace-1', '../escape')).toMatchObject({
+      ok: false,
+      error: { code: 'VALIDATION_FAILED' },
+    })
   })
 })

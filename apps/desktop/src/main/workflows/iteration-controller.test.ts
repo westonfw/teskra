@@ -66,7 +66,11 @@ interface Fixture {
   readonly restart: () => IterationController
 }
 
-function setup(options?: { review?: (round: number) => StepCompletion }): Fixture {
+function setup(options?: {
+  review?: (round: number) => StepCompletion
+  /** Parks every agent step forever, so the loop stays in engine.start. */
+  hangAgent?: boolean
+}): Fixture {
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')
   const migrated = migrateDatabase(database)
@@ -119,6 +123,7 @@ function setup(options?: { review?: (round: number) => StepCompletion }): Fixtur
         iteration: execution.run.currentIteration,
         agentRunId,
       })
+      if (options?.hangAgent === true) return new Promise<StepCompletion>(() => {})
       return Promise.resolve({ outcome: 'success', result: { agentRunId } })
     },
   }
@@ -478,5 +483,29 @@ describe('IterationController (TASK-062)', () => {
     releaseReview()
     const result = expectOk(await first)
     expect(result.stopReason).toBe('passed')
+  })
+
+  it('dispose cancels the active loop and waits for it to settle (P2-1)', async () => {
+    const fixture = setup({ hangAgent: true })
+
+    const pending = fixture.controller.iterate({
+      workspaceId: 'workspace-1',
+      taskId: 'task-1',
+      agent: 'codex',
+      reviewers: ['claude'],
+    })
+    // Round 1's agent step is parked inside engine.start.
+    await vi.waitFor(() => {
+      expect(fixture.agentCalls).toHaveLength(1)
+    })
+
+    await fixture.controller.dispose()
+
+    const result = expectOk(await pending)
+    expect(result.stopReason).toBe('cancelled')
+    expect(result.run.status).toBe('cancelled')
+
+    // Idempotent: no loop is in flight anymore.
+    await fixture.controller.dispose()
   })
 })

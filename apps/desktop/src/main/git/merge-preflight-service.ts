@@ -148,7 +148,9 @@ export function createMergePreflightService(
       : commandFailed(operation, result.data)
   }
 
-  const checkMainClean = async (context: PreflightContext): Promise<IpcResult<MergePreflightCheck>> => {
+  const checkMainClean = async (
+    context: PreflightContext,
+  ): Promise<IpcResult<MergePreflightCheck>> => {
     const status = await git(context, 'status', STATUS_ARGS, context.repoCwd)
     if (!status.ok) return status
     return {
@@ -331,7 +333,7 @@ export function createMergePreflightService(
   const checkRequiredTests = (): MergePreflightCheck =>
     skipped('required-tests', 'Required tests passed', 'No test results are recorded for this run.')
 
-  const checkAcceptanceCriteria = async (worktree: Worktree): Promise<IpcResult<MergePreflightCheck>> => {
+  const checkAcceptanceCriteria = (worktree: Worktree): IpcResult<MergePreflightCheck> => {
     const label = 'Acceptance criteria passed'
     if (worktree.runId === undefined) {
       return {
@@ -401,6 +403,8 @@ export function createMergePreflightService(
         return fail({
           code: 'VALIDATION_FAILED',
           message: `Worktree "${worktreeId}" was not found.`,
+          messageKey: 'errorMessage.worktreeNotFound',
+          params: { id: worktreeId },
           retryable: false,
           detail: `MergePreflightService could not resolve worktree id=${JSON.stringify(worktreeId)}`,
         })
@@ -413,6 +417,8 @@ export function createMergePreflightService(
         return fail({
           code: 'WORKSPACE_NOT_FOUND',
           message: `Workspace "${worktree.workspaceId}" was not found.`,
+          messageKey: 'errorMessage.workspaceNotFound',
+          params: { id: worktree.workspaceId },
           retryable: false,
           detail: `MergePreflightService could not resolve workspace id=${JSON.stringify(worktree.workspaceId)}`,
         })
@@ -449,7 +455,7 @@ export function createMergePreflightService(
       const healthy = await collect(checkWorktreeHealthy(context))
       if (!healthy.ok) return healthy
       checks.push(checkRequiredTests())
-      const criteria = await collect(checkAcceptanceCriteria(worktree))
+      const criteria = await collect(Promise.resolve(checkAcceptanceCriteria(worktree)))
       if (!criteria.ok) return criteria
 
       return {

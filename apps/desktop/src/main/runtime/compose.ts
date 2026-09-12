@@ -9,6 +9,7 @@ import type {
 } from '@teskra/contracts'
 
 import { createConfigService } from '../config/config-service'
+import { APP_VERSION } from '../build-info'
 import { createArtifactStore } from '../artifacts/artifact-store'
 import { createAgentDetector } from '../agents/agent-detector'
 import { createAgentHealthManager } from '../agents/agent-health-manager'
@@ -46,6 +47,7 @@ import { getLogger, initializeLogging } from '../logger'
 import { createRetentionService } from '../maintenance/retention-service'
 import { createTeskraPaths, type TeskraPaths } from '../paths'
 import { createCommandRunner, type CommandRunner } from '../process/command-runner'
+import { createHostProcessControl } from '../process/host-processes'
 import { createProcessManager } from '../process/process-manager'
 import { createPermissionManager } from '../permissions/permission-manager'
 import { createPromptTemplateService } from '../prompts/prompt-template-service'
@@ -607,6 +609,9 @@ export async function composeTeskraRuntime(
     tasks: repositories.tasks,
     processes: processManager,
     commands,
+    // P0-2: the in-process registry is empty at startup; the pid probe is the
+    // only way to tell a dead run from one whose Agent survived the restart.
+    hostProcesses: createHostProcessControl({ commands, hostPlatform: options.hostPlatform }),
     events,
     runLogs,
     resolveRuntime: (workspace) => runtimeFor(workspace.runtime),
@@ -616,7 +621,9 @@ export async function composeTeskraRuntime(
   } else if (
     reconciled.data.missingWorkspaceIds.length > 0 ||
     reconciled.data.brokenWorktrees.length > 0 ||
-    reconciled.data.interruptedRunIds.length > 0
+    reconciled.data.interruptedRunIds.length > 0 ||
+    reconciled.data.terminatedSurvivorRunIds.length > 0 ||
+    reconciled.data.survivingRunIds.length > 0
   ) {
     getLogger('runtime').warn(reconciled.data, 'Startup reconciliation repaired stale state.')
   }
@@ -734,11 +741,17 @@ export async function composeTeskraRuntime(
       },
       listRuns: (request = {}) => workflowRunStore.listRuns(request),
       getRun: ({ runId }) => workflowRunStore.getRun(runId),
+      // P0-4: begin() returns as soon as the pass is running — start() would
+      // park on suspended steps (checkpoint / criteria-gate / review-panel)
+      // and keep the ipcRenderer.invoke pending forever. Pass progress flows
+      // through workflow.run_updated / workflow.step_updated events.
       startRun: (request) =>
-        workflowEngine.start(request.runId, {
-          workspaceId: request.workspaceId,
-          ...(request.worktreeId === undefined ? {} : { worktreeId: request.worktreeId }),
-        }),
+        Promise.resolve(
+          workflowEngine.begin(request.runId, {
+            workspaceId: request.workspaceId,
+            ...(request.worktreeId === undefined ? {} : { worktreeId: request.worktreeId }),
+          }),
+        ),
       cancelRun: ({ runId }) => workflowEngine.cancel(runId),
       resolveStep: ({ stepId, outcome, result }) =>
         workflowEngine.resolveStep(stepId, {
@@ -760,6 +773,7 @@ export async function composeTeskraRuntime(
       log: (request) => gitManager.log(request),
       commit: (request) => gitManager.commit(request),
       changes: ({ workspaceId }) => diffService.get(workspaceId),
+      filePatch: ({ workspaceId, path }) => diffService.getFilePatch(workspaceId, path),
       openFile: (request) => gitManager.openFile(request),
     },
     worktree: {
@@ -793,7 +807,8 @@ export async function composeTeskraRuntime(
       cancel: ({ runId }) => agentManager.cancel(runId),
       get: ({ runId }) => agentManager.get(runId),
       list: (request = {}) => agentManager.list(request),
-      getOutput: ({ runId }) => agentManager.getOutput(runId),
+      getOutput: ({ runId, tailBytes }) =>
+        agentManager.getOutput(runId, tailBytes === undefined ? undefined : { tailBytes }),
     },
     workspace: {
       create: (request) => workspaceManager.create(request),
@@ -839,7 +854,7 @@ export async function composeTeskraRuntime(
       info: () => ({
         ok: true,
         data: {
-          appVersion: options.appVersion ?? '0.1.0',
+          appVersion: options.appVersion ?? APP_VERSION,
           runtimeVersion: options.runtimeVersion ?? process.versions.node,
         },
       }),
@@ -939,19 +954,41 @@ export async function composeTeskraRuntime(
         }
       },
     },
-    dispose() {
+    async dispose() {
       if (disposed) {
         return { ok: true, data: undefined }
       }
       disposed = true
+      // P2-1/P2-2: stop the workflow/maintenance layer first, awaiting every
+      // cancel, so no in-flight loop, dispatch, or GC keeps writing to the
+      // database after it closes below.
+      await retentionService.dispose()
+      await workflowEngine.dispose()
+      await fullWorkflowEngine.dispose()
+      await dispatchService.dispose()
+      await iterationController.dispose()
+      await fullWorkflow.dispose()
       permissionManager.dispose()
-      workflowEngine.dispose()
-      fullWorkflowEngine.dispose()
-      agentManager.dispose()
+      // P0-2: stop every child process before the EventBus is cleared and the
+      // database closes — Agent runs first (their exit path settles terminal
+      // status and collects handoffs), then terminals, then the backstop for
+      // anything still registered with the ProcessManager.
+      await agentManager.dispose()
+      // Belt and braces: compose owns the shared RunLogStore — make sure its
+      // throttled writes are fsynced and handles released even if the Agent
+      // manager's own shutdown path bailed out early.
+      runLogs.disposeAll()
       reviewerService.dispose()
       reviewPanelService.dispose()
-      terminalManager.dispose()
+      await terminalManager.dispose()
       autoCommit.dispose()
+      const processes = await processManager.disposeAll()
+      if (processes.ok && processes.data.failed.length > 0) {
+        getLogger('runtime').error(
+          { failed: processes.data.failed },
+          'Some processes did not stop cleanly during shutdown.',
+        )
+      }
       events.clear()
       return database.close()
     },

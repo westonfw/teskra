@@ -12,10 +12,7 @@ import { CODEX_AGENT } from '../agents/definitions/codex'
 import { FAKE_AGENT } from '../agents/definitions/fake'
 import { createAgentRegistry } from '../agents/agent-registry'
 import { migrateDatabase } from '../db/migrations'
-import {
-  createAgentRunRepository,
-  createPermissionRepository,
-} from '../db/repositories'
+import { createAgentRunRepository, createPermissionRepository } from '../db/repositories'
 import { createEventBus, type EventBus } from '../events/event-bus'
 import {
   createPermissionManager,
@@ -106,6 +103,18 @@ describe('matchCommandPattern', () => {
     expect(matchCommandPattern('sudo *', 'sudoedit /etc/hosts')).toBe(false)
     expect(matchCommandPattern('docker *', 'docker-compose up')).toBe(false)
   })
+
+  it('enforces the executable-name boundary even without a space before the star (P2-18)', () => {
+    // `rm*` (no space) must behave like `rm *`: match the `rm` executable,
+    // never a different executable that merely shares the letters.
+    expect(matchCommandPattern('rm*', 'rm -rf x')).toBe(true)
+    expect(matchCommandPattern('rm*', 'rm')).toBe(true)
+    expect(matchCommandPattern('rm*', 'rmdir')).toBe(false)
+    expect(matchCommandPattern('rm*', 'rmdir build')).toBe(false)
+    expect(matchCommandPattern('git push*', 'git push origin main')).toBe(true)
+    expect(matchCommandPattern('git push*', 'git pushup')).toBe(false)
+    expect(matchCommandPattern('sudo*', 'sudoedit /etc/hosts')).toBe(false)
+  })
 })
 
 describe('PermissionManager rule CRUD (TASK-065)', () => {
@@ -120,7 +129,7 @@ describe('PermissionManager rule CRUD (TASK-065)', () => {
     const scoped = manager.createRule({
       commandPattern: 'git push',
       action: 'audit',
-      scope: 'session',
+      scope: 'persistent',
       workspaceId: 'ws-1',
       agentType: 'codex',
     })
@@ -141,12 +150,64 @@ describe('PermissionManager rule CRUD (TASK-065)', () => {
     const created = manager.createRule({
       commandPattern: 'x',
       action: 'allow',
-      scope: 'once',
+      scope: 'persistent',
       agentType: 'ghost',
     })
     expect(created.ok).toBe(false)
     if (created.ok) return
     expect(created.error.code).toBe('VALIDATION_FAILED')
+  })
+})
+
+describe('PermissionManager rule scope (P1-3)', () => {
+  it('rejects once/session scopes on create and points to permission decisions', () => {
+    const { manager } = setup()
+    for (const scope of ['once', 'session'] as const) {
+      const created = manager.createRule({ commandPattern: 'npm test', action: 'allow', scope })
+      expect(created.ok).toBe(false)
+      if (created.ok) continue
+      expect(created.error.code).toBe('VALIDATION_FAILED')
+      expect(created.error.message).toContain('persistent')
+      expect(created.error.message).toContain('allow-once')
+    }
+    expect(unwrap(manager.listRules())).toEqual([])
+  })
+
+  it('rejects scope downgrades on update', () => {
+    const { manager } = setup()
+    const rule = unwrap(
+      manager.createRule({ commandPattern: 'npm test', action: 'allow', scope: 'persistent' }),
+    )
+    for (const scope of ['once', 'session'] as const) {
+      const updated = manager.updateRule({ ruleId: rule.id, scope })
+      expect(updated.ok).toBe(false)
+      if (updated.ok) continue
+      expect(updated.error.code).toBe('VALIDATION_FAILED')
+    }
+    // Updating other fields without touching the scope still works.
+    expect(unwrap(manager.updateRule({ ruleId: rule.id, action: 'deny' }))?.action).toBe('deny')
+  })
+
+  it('legacy non-persistent rows are inert: neither listed nor applied to profiles', () => {
+    const context = setup()
+    // Rows written before the P1-3 fix (the manager now refuses to create
+    // them, so the test writes them through the repository directly).
+    const repo = createPermissionRepository(context.connection)
+    unwrap(
+      repo.createRule({
+        id: 'legacy-once',
+        commandPattern: 'npm test',
+        action: 'allow',
+        scope: 'once',
+        workspaceId: 'ws-1',
+        agentType: 'codex',
+      }),
+    )
+    const resolved = unwrap(
+      context.manager.resolveProfile({ agentType: 'codex', workspaceId: 'ws-1' }),
+    )
+    expect(resolved.profile.allow).toEqual([])
+    expect(unwrap(context.manager.listRules({ workspaceId: 'ws-1' }))).toEqual([])
   })
 })
 
@@ -313,7 +374,7 @@ describe('PermissionManager audit (TASK-065)', () => {
 
   it('links the most specific matching rule and emits permission.audit_recorded', () => {
     const context = setup()
-    context.manager.createRule({ commandPattern: 'git push', action: 'audit', scope: 'session' })
+    context.manager.createRule({ commandPattern: 'git push', action: 'audit', scope: 'persistent' })
     const specific = context.manager.createRule({
       commandPattern: 'git push',
       action: 'deny',
@@ -339,6 +400,60 @@ describe('PermissionManager audit (TASK-065)', () => {
     // run-999 does not exist → FK violation on insert; must be swallowed.
     emitOutput(context, 'run-999', '$ rm -rf /\n')
     expect(unwrap(context.manager.listAudit())).toEqual([])
+  })
+
+  it('recognizes a command line split across output chunks (P1-4 cross-chunk line buffering)', () => {
+    const context = setup()
+    emitOutput(context, 'run-1', '$ git sta')
+    expect(unwrap(context.manager.listAudit({ runId: 'run-1' }))).toEqual([])
+    emitOutput(context, 'run-1', 'tus\n')
+    const list = unwrap(context.manager.listAudit({ runId: 'run-1' }))
+    expect(list.map((entry) => entry.command)).toEqual(['git status'])
+  })
+
+  it('flushes the trailing partial line when the Run ends', () => {
+    const context = setup()
+    emitOutput(context, 'run-1', '$ git status') // no trailing newline
+    expect(unwrap(context.manager.listAudit({ runId: 'run-1' }))).toEqual([])
+    context.events.emit('agent.completed', { runId: 'run-1', exitCode: 0 })
+    const list = unwrap(context.manager.listAudit({ runId: 'run-1' }))
+    expect(list.map((entry) => entry.command)).toEqual(['git status'])
+  })
+
+  it('clears the per-Run audit dedupe set when the Run ends (P2-3)', () => {
+    const context = setup()
+    emitOutput(context, 'run-1', '$ git status\n')
+    emitOutput(context, 'run-1', '$ git status\n') // deduped while the Run is live
+    expect(unwrap(context.manager.listAudit({ runId: 'run-1' }))).toHaveLength(1)
+
+    context.events.emit('agent.completed', { runId: 'run-1', exitCode: 0 })
+    // The Run is over: its dedupe entries are dropped (the Map would otherwise
+    // grow unbounded), so a late/resumed chunk is audited fresh.
+    emitOutput(context, 'run-1', '$ git status\n')
+    expect(unwrap(context.manager.listAudit({ runId: 'run-1' }))).toHaveLength(2)
+  })
+
+  it('recognizes the Agent-specific TUI formats declared on the AgentDefinition (P1-4)', () => {
+    const context = setup()
+    // run-2 is a claude run: Claude Code transcript lines.
+    emitOutput(context, 'run-2', '⏺ Bash(npm test)\n  ⎿  42 passing\n')
+    // run-1 is a codex run: `codex exec` marker line + `<command> in <cwd>`.
+    emitOutput(
+      context,
+      'run-1',
+      'exec\nbash -lc "npm run build" in /home/dev/ws\n succeeded in 9ms:\n',
+    )
+    const claudeAudit = unwrap(context.manager.listAudit({ runId: 'run-2' }))
+    expect(claudeAudit.map((entry) => entry.command)).toEqual(['npm test'])
+    const codexAudit = unwrap(context.manager.listAudit({ runId: 'run-1' }))
+    expect(codexAudit.map((entry) => entry.command)).toEqual(['bash -lc "npm run build"'])
+  })
+
+  it('does not apply another Agent’s TUI patterns to a Run', () => {
+    const context = setup()
+    // run-2 is a claude run; the codex exec-block format must not match there.
+    emitOutput(context, 'run-2', 'exec\nbash -lc "npm test" in /home/dev/ws\n')
+    expect(unwrap(context.manager.listAudit({ runId: 'run-2' }))).toEqual([])
   })
 })
 
@@ -394,8 +509,8 @@ describe('PermissionRepository.listAudit filters (TASK-065)', () => {
     expect(byWorkspace.map((entry) => entry.runId)).toEqual(['run-1', 'run-1'])
     const byRisk = unwrap(context.manager.listAudit({ riskLevel: 'NETWORK_WRITE' }))
     expect(byRisk.map((entry) => entry.runId)).toEqual(['run-2', 'run-1'])
-    expect(unwrap(context.manager.listAudit({ workspaceId: 'ws-2', riskLevel: 'DESTRUCTIVE' }))).toEqual(
-      [],
-    )
+    expect(
+      unwrap(context.manager.listAudit({ workspaceId: 'ws-2', riskLevel: 'DESTRUCTIVE' })),
+    ).toEqual([])
   })
 })

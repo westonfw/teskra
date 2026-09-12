@@ -41,7 +41,7 @@ describe('createTeskraPaths (ADR-0003 / TASK-078)', () => {
     expect(paths.home()).toBe(join(homedir(), '.teskra'))
   })
 
-  it('creates the db / logs / run / worktree directories on demand', () => {
+  it('creates the db / logs / run directories on demand', () => {
     const dir = makeTempHome()
     const paths = createTeskraPaths({ TESKRA_HOME: dir })
 
@@ -67,12 +67,6 @@ describe('createTeskraPaths (ADR-0003 / TASK-078)', () => {
       },
     })
     expect(existsSync(join(dir, 'runs', 'run-1', 'artifacts'))).toBe(true)
-
-    expect(paths.worktreeRoot('ws-1')).toEqual({
-      ok: true,
-      data: join(dir, 'worktrees', 'ws-1'),
-    })
-    expect(existsSync(join(dir, 'worktrees', 'ws-1'))).toBe(true)
   })
 
   it('returns a structured error when directory creation fails (ENOTDIR)', () => {
@@ -132,15 +126,9 @@ describe('createTeskraPaths (ADR-0003 / TASK-078)', () => {
       if (!run.ok) {
         expect(run.error.code).toBe('VALIDATION_FAILED')
       }
-      const worktree = paths.worktreeRoot(bad)
-      expect(worktree.ok).toBe(false)
-      if (!worktree.ok) {
-        expect(worktree.error.code).toBe('VALIDATION_FAILED')
-      }
     }
     // Nothing was created for invalid segments.
     expect(existsSync(join(dir, 'runs'))).toBe(false)
-    expect(existsSync(join(dir, 'worktrees'))).toBe(false)
   })
 
   it('builds every path with node:path joins (correct separators per platform)', () => {

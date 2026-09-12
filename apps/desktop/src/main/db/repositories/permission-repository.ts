@@ -90,10 +90,10 @@ export interface CreatePermissionRuleInput {
 }
 
 export interface UpdatePermissionRuleInput {
-  readonly commandPattern?: string
-  readonly action?: PermissionAction
-  readonly scope?: PermissionScope
-  readonly riskLevel?: string | null
+  readonly commandPattern?: string | undefined
+  readonly action?: PermissionAction | undefined
+  readonly scope?: PermissionScope | undefined
+  readonly riskLevel?: string | null | undefined
 }
 
 export interface RecordAuditInput {
@@ -108,11 +108,11 @@ export interface RecordAuditInput {
 
 /** TASK-065: audit filters for the Manager/UI (`workspaceId` joins agent_runs). */
 export interface ListPermissionAuditFilter {
-  readonly runId?: string
-  readonly workspaceId?: string
-  readonly riskLevel?: string
+  readonly runId?: string | undefined
+  readonly workspaceId?: string | undefined
+  readonly riskLevel?: string | undefined
   /** Defaults to 500. */
-  readonly limit?: number
+  readonly limit?: number | undefined
 }
 
 export interface PermissionRepository {
@@ -121,7 +121,9 @@ export interface PermissionRepository {
   updateRule(id: string, patch: UpdatePermissionRuleInput): IpcResult<PermissionRule | null>
   /**
    * Rules applicable to a context: global rules (workspace_id / agent_type
-   * NULL) plus rows matching the given workspace / agent exactly.
+   * NULL) plus rows matching the given workspace / agent exactly. Only
+   * `persistent` rules apply (P1-3) — ephemeral grants are never read from
+   * this table.
    */
   listApplicableRules(workspaceId?: string, agentType?: string): IpcResult<PermissionRule[]>
   deleteRule(id: string): IpcResult<boolean>
@@ -238,8 +240,12 @@ export function createPermissionRepository(connection: Database.Database): Permi
     },
 
     listApplicableRules(workspaceId, agentType) {
-      const conditions = ['(workspace_id IS NULL OR workspace_id = ?)']
-      const values: unknown[] = [workspaceId ?? null]
+      // P1-3: only persistent rules are policy. 'once' / 'session' grants are
+      // ephemeral and live in the PermissionManager's in-memory session
+      // decisions; any legacy non-persistent row in this table is inert
+      // (it used to apply forever — the opposite of what its scope promised).
+      const conditions = ['scope = ?', '(workspace_id IS NULL OR workspace_id = ?)']
+      const values: unknown[] = ['persistent', workspaceId ?? null]
       if (agentType !== undefined) {
         conditions.push('(agent_type IS NULL OR agent_type = ?)')
         values.push(agentType)

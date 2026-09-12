@@ -102,9 +102,7 @@ describe('PromptTemplateService (TASK-079)', () => {
     expect(rendered.ok).toBe(true)
     if (rendered.ok) {
       expect(rendered.data.source).toBe('repo-local')
-      expect(rendered.data.content).toBe(
-        'CUSTOM: Add dark mode via /data/runs/run-1/handoff.json',
-      )
+      expect(rendered.data.content).toBe('CUSTOM: Add dark mode via /data/runs/run-1/handoff.json')
     }
   })
 

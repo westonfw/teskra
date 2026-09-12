@@ -2,12 +2,19 @@ import { randomUUID } from 'node:crypto'
 import { statSync } from 'node:fs'
 import { basename, win32 } from 'node:path'
 
-import type { IpcResult, Workspace, WorkspaceEnvValue, WorkspaceRuntimeRef } from '@teskra/contracts'
+import type {
+  IpcResult,
+  Workspace,
+  WorkspaceEnvValue,
+  WorkspaceRuntimeRef,
+} from '@teskra/contracts'
 
 import type { WorkspaceRepository } from '../db/repositories'
 import { type InternalAppError, toPublicError } from '../errors'
+import { getLogger } from '../logger'
 import { containsSecretValue, looksLikeSecretKey } from '../redact'
 import {
+  workspaceCredentialKeyPrefix,
   workspaceEnvCredentialKey,
   type CredentialStore,
 } from '../security/credential-store'
@@ -28,12 +35,12 @@ import { createWorkspaceRuntime, type WorkspaceRuntime } from './runtime'
 
 export interface OpenWorkspaceInput {
   /** Defaults to the path's basename (win32-aware for `windows` runtimes). */
-  readonly name?: string
+  readonly name?: string | undefined
   readonly runtime: WorkspaceRuntimeRef
   readonly path: string
-  readonly gitRoot?: string
-  readonly defaultBranch?: string
-  readonly env?: Record<string, string>
+  readonly gitRoot?: string | undefined
+  readonly defaultBranch?: string | undefined
+  readonly env?: Record<string, string> | undefined
 }
 
 export interface WorkspaceValidation {
@@ -138,6 +145,21 @@ export function createWorkspaceManager(
       return { ok: true, data: undefined }
     }
     const diverted: Record<string, WorkspaceEnvValue> = {}
+    /** Refs written by THIS call; rolled back when a later write fails (P2-5). */
+    const writtenRefs: string[] = []
+    const rollback = (): void => {
+      const store = options.credentials
+      if (store === undefined) return
+      for (const ref of writtenRefs) {
+        const removed = store.delete(ref)
+        if (!removed.ok) {
+          getLogger('security').warn(
+            { workspaceId, key: ref, error: removed.error },
+            'Failed to roll back a partially written workspace secret.',
+          )
+        }
+      }
+    }
     for (const [key, value] of Object.entries(env)) {
       if (!looksLikeSecretKey(key) && !containsSecretValue(value)) {
         diverted[key] = value
@@ -145,10 +167,12 @@ export function createWorkspaceManager(
       }
       const store = options.credentials
       if (store === undefined || !store.isAvailable()) {
+        rollback()
         return fail({
           code: 'CAPABILITY_NOT_AVAILABLE',
           message:
             'This environment cannot securely store secrets; sensitive environment variables were not persisted.',
+          messageKey: 'errorMessage.secretsNotPersisted',
           retryable: false,
           detail: `env key ${JSON.stringify(key)} looks sensitive but the Credential Store is unavailable`,
         })
@@ -156,11 +180,32 @@ export function createWorkspaceManager(
       const ref = workspaceEnvCredentialKey(workspaceId, key)
       const stored = store.set(ref, value)
       if (!stored.ok) {
+        rollback()
         return stored
       }
+      writtenRefs.push(ref)
       diverted[key] = { secretRef: ref }
     }
     return { ok: true, data: diverted }
+  }
+
+  /**
+   * Best-effort delete of every secretRef a diverted env map points at; used
+   * when the workspace write that owned those secrets failed (P2-5).
+   */
+  const dropEnvSecretRefs = (env: Record<string, WorkspaceEnvValue> | undefined): void => {
+    const store = options.credentials
+    if (store === undefined || env === undefined) return
+    for (const value of Object.values(env)) {
+      if (typeof value === 'string') continue
+      const removed = store.delete(value.secretRef)
+      if (!removed.ok) {
+        getLogger('security').warn(
+          { key: value.secretRef, error: removed.error },
+          'Failed to delete an orphaned workspace secret.',
+        )
+      }
+    }
   }
 
   const manager: WorkspaceManager = {
@@ -177,6 +222,7 @@ export function createWorkspaceManager(
         return fail({
           code: 'VALIDATION_FAILED',
           message: 'A workspace for this runtime and path already exists.',
+          messageKey: 'errorMessage.workspaceDuplicate',
           retryable: false,
           detail: `duplicate of workspace ${existing.data.id}; use open() for idempotent opens`,
         })
@@ -186,7 +232,11 @@ export function createWorkspaceManager(
       if (!env.ok) {
         return env
       }
-      return repository.create({ id, ...draft.data, env: env.data }, now())
+      const created = repository.create({ id, ...draft.data, env: env.data }, now())
+      if (!created.ok) {
+        dropEnvSecretRefs(env.data)
+      }
+      return created
     },
 
     open(input) {
@@ -206,6 +256,7 @@ export function createWorkspaceManager(
         return fail({
           code: 'WORKSPACE_NOT_FOUND',
           message: 'The workspace directory does not exist.',
+          messageKey: 'errorMessage.workspaceDirMissing',
           retryable: false,
           detail: `no directory at ${draft.data.path}`,
         })
@@ -237,14 +288,46 @@ export function createWorkspaceManager(
       if (!env.ok) {
         return env
       }
-      return repository.create(
+      const created = repository.create(
         { id, ...draft.data, env: env.data, lastOpenedAt: timestamp },
         timestamp,
       )
+      if (!created.ok) {
+        dropEnvSecretRefs(env.data)
+      }
+      return created
     },
 
     remove(id) {
-      return repository.delete(id)
+      const deleted = repository.delete(id)
+      if (!deleted.ok || deleted.data !== true) {
+        return deleted
+      }
+      // P2-5: the workspace's Credential Store entries
+      // (`workspace/<id>/*`, TASK-088) must not outlive the workspace.
+      const store = options.credentials
+      if (store !== undefined) {
+        const keys = store.list()
+        if (!keys.ok) {
+          getLogger('security').warn(
+            { workspaceId: id, error: keys.error },
+            'Failed to list credentials while removing a workspace.',
+          )
+        } else {
+          const prefix = workspaceCredentialKeyPrefix(id)
+          for (const key of keys.data) {
+            if (!key.startsWith(prefix)) continue
+            const removedKey = store.delete(key)
+            if (!removedKey.ok) {
+              getLogger('security').warn(
+                { workspaceId: id, key, error: removedKey.error },
+                'Failed to delete a workspace credential during workspace removal.',
+              )
+            }
+          }
+        }
+      }
+      return deleted
     },
 
     listRecent(limit = 10) {

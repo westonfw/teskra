@@ -32,8 +32,20 @@ function fail<T>(error: InternalAppError): IpcResult<T> {
   return { ok: false, error: toPublicError(error) }
 }
 
-function unavailable(message: string, detail: string): IpcResult<never> {
-  return fail({ code: 'VALIDATION_FAILED', message, retryable: true, detail })
+function unavailable(
+  message: string,
+  detail: string,
+  messageKey: string,
+  params?: Record<string, string | number>,
+): IpcResult<never> {
+  return fail({
+    code: 'VALIDATION_FAILED',
+    message,
+    messageKey,
+    ...(params === undefined ? {} : { params }),
+    retryable: true,
+    detail,
+  })
 }
 
 /** TASK-042 restores a Run environment; it never treats a persisted PID as a live session. */
@@ -45,13 +57,19 @@ export function createResumeService(deps: ResumeServiceDeps): ResumeService {
       const found = deps.runs.getById(request.runId)
       if (!found.ok) return found
       if (found.data === null) {
-        return unavailable(`Agent run "${request.runId}" was not found.`, 'resume target missing')
+        return unavailable(
+          `Agent run "${request.runId}" was not found.`,
+          'resume target missing',
+          'errorMessage.agentRunNotFound',
+          { id: request.runId },
+        )
       }
       const run = found.data
       if (run.status !== 'interrupted') {
         return unavailable(
           'Only interrupted Agent runs can be resumed.',
           `run=${run.id} status=${run.status}`,
+          'errorMessage.onlyInterruptedResumable',
         )
       }
       // ADR-0002: an orchestrated Run may only execute inside its isolated
@@ -63,6 +81,7 @@ export function createResumeService(deps: ResumeServiceDeps): ResumeService {
         return unavailable(
           'Orchestrated Agent runs require an isolated worktree.',
           `run=${run.id} mode=orchestrated worktree=none`,
+          'errorMessage.orchestratedRequiresWorktree',
         )
       }
 
@@ -78,13 +97,18 @@ export function createResumeService(deps: ResumeServiceDeps): ResumeService {
         return unavailable(
           'The interrupted Run still has a live process and cannot be resumed safely.',
           `run=${run.id} persisted process=${run.processId ?? 'none'} pid=${String(run.pid ?? 'none')}`,
+          'errorMessage.resumeLiveProcess',
         )
       }
 
       const workspace = deps.workspaces.getById(run.workspaceId)
       if (!workspace.ok) return workspace
       if (workspace.data === null) {
-        return unavailable('The Run workspace no longer exists.', `workspace=${run.workspaceId}`)
+        return unavailable(
+          'The Run workspace no longer exists.',
+          `workspace=${run.workspaceId}`,
+          'errorMessage.resumeWorkspaceGone',
+        )
       }
       const runtime = deps.resolveRuntime(workspace.data)
       if (!runtime.ok) return runtime
@@ -98,6 +122,7 @@ export function createResumeService(deps: ResumeServiceDeps): ResumeService {
         return unavailable(
           'The Run workspace directory no longer exists.',
           `workspace=${workspace.data.id} path=${workspace.data.path}`,
+          'errorMessage.resumeWorkspaceDirGone',
         )
       }
 
@@ -108,6 +133,7 @@ export function createResumeService(deps: ResumeServiceDeps): ResumeService {
           return unavailable(
             'The workspace is in detached HEAD state.',
             `workspace=${workspace.data.id}`,
+            'errorMessage.resumeDetachedHead',
           )
         }
       } else {
@@ -117,12 +143,14 @@ export function createResumeService(deps: ResumeServiceDeps): ResumeService {
           return unavailable(
             'The Run worktree no longer exists.',
             `run=${run.id} worktree=${run.worktreeId}`,
+            'errorMessage.resumeWorktreeGone',
           )
         }
         if (!RESUMABLE_WORKTREE_STATES.has(worktree.data.state)) {
           return unavailable(
             'The Run worktree is not in a resumable state.',
             `worktree=${worktree.data.id} state=${worktree.data.state}`,
+            'errorMessage.resumeWorktreeNotResumable',
           )
         }
         const worktreePath = runtime.data.resolveHostPath(
@@ -133,12 +161,14 @@ export function createResumeService(deps: ResumeServiceDeps): ResumeService {
           return unavailable(
             'The Run worktree directory no longer exists.',
             `worktree=${worktree.data.id} path=${worktree.data.path}`,
+            'errorMessage.resumeWorktreeDirGone',
           )
         }
         if (!branches.data.branches.includes(worktree.data.branch)) {
           return unavailable(
             'The Run worktree branch no longer exists.',
             `worktree=${worktree.data.id} branch=${worktree.data.branch}`,
+            'errorMessage.resumeBranchGone',
           )
         }
       }

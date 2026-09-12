@@ -297,6 +297,7 @@ function fakeRuntime(): TeskraRuntime {
       log: vi.fn(async () => ok([])),
       commit: vi.fn(async () => ok({ hash: 'abc', output: 'committed' })),
       changes: vi.fn(async () => ok({ files: [] })),
+      filePatch: vi.fn(async () => ok({ patch: '' })),
       openFile: vi.fn(async () => ok(undefined)),
     },
     worktree: {
@@ -457,7 +458,7 @@ function fakeRuntime(): TeskraRuntime {
         }),
       ),
     },
-    dispose: vi.fn(() => ok(undefined)),
+    dispose: vi.fn(async () => ok(undefined)),
   }
 }
 

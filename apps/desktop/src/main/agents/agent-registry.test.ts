@@ -63,4 +63,20 @@ describe('AgentRegistry', () => {
       error: { code: 'VALIDATION_FAILED' },
     })
   })
+
+  it('rejects auditCommandPatterns that do not compile (P1-4)', () => {
+    const invalid = createAgentRegistry([{ ...FAKE, auditCommandPatterns: [{ pattern: '([' }] }])
+    expect(invalid).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    const invalidMarker = createAgentRegistry([
+      { ...FAKE, auditCommandPatterns: [{ pattern: '^(.+)$', afterMarker: '*' }] },
+    ])
+    expect(invalidMarker).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+  })
+
+  it('built-in Codex and Claude definitions declare their TUI audit patterns (P1-4)', () => {
+    const created = createBuiltInAgentRegistry()
+    if (!created.ok) throw new Error('expected registry')
+    expect(created.data.get('codex')?.auditCommandPatterns?.length).toBeGreaterThan(0)
+    expect(created.data.get('claude')?.auditCommandPatterns?.length).toBeGreaterThan(0)
+  })
 })

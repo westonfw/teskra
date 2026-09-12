@@ -228,4 +228,46 @@ describe('ClaudeAdapter process contract (TASK-027)', () => {
     expect(result).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
     expect(deps.processes.start).not.toHaveBeenCalled()
   })
+
+  it('translates host-side run paths into the WSL path form at launch (P0-1)', async () => {
+    const wslRuntime: WorkspaceRuntime = { ...runtime, hostNative: false }
+    const deps = dependencies()
+    const sessionId = '550e8400-e29b-41d4-a716-446655440009'
+    const adapter = createClaudeAdapter({
+      ...deps,
+      resolveRuntime: () => ({ ok: true, data: wslRuntime }),
+      createSessionId: () => sessionId,
+    })
+
+    const result = await adapter.start({
+      ...request,
+      prompt: 'Review',
+      approvalMode: 'read-only',
+      handoffPath: 'C:\\Users\\u\\.teskra\\runs\\run-claude-1\\handoff.json',
+      artifactDir: 'C:\\Users\\u\\.teskra\\runs\\run-claude-1\\artifacts',
+      permissionConfigPath: 'C:\\Users\\u\\.teskra\\runs\\run-claude-1\\permission-settings.json',
+    })
+    expect(result.ok).toBe(true)
+
+    // The --settings argument and the handoff/artifact env values all reach
+    // the WSL-side process in /mnt/c form; the host keeps using the originals.
+    expect(deps.processes.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: [
+          '--permission-mode',
+          'plan',
+          '--settings',
+          '/mnt/c/Users/u/.teskra/runs/run-claude-1/permission-settings.json',
+          '--session-id',
+          sessionId,
+          'Review',
+        ],
+        env: expect.objectContaining({
+          TESKRA_HANDOFF_PATH: '/mnt/c/Users/u/.teskra/runs/run-claude-1/handoff.json',
+          TESKRA_ARTIFACT_DIR: '/mnt/c/Users/u/.teskra/runs/run-claude-1/artifacts',
+          TESKRA_RUN_ID: 'run-claude-1',
+        }),
+      }),
+    )
+  })
 })

@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type {
   AgentDefinition,
@@ -98,6 +98,8 @@ function setup(options?: {
   review?: (round: number) => StepCompletion
   reviewers?: boolean
   overrideDefinition?: boolean
+  /** Parks every agent step forever, so start() stays inside the loop. */
+  hangAgent?: boolean
 }): Fixture {
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')
@@ -165,6 +167,7 @@ function setup(options?: {
         iteration: execution.run.currentIteration,
         agentRunId: execution.context.agentRunId,
       })
+      if (options?.hangAgent === true) return new Promise<StepCompletion>(() => {})
       return Promise.resolve({
         outcome: 'success',
         result: { agentRunId: execution.context.agentRunId ?? 'unknown' },
@@ -448,6 +451,26 @@ describe('FullWorkflowService (TASK-063)', () => {
     expect(fixture.stepContexts).toEqual([
       { workspaceId: 'ws-1', worktreeId: started.data.worktree.id },
     ])
+  })
+
+  it('dispose cancels the in-flight start and waits for it to settle (P2-1)', async () => {
+    const fixture = setup({ hangAgent: true })
+
+    const pending = fixture.service.start({ workspaceId: 'ws-1', taskId: 'task-1' })
+    // Round 1's implement step is parked inside the controller's engine pass.
+    await vi.waitFor(() => {
+      expect(fixture.agentCalls).toHaveLength(1)
+    })
+
+    await fixture.service.dispose()
+
+    const started = await pending
+    if (!started.ok) throw new Error(started.error.message)
+    expect(started.data.stopReason).toBe('cancelled')
+    expect(started.data.run.status).toBe('cancelled')
+
+    // Idempotent: nothing is in flight anymore.
+    await fixture.service.dispose()
   })
 })
 

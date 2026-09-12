@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { IpcResult, WorkbenchEvents } from '@teskra/contracts'
+import type { AgentDefinition, IpcResult, WorkbenchEvents } from '@teskra/contracts'
 
 import { migrateDatabase } from '../db/migrations'
 import {
@@ -51,7 +51,7 @@ afterEach(() => {
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
-function mockAdapter(definition: typeof CODEX_AGENT | typeof FAKE_AGENT): CodingAgentAdapter {
+function mockAdapter(definition: AgentDefinition): CodingAgentAdapter {
   return {
     definition,
     detect: vi.fn(async ({ runtime }) => ({
@@ -409,6 +409,33 @@ describe('DispatchService (TASK-059)', () => {
     const result = requireOk(await dispatched)
     expect(result.run.status).toBe('cancelled')
     expect(result.agentRun.status).toBe('cancelled')
+  })
+
+  it('dispose cancels the in-flight dispatch and waits for it to settle (P2-1)', async () => {
+    const fixture = await setup()
+
+    const dispatched = fixture.service.dispatch({
+      workspaceId: 'workspace-1',
+      taskId: 'task-1',
+      agent: 'codex',
+    })
+    const start = await awaitAdapterStart(fixture.adapters.codex)
+    await vi.waitFor(() => {
+      const agentRun = fixture.agents.get(start.runId)
+      expect(agentRun.ok && agentRun.data?.status).toBe('running')
+    })
+
+    // Shutdown: the dispatch's WorkflowRun is cancelled and the returned
+    // promise settles (with its trailing finalization writes) before
+    // dispose() returns.
+    await fixture.service.dispose()
+
+    const result = requireOk(await dispatched)
+    expect(result.run.status).toBe('cancelled')
+    expect(result.agentRun.status).toBe('cancelled')
+
+    // Idempotent: nothing in flight anymore.
+    await fixture.service.dispose()
   })
 
   it('refuses unknown agents and tasks from another workspace without creating a worktree', async () => {

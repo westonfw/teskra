@@ -249,9 +249,7 @@ function peel(tokens: readonly string[], depth: number): Peeled | null {
     }
     if (head === 'sudo' || head === 'doas') {
       privileged = true
-      rest = rest.slice(
-        skipFlagsWithValues(rest, 1, new Set(['-u', '-g', '-h', '-p', '-C', '-T'])),
-      )
+      rest = rest.slice(skipFlagsWithValues(rest, 1, new Set(['-u', '-g', '-h', '-p', '-C', '-T'])))
       continue
     }
     if (head === 'nice') {
@@ -533,7 +531,9 @@ export const COMMAND_RULES: readonly CommandRule[] = [
       const args = git(inv)
       if (args?.[0] !== 'branch') return false
       const rest = args.slice(1)
-      return rest.every((arg) => ['-l', '--list', '-a', '-r', '-v', '-vv', '--show-current'].includes(arg))
+      return rest.every((arg) =>
+        ['-l', '--list', '-a', '-r', '-v', '-vv', '--show-current'].includes(arg),
+      )
     },
   },
   {
@@ -559,7 +559,9 @@ export const COMMAND_RULES: readonly CommandRule[] = [
     risk: 'WORKSPACE_WRITE',
     match: (inv) => {
       const sub = git(inv)?.[0]
-      return sub !== undefined && (GIT_WRITE_SUBCOMMANDS.has(sub) || sub === 'branch' || sub === 'tag')
+      return (
+        sub !== undefined && (GIT_WRITE_SUBCOMMANDS.has(sub) || sub === 'branch' || sub === 'tag')
+      )
     },
   },
   // --- file deletion
@@ -606,7 +608,10 @@ export const COMMAND_RULES: readonly CommandRule[] = [
     match: (inv) => {
       const sub = dockerArgs(inv)?.[0]
       return (
-        sub !== undefined && ['ps', 'images', 'inspect', 'logs', 'version', 'info', 'stats', 'diff', 'history'].includes(sub)
+        sub !== undefined &&
+        ['ps', 'images', 'inspect', 'logs', 'version', 'info', 'stats', 'diff', 'history'].includes(
+          sub,
+        )
       )
     },
   },
@@ -625,7 +630,26 @@ export const COMMAND_RULES: readonly CommandRule[] = [
       const sub = dockerArgs(inv)?.[0]
       return (
         sub !== undefined &&
-        ['run', 'create', 'start', 'stop', 'restart', 'exec', 'build', 'up', 'down', 'kill', 'rename', 'cp', 'commit', 'tag', 'save', 'load', 'import', 'export'].includes(sub)
+        [
+          'run',
+          'create',
+          'start',
+          'stop',
+          'restart',
+          'exec',
+          'build',
+          'up',
+          'down',
+          'kill',
+          'rename',
+          'cp',
+          'commit',
+          'tag',
+          'save',
+          'load',
+          'import',
+          'export',
+        ].includes(sub)
       )
     },
   },
@@ -650,7 +674,8 @@ export const COMMAND_RULES: readonly CommandRule[] = [
     id: 'system-package-manager-write',
     risk: 'SYSTEM_WRITE',
     match: (inv) => {
-      if (!isExec(inv, 'apt', 'apt-get', 'dnf', 'yum', 'brew', 'pacman', 'pip', 'pip3')) return false
+      if (!isExec(inv, 'apt', 'apt-get', 'dnf', 'yum', 'brew', 'pacman', 'pip', 'pip3'))
+        return false
       const sub = inv.args[0]
       if (sub === undefined) return false
       return !['search', 'list', 'show', 'info', 'freeze', '--version', '--help'].includes(sub)

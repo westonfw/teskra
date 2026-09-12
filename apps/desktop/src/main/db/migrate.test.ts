@@ -280,9 +280,9 @@ describe('MIGRATIONS registry (TASK-006)', () => {
       task_id: 't1',
     })
     // 008 (TASK-062): pre-existing rows gain the per-criteria-version counter at 0.
-    expect(db.prepare('SELECT criteria_iteration FROM workflow_runs WHERE id = ?').get('wr1')).toEqual(
-      { criteria_iteration: 0 },
-    )
+    expect(
+      db.prepare('SELECT criteria_iteration FROM workflow_runs WHERE id = ?').get('wr1'),
+    ).toEqual({ criteria_iteration: 0 })
     // task_id is nullable now; FK enforcement is back on.
     expect(db.pragma('foreign_keys', { simple: true })).toBe(1)
     expect(() =>

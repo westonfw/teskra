@@ -1,10 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import type {
-  AgentResumeRequest,
-  AgentStartRequest,
-  ProviderSessionRef,
-} from '@teskra/contracts'
+import type { AgentResumeRequest, AgentStartRequest, ProviderSessionRef } from '@teskra/contracts'
 
 import { CLAUDE_AGENT } from '../definitions/claude'
 import {
