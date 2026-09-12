@@ -24,6 +24,7 @@ import { TaskPage } from '../tasks/task-page'
 import { AgentCatalogPage } from '../agents/agent-catalog-page'
 import type { SettingsSectionRegistry } from '../settings/registry'
 import { LOCALES, useTranslation, type Locale, type TranslationKey } from '../i18n'
+import { useGitStore } from '../stores/git-store'
 import { useNavigationStore, type WorkbenchPage } from '../stores/navigation-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
 import { TerminalKeepAliveHost } from '../terminal/terminal-keep-alive-host'
@@ -78,6 +79,18 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
   const loadRecent = useWorkspaceStore((state) => state.loadRecent)
   const selectWorkspace = useWorkspaceStore((state) => state.selectWorkspace)
   const { t, locale, setLocale } = useTranslation()
+  const gitBranch = useGitStore((state) => state.status?.branch)
+  const refreshGit = useGitStore((state) => state.refresh)
+
+  // The persisted workspace.defaultBranch is a snapshot from open time (an
+  // empty repo has no branch yet); keep the topbar on the live branch.
+  useEffect(() => {
+    if (workspace === undefined) return
+    const refresh = (): void => void refreshGit(workspace.id)
+    refresh()
+    window.addEventListener('focus', refresh)
+    return () => window.removeEventListener('focus', refresh)
+  }, [refreshGit, workspace])
 
   useEffect(() => {
     void loadRecent()
@@ -125,7 +138,9 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
           <div className="topbar-context">
             <Space size={6}>
               <BranchesOutlined />
-              <Typography.Text>{workspace?.defaultBranch ?? t('topbar.noBranch')}</Typography.Text>
+              <Typography.Text>
+                {gitBranch ?? workspace?.defaultBranch ?? t('topbar.noBranch')}
+              </Typography.Text>
             </Space>
             {workspace !== undefined && (
               <Tag bordered={false} color="cyan">
