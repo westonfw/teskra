@@ -27,7 +27,9 @@ import { AppErrorAlert } from '../components/app-error-alert'
 import { useTranslation, type TranslationKey, type TranslationParams } from '../i18n'
 import { useSettingsStore } from '../settings/settings-store'
 import { agentRuntimeKey, useAgentStore } from '../stores/agent-store'
+import { useNavigationStore } from '../stores/navigation-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
+import { RunWorktreePanel } from '../tasks/run-worktree-panel'
 import { AgentPicker } from './agent-picker'
 import { AgentRunTerminal } from './agent-run-terminal'
 import { restartAgentRunRequest, shortDuration } from './agent-watchdog'
@@ -114,6 +116,17 @@ export function AgentCatalogPage() {
       setSelectedId(definitions[0].id)
     }
   }, [definitions, selectedId])
+
+  // Honor cross-page intents (e.g. Home → Merge Ready opens the owning Run's
+  // drawer here, where the worktree merge action lives).
+  const pendingRunId = useNavigationStore((state) => state.pendingRunId)
+  const consumePendingRunId = useNavigationStore((state) => state.consumePendingRunId)
+  useEffect(() => {
+    if (pendingRunId === undefined) return
+    if (!runs.some((run) => run.id === pendingRunId)) return
+    setSelectedRunId(pendingRunId)
+    consumePendingRunId()
+  }, [consumePendingRunId, pendingRunId, runs])
 
   const names = useMemo(
     () => Object.fromEntries(definitions.map((definition) => [definition.id, definition.name])),
@@ -442,6 +455,7 @@ function RunDetail({
   onResume,
 }: RunDetailProps) {
   const { t } = useTranslation()
+  const workspace = useWorkspaceStore((state) => state.current)
   return (
     <div className="run-detail">
       {run.executionMode === 'attended' && run.worktreeId === undefined && (
@@ -509,6 +523,7 @@ function RunDetail({
           <Typography.Paragraph className="run-prompt">{run.prompt}</Typography.Paragraph>
         </Card>
       )}
+      {workspace !== undefined && <RunWorktreePanel run={run} workspace={workspace} />}
       <AgentRunTerminal key={run.id} run={run} initialData={output} />
       {ACTIVE_STATUSES.has(run.status) && (
         <Button danger onClick={onCancel}>

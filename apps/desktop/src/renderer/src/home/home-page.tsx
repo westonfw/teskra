@@ -232,7 +232,7 @@ export function HomePage() {
         <DashboardSection
           title={t('home.section.mergeReady')}
           count={mergeReady.data?.total}
-          target="git"
+          target="runs"
           block={mergeReady}
           onRetry={() => reloadBlock(workspace, 'mergeReady')}
         >
@@ -248,7 +248,14 @@ export function HomePage() {
               ),
             }}
             renderItem={(item: Worktree) => (
-              <List.Item className="dashboard-item" onClick={() => navigate('git')}>
+              <List.Item
+                className="dashboard-item"
+                onClick={() =>
+                  item.runId === undefined
+                    ? navigate('runs')
+                    : navigate('runs', { openRunId: item.runId })
+                }
+              >
                 <Typography.Text ellipsis className="dashboard-item-label">
                   {item.branch}
                 </Typography.Text>
