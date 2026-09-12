@@ -46,6 +46,7 @@ interface AgentRunRow {
   agent_type: string
   role: string | null
   model: string | null
+  mode: string | null
   approval_mode: string | null
   status: string
   process_id: string | null
@@ -77,6 +78,8 @@ export interface CreateAgentRunInput {
   readonly workflowStepId?: string
   readonly role?: AgentRole
   readonly model?: string
+  /** ADR-0007: launch mode persisted at create; never updated afterwards. */
+  readonly mode?: 'interactive' | 'exec'
   readonly approvalMode?: ApprovalMode
   /** Defaults to 'created'. */
   readonly status?: AgentRunStatus
@@ -146,6 +149,7 @@ function toDomain(row: AgentRunRow): IpcResult<AgentRun> {
     agentType: row.agent_type,
     role: row.role ?? undefined,
     model: row.model ?? undefined,
+    mode: row.mode === 'interactive' || row.mode === 'exec' ? row.mode : undefined,
     approvalMode: row.approval_mode ?? undefined,
     status: row.status,
     processId: row.process_id ?? undefined,
@@ -183,8 +187,8 @@ export function createAgentRunRepository(connection: Database.Database): AgentRu
       const inserted = execute(ENTITY, 'create', () => {
         connection
           .prepare(
-            `INSERT INTO agent_runs (id, task_id, workspace_id, workflow_run_id, workflow_step_id, agent_type, role, model, approval_mode, status, worktree_id, execution_mode, criteria_set_id, provider_session_json, run_dir, prompt, started_at, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO agent_runs (id, task_id, workspace_id, workflow_run_id, workflow_step_id, agent_type, role, model, mode, approval_mode, status, worktree_id, execution_mode, criteria_set_id, provider_session_json, run_dir, prompt, started_at, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             input.id,
@@ -195,6 +199,7 @@ export function createAgentRunRepository(connection: Database.Database): AgentRu
             input.agentType,
             input.role ?? null,
             input.model ?? null,
+            input.mode ?? null,
             input.approvalMode ?? null,
             input.status ?? 'created',
             input.worktreeId ?? null,

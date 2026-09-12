@@ -58,6 +58,34 @@ describe('AgentRunRepository', () => {
     expect(repo.getById('run-1')).toEqual(created)
   })
 
+  it('round-trips the persisted launch mode (ADR-0007), absent for legacy rows', () => {
+    setup()
+    const created = repo.create({
+      id: 'run-exec',
+      workspaceId: 'ws-1',
+      agentType: 'codex',
+      executionMode: 'orchestrated',
+      runDir: 'runs/run-exec',
+      mode: 'exec',
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    expect(created.data.mode).toBe('exec')
+    expect(repo.getById('run-exec')).toEqual(created)
+
+    const legacy = repo.create({
+      id: 'run-legacy',
+      workspaceId: 'ws-1',
+      agentType: 'codex',
+      executionMode: 'attended',
+      runDir: 'runs/run-legacy',
+    })
+    expect(legacy.ok).toBe(true)
+    if (!legacy.ok) return
+    // Rows without a recorded mode read back as undefined (pre-009 behavior).
+    expect(legacy.data.mode).toBeUndefined()
+  })
+
   it('updates lifecycle fields including error_json roundtrip', () => {
     setup()
     repo.create({

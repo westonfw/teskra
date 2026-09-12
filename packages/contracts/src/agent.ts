@@ -242,6 +242,12 @@ export const agentRunSchema = z.strictObject({
   agentType: z.string().min(1),
   role: agentRoleSchema.optional(),
   model: z.string().optional(),
+  /**
+   * ADR-0007: the launch mode the run was started with ('interactive' | 'exec').
+   * Persisted so resume relaunches with the original mode; absent on runs that
+   * predate 009_agent_run_mode — resume treats those as 'interactive'.
+   */
+  mode: z.enum(['interactive', 'exec']).optional(),
   approvalMode: approvalModeSchema.optional(),
   status: agentRunStatusSchema,
   processId: z.string().optional(),
