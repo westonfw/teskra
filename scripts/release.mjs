@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // TASK-073 — release orchestration:
 //
 //   build -> sign (Windows, optional) -> package -> checksum -> release notes
@@ -91,12 +90,21 @@ export function buildVersionEnv(version, baseEnv = process.env) {
 function main() {
   function run(command, commandArgs, options = {}) {
     console.log(`release: $ ${command} ${commandArgs.join(' ')}`)
-    const result = spawnSync(command, commandArgs, {
-      cwd: repoRoot,
-      stdio: 'inherit',
-      shell: process.platform === 'win32',
-      ...options,
-    })
+    // shell: true is required on win32 to resolve the npm.cmd shim, but it
+    // concatenates command + args into a cmd.exe string — quote anything
+    // containing whitespace so e.g. "C:\Program Files\nodejs\node.exe" works.
+    const useShell = process.platform === 'win32'
+    const quote = (s) => (/\s/.test(s) ? `"${s}"` : s)
+    const result = spawnSync(
+      useShell ? quote(command) : command,
+      useShell ? commandArgs.map(quote) : commandArgs,
+      {
+        cwd: repoRoot,
+        stdio: 'inherit',
+        shell: useShell,
+        ...options,
+      },
+    )
     if (result.error) fail(`${command} failed to start: ${result.error.message}`)
     if (result.status !== 0) fail(`${command} exited with code ${result.status}`)
   }
