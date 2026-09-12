@@ -210,7 +210,9 @@ export function TaskPage() {
                     <div>
                       <Typography.Text strong>{task.title}</Typography.Text>
                       <div className="task-list-meta">
-                        <Tag color={taskStatusColor[task.status]}>{label(task.status)}</Tag>
+                        <Tag color={taskStatusColor[task.status] ?? 'default'}>
+                          {t(`tasks.status.${task.status}`)}
+                        </Tag>
                         <span>
                           {t('tasks.runsCount', {
                             count: runs.filter(({ taskId }) => taskId === task.id).length,
@@ -266,7 +268,7 @@ export function TaskPage() {
                     value={selected.status}
                     options={TASK_STATUSES.map((status) => ({
                       value: status,
-                      label: label(status),
+                      label: t(`tasks.status.${status}`),
                     }))}
                     onChange={(status) => void updateTask({ id: selected.id, status })}
                   />
@@ -381,7 +383,7 @@ export function TaskPage() {
                         title={
                           <Space>
                             <span>{run.agentType}</span>
-                            <Tag>{label(run.status)}</Tag>
+                            <Tag>{t(`runs.status.${run.status}`)}</Tag>
                           </Space>
                         }
                         description={`${run.model ?? t('tasks.runs.defaultModel')} · ${new Date(run.createdAt).toLocaleString()}`}
@@ -411,7 +413,7 @@ export function TaskPage() {
                       : run.status === 'completed'
                         ? 'green'
                         : 'gray',
-                    children: `${run.agentType} · ${label(run.status)} · ${new Date(run.updatedAt).toLocaleString()}`,
+                    children: `${run.agentType} · ${t(`runs.status.${run.status}`)} · ${new Date(run.updatedAt).toLocaleString()}`,
                   })),
                   {
                     color: 'gray',
@@ -463,7 +465,7 @@ export function TaskPage() {
         {openRun !== undefined && (
           <div className="run-detail">
             <Space>
-              <Tag>{label(openRun.status)}</Tag>
+              <Tag>{t(`runs.status.${openRun.status}`)}</Tag>
               <Typography.Text code>{openRun.id}</Typography.Text>
             </Space>
             <Tabs
@@ -501,8 +503,4 @@ export function TaskPage() {
       </Drawer>
     </div>
   )
-}
-
-function label(value: string): string {
-  return value.replaceAll('_', ' ')
 }

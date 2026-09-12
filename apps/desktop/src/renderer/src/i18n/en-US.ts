@@ -96,6 +96,18 @@ export const enUS = {
   'runs.terminal.title': 'Agent PTY',
   'runs.terminal.ariaLabel': 'Agent PTY — {agentType} — {id}',
   'runs.terminal.connectionLost': 'The Agent terminal connection was interrupted.',
+  'runs.status.created': 'created',
+  'runs.status.queued': 'queued',
+  'runs.status.preparing': 'preparing',
+  'runs.status.running': 'running',
+  'runs.status.waiting_for_user': 'waiting for user',
+  'runs.status.waiting_for_permission': 'waiting for permission',
+  'runs.status.waiting_for_agent': 'waiting for agent',
+  'runs.status.reviewing': 'reviewing',
+  'runs.status.completed': 'completed',
+  'runs.status.failed': 'failed',
+  'runs.status.cancelled': 'cancelled',
+  'runs.status.interrupted': 'interrupted',
 
   'permissions.decision.title': 'Approval decisions',
   'permissions.decision.description':
@@ -192,6 +204,11 @@ export const enUS = {
 
   'error.transport': 'Teskra could not reach the main process.',
 
+  'errorBoundary.title': 'The workbench interface crashed',
+  'errorBoundary.description':
+    'An unexpected rendering error occurred. Reloading usually restores the workbench; workspaces, runs and settings are stored on disk and are not affected.',
+  'errorBoundary.reload': 'Reload workbench',
+
   'errorSuggestion.WORKSPACE_NOT_FOUND':
     'Check that the folder still exists and that its runtime is available.',
   'errorSuggestion.WSL_NOT_AVAILABLE': 'Install or start WSL, then retry the operation.',
@@ -211,6 +228,59 @@ export const enUS = {
   'errorSuggestion.VALIDATION_FAILED': 'Review the entered values and try again.',
   'errorSuggestion.UNKNOWN':
     'Retry the operation. If it persists, open the logs from Settings → Advanced.',
+
+  // Localized copies of Main-process PublicAppError messages. Main attaches
+  // `messageKey` (+ optional `params`) to high-frequency errors; the Renderer
+  // resolves them here and falls back to the English `message` when a key is
+  // unknown. src/error-message-keys.test.ts asserts that every messageKey used
+  // in src/main exists in both dictionaries.
+  'errorMessage.workspaceNotFound': 'Workspace "{id}" was not found.',
+  'errorMessage.workspaceDirMissing': 'The workspace directory does not exist.',
+  'errorMessage.workspaceDuplicate': 'A workspace for this runtime and path already exists.',
+  'errorMessage.secretsNotPersisted':
+    'This environment cannot securely store secrets; sensitive environment variables were not persisted.',
+  'errorMessage.terminalNotActive': 'Terminal "{id}" is not active.',
+  'errorMessage.agentRunNotFound': 'Agent run "{id}" was not found.',
+  'errorMessage.agentRunNotActive': 'Agent run "{runId}" is not active.',
+  'errorMessage.agentRunNoActiveProcess': 'Agent run "{runId}" has no active process.',
+  'errorMessage.onlyInterruptedResumable': 'Only interrupted Agent runs can be resumed.',
+  'errorMessage.workspaceRequiredForRunHistory':
+    'A workspace is required when listing historical Agent runs.',
+  'errorMessage.taskNotFound': 'Task "{id}" was not found.',
+  'errorMessage.worktreeNotFound': 'Worktree "{id}" was not found.',
+  'errorMessage.agentNotRegistered': 'Agent "{agentType}" is not registered.',
+  'errorMessage.agentNotInstalled': '{agent} is not installed in this workspace runtime.',
+  'errorMessage.agentModeUnsupported': '{agent} does not support {mode} mode.',
+  'errorMessage.orchestratedRequiresWorktree':
+    'Orchestrated Agent runs require an isolated worktree.',
+  'errorMessage.taskWorkspaceMismatch': 'The selected task belongs to a different workspace.',
+  'errorMessage.worktreeWorkspaceMismatch':
+    'The selected worktree belongs to a different workspace.',
+  'errorMessage.attendedRunConflict':
+    'Agent run "{runId}" is already modifying this workspace directly. Stop it before starting another writable Agent, or use an isolated worktree.',
+  'errorMessage.attendedRunConflictResume':
+    'Agent run "{runId}" is already modifying this workspace directly.',
+  'errorMessage.invalidWorktreeSegment': 'Invalid {kind} for a worktree.',
+  'errorMessage.detachedHead': 'The repository is on a detached HEAD; pass baseBranch explicitly.',
+  'errorMessage.worktreeExistsForRun': 'A worktree already exists for run "{runId}".',
+  'errorMessage.branchNotMergedDelete':
+    'Branch "{branch}" is not merged into "{baseBranch}"; unmerged branches are never deleted. Discard without deleteBranch to keep it.',
+  'errorMessage.worktreeDiscardNeedsConfirm':
+    'Discarding a worktree permanently deletes its uncommitted changes; rerun with confirm: true to proceed.',
+  'errorMessage.workflowDefinitionNotFound': 'Workflow definition "{id}" was not found.',
+  'errorMessage.workflowDefinitionInvalid':
+    'Workflow definition "{id}" is invalid and cannot be loaded.',
+  'errorMessage.workflowDefinitionUnparseable':
+    'Workflow definition file "{path}" is not parseable.',
+  'errorMessage.resumeLiveProcess':
+    'The interrupted Run still has a live process and cannot be resumed safely.',
+  'errorMessage.resumeWorkspaceGone': 'The Run workspace no longer exists.',
+  'errorMessage.resumeWorkspaceDirGone': 'The Run workspace directory no longer exists.',
+  'errorMessage.resumeDetachedHead': 'The workspace is in detached HEAD state.',
+  'errorMessage.resumeWorktreeGone': 'The Run worktree no longer exists.',
+  'errorMessage.resumeWorktreeNotResumable': 'The Run worktree is not in a resumable state.',
+  'errorMessage.resumeWorktreeDirGone': 'The Run worktree directory no longer exists.',
+  'errorMessage.resumeBranchGone': 'The Run worktree branch no longer exists.',
 
   'tasks.eyebrow': 'TASK-FIRST WORKBENCH',
   'tasks.title': 'Tasks',
@@ -246,6 +316,14 @@ export const enUS = {
   'tasks.drawer.agentRun': '{name} Run',
   'tasks.drawer.tabOutput': 'Output',
   'tasks.drawer.tabCommands': 'Commands',
+  'tasks.status.draft': 'draft',
+  'tasks.status.ready': 'ready',
+  'tasks.status.running': 'running',
+  'tasks.status.needs_review': 'needs review',
+  'tasks.status.blocked': 'blocked',
+  'tasks.status.completed': 'completed',
+  'tasks.status.failed': 'failed',
+  'tasks.status.cancelled': 'cancelled',
 
   'criteria.title': 'Acceptance Criteria',
   'criteria.empty': 'No acceptance criteria yet',
@@ -269,6 +347,15 @@ export const enUS = {
   'criteria.fieldCategory': 'Category',
   'criteria.categoryPlaceholder': 'Optional',
   'criteria.fieldRequired': 'Required',
+  'criteria.status.draft': 'draft',
+  'criteria.status.confirmed': 'confirmed',
+  'criteria.status.superseded': 'superseded',
+  'criteria.category.functional': 'functional',
+  'criteria.category.test': 'test',
+  'criteria.category.performance': 'performance',
+  'criteria.category.security': 'security',
+  'criteria.category.compatibility': 'compatibility',
+  'criteria.category.quality': 'quality',
 
   'memory.title': 'Workspace Memory',
   'memory.preview': 'Preview context',
@@ -285,6 +372,13 @@ export const enUS = {
   'memory.previewStats':
     '{used} / {budget} chars · {sections} sections included · {omitted} omitted',
   'memory.previewEmpty': 'The context is empty',
+  'memory.type.architecture': 'architecture',
+  'memory.type.convention': 'convention',
+  'memory.type.decision': 'decision',
+  'memory.type.command': 'command',
+  'memory.type.known_issue': 'known issue',
+  'memory.type.preference': 'preference',
+  'memory.type.summary': 'summary',
 
   'artifacts.title': 'Artifacts · {count}',
   'artifacts.scan': 'Scan run artifacts',
@@ -427,6 +521,10 @@ export const enUS = {
   'settings.general.logging.level.label': 'Log level',
   'settings.general.logging.level.description':
     'Controls the minimum severity written to the Teskra log.',
+  'settings.general.logging.level.debug': 'DEBUG',
+  'settings.general.logging.level.info': 'INFO',
+  'settings.general.logging.level.warn': 'WARN',
+  'settings.general.logging.level.error': 'ERROR',
   'settings.general.concurrency.title': 'Concurrency',
   'settings.general.concurrency.maxGlobalRuns.label': 'Global runs',
   'settings.general.concurrency.maxGlobalRuns.description':
@@ -487,6 +585,17 @@ export const enUS = {
   'settings.permissions.rules.deleteConfirm': 'Delete this rule?',
   'settings.permissions.scope.global': 'global',
   'settings.permissions.scope.allAgents': 'all agents',
+  'settings.permissions.scope.persistent': 'persistent',
+  'settings.permissions.action.allow': 'allow',
+  'settings.permissions.action.deny': 'deny',
+  'settings.permissions.action.ask': 'ask',
+  'settings.permissions.action.audit': 'audit',
+  'settings.permissions.risk.READ_ONLY': 'READ_ONLY',
+  'settings.permissions.risk.WORKSPACE_WRITE': 'WORKSPACE_WRITE',
+  'settings.permissions.risk.NETWORK_WRITE': 'NETWORK_WRITE',
+  'settings.permissions.risk.SYSTEM_WRITE': 'SYSTEM_WRITE',
+  'settings.permissions.risk.DESTRUCTIVE': 'DESTRUCTIVE',
+  'settings.permissions.risk.UNKNOWN': 'UNKNOWN',
   'settings.permissions.audit.title': 'Audit log',
   'settings.permissions.audit.riskLevel': 'Risk level',
   'settings.permissions.audit.filter': 'Filter',
@@ -496,7 +605,7 @@ export const enUS = {
   'settings.permissions.audit.column.run': 'Run',
   'settings.permissions.audit.column.recognizedAt': 'Recognized at',
   'settings.permissions.audit.recognizedNote':
-    '“Recognized at” is when the command was detected in the output stream — after it already executed.',
+    '“Recognized at” is when the command was detected in the output stream — after it already executed. Recognition is heuristic: it covers shell prompt lines and the TUI formats each Agent declares (e.g. Claude Code’s “⏺ Bash(…)” lines, Codex “exec” blocks). Commands hidden inside full-screen TUI redraws may be missed, so an empty log does not prove that no commands ran.',
   'settings.permissions.rule.new': 'New permission rule',
   'settings.permissions.rule.edit': 'Edit permission rule',
   'settings.permissions.rule.commandPatternPlaceholder':

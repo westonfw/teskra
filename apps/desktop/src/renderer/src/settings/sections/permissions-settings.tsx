@@ -18,7 +18,7 @@ import {
 import { useEffect, useState } from 'react'
 
 import type { PermissionAction, PermissionScope } from '@teskra/contracts'
-import { PERMISSION_ACTIONS, PERMISSION_SCOPES } from '@teskra/contracts'
+import { PERMISSION_ACTIONS } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../../components/app-error-alert'
 import { useTranslation, type TranslationKey } from '../../i18n'
@@ -263,7 +263,10 @@ export function PermissionsSettingsSection() {
             placeholder={t('settings.permissions.audit.riskLevel')}
             value={auditRiskLevel}
             onChange={(value: string | undefined) => setAuditRiskLevel(value)}
-            options={RISK_LEVELS.map((risk) => ({ value: risk, label: risk }))}
+            options={RISK_LEVELS.map((risk) => ({
+              value: risk,
+              label: t(`settings.permissions.risk.${risk}`),
+            }))}
           />
           <Input
             allowClear
@@ -294,7 +297,11 @@ export function PermissionsSettingsSection() {
               title: t('settings.permissions.audit.column.risk'),
               dataIndex: 'riskLevel',
               width: 150,
-              render: (risk: string) => <Tag color={riskTagColor(risk)}>{risk}</Tag>,
+              render: (risk: string) => (
+                <Tag color={riskTagColor(risk)}>
+                  {t(`settings.permissions.risk.${risk}` as TranslationKey)}
+                </Tag>
+              ),
             },
             {
               title: t('settings.permissions.audit.column.command'),
@@ -345,12 +352,18 @@ export function PermissionsSettingsSection() {
           <Select<PermissionAction>
             value={draft.action}
             onChange={(action) => setDraft({ ...draft, action })}
-            options={PERMISSION_ACTIONS.map((action) => ({ value: action, label: action }))}
+            options={PERMISSION_ACTIONS.map((action) => ({
+              value: action,
+              label: t(`settings.permissions.action.${action}`),
+            }))}
           />
           <Select<PermissionScope>
             value={draft.scope}
             onChange={(scope) => setDraft({ ...draft, scope })}
-            options={PERMISSION_SCOPES.map((scope) => ({ value: scope, label: scope }))}
+            // P1-3: stored rules are always persistent. Ephemeral grants
+            // (allow-once / allow-session) come from approval decisions, not
+            // from the rule editor.
+            options={[{ value: 'persistent', label: t('settings.permissions.scope.persistent') }]}
           />
           <Select
             allowClear

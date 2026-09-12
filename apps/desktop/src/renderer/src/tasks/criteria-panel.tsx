@@ -157,7 +157,7 @@ export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
             value={selected?.set.id}
             options={details.map(({ set }) => ({
               value: set.id,
-              label: `v${set.version} · ${set.status}`,
+              label: `v${set.version} · ${t(`criteria.status.${set.status}`)}`,
             }))}
             onChange={setSelectedSetId}
           />
@@ -183,7 +183,9 @@ export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
           <div className="criteria-set">
             <Space wrap>
               <Typography.Text strong>v{selected.set.version}</Typography.Text>
-              <Tag color={statusColor[selected.set.status]}>{selected.set.status}</Tag>
+              <Tag color={statusColor[selected.set.status]}>
+                {t(`criteria.status.${selected.set.status}`)}
+              </Tag>
               {overall !== undefined && (
                 <Tag color={outcomeColor[overall]}>
                   {t('criteria.reviewOutcome', { outcome: overall })}
@@ -240,9 +242,9 @@ export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
               locale={{ emptyText: t('criteria.emptyVersion') }}
               renderItem={(criterion) => (
                 <List.Item
-                  actions={
-                    editable
-                      ? [
+                  {...(editable
+                    ? {
+                        actions: [
                           <Button
                             key="edit"
                             type="text"
@@ -264,15 +266,17 @@ export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
                               disabled={saving}
                             />
                           </Popconfirm>,
-                        ]
-                      : undefined
-                  }
+                        ],
+                      }
+                    : {})}
                 >
                   <Space>
                     <Typography.Text>
                       #{criterion.ordinal} {criterion.description}
                     </Typography.Text>
-                    {criterion.category !== undefined && <Tag>{criterion.category}</Tag>}
+                    {criterion.category !== undefined && (
+                      <Tag>{t(`criteria.category.${criterion.category}`)}</Tag>
+                    )}
                     {criterion.required && <Tag color="red">{t('criteria.required')}</Tag>}
                     {latestScores.has(criterion.id) && (
                       <Tag color={scoreColor[latestScores.get(criterion.id)?.result ?? 'unknown']}>
@@ -309,10 +313,13 @@ export function CriteriaPanel({ taskId }: CriteriaPanelProps) {
           <label>
             <Typography.Text type="secondary">{t('criteria.fieldCategory')}</Typography.Text>
             <Select<CriterionCategory>
-              value={category}
+              {...(category === undefined ? {} : { value: category })}
               allowClear
               placeholder={t('criteria.categoryPlaceholder')}
-              options={CRITERION_CATEGORIES.map((value) => ({ value, label: value }))}
+              options={CRITERION_CATEGORIES.map((value) => ({
+                value,
+                label: t(`criteria.category.${value}`),
+              }))}
               onChange={(value) => setCategory(value)}
             />
           </label>

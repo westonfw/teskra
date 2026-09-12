@@ -44,7 +44,7 @@ type EditorState = { readonly mode: 'add' } | { readonly mode: 'edit'; readonly 
 interface MemoryPanelProps {
   readonly workspaceId: string
   /** When set, the context preview includes this Task (criteria, handoff). */
-  readonly taskId?: string
+  readonly taskId?: string | undefined
 }
 
 export function MemoryPanel({ workspaceId, taskId }: MemoryPanelProps) {
@@ -146,10 +146,10 @@ export function MemoryPanel({ workspaceId, taskId }: MemoryPanelProps) {
             const readOnly = isRepoLocalMemory(memory)
             return (
               <List.Item
-                actions={
-                  readOnly
-                    ? undefined
-                    : [
+                {...(readOnly
+                  ? {}
+                  : {
+                      actions: [
                         <Button
                           key="edit"
                           type="text"
@@ -171,13 +171,13 @@ export function MemoryPanel({ workspaceId, taskId }: MemoryPanelProps) {
                             disabled={saving}
                           />
                         </Popconfirm>,
-                      ]
-                }
+                      ],
+                    })}
               >
                 <List.Item.Meta
                   title={
                     <Space>
-                      <Tag color={typeColor[memory.type]}>{memory.type.replace('_', ' ')}</Tag>
+                      <Tag color={typeColor[memory.type]}>{t(`memory.type.${memory.type}`)}</Tag>
                       {readOnly && <Tag>{t('memory.repoTag')}</Tag>}
                     </Space>
                   }
@@ -209,7 +209,10 @@ export function MemoryPanel({ workspaceId, taskId }: MemoryPanelProps) {
             <Typography.Text type="secondary">{t('memory.fieldType')}</Typography.Text>
             <Select<MemoryType>
               value={type}
-              options={MEMORY_TYPES.map((value) => ({ value, label: value.replace('_', ' ') }))}
+              options={MEMORY_TYPES.map((value) => ({
+                value,
+                label: t(`memory.type.${value}`),
+              }))}
               onChange={setType}
             />
           </label>

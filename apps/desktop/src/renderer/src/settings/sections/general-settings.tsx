@@ -32,7 +32,10 @@ export function GeneralSettingsSection() {
           <Select<LogLevel>
             value={config.logging.level}
             loading={saving}
-            options={LOG_LEVELS.map((value) => ({ value, label: value.toUpperCase() }))}
+            options={LOG_LEVELS.map((value) => ({
+              value,
+              label: t(`settings.general.logging.level.${value}`),
+            }))}
             onChange={(level) => void save({ logging: { level } })}
           />
         </ConfigField>
