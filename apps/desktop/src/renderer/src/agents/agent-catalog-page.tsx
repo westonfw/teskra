@@ -169,7 +169,10 @@ export function AgentCatalogPage() {
   }
 
   const handleOpenRun = async (run: AgentRun): Promise<void> => {
-    if (!ACTIVE_STATUSES.has(run.status)) await loadRunOutput(run.id)
+    // Always replay the durable log: the live buffer only holds frames emitted
+    // while this renderer was subscribed, so a run that is already active
+    // (resumed, or started before a reload) would otherwise show a blank PTY.
+    await loadRunOutput(run.id)
     setSelectedRunId(run.id)
   }
 

@@ -155,7 +155,9 @@ export function TaskPage() {
   }
 
   const handleOpenRun = async (run: AgentRun): Promise<void> => {
-    if (!ACTIVE_RUN_STATUSES.has(run.status)) await loadRunOutput(run.id)
+    // Always replay the durable log (see agent-catalog-page): an active run
+    // whose output predates this renderer's subscription is otherwise blank.
+    await loadRunOutput(run.id)
     setOpenRunId(run.id)
   }
 
