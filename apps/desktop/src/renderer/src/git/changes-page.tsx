@@ -7,6 +7,7 @@ import type { DiffFile, DiffFileStatus } from '@teskra/contracts'
 import { AppErrorAlert } from '../components/app-error-alert'
 import { useGitStore } from '../stores/git-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
+import { splitDiffLines } from './diff-lines'
 
 const MAX_RENDERED_PATCH_CHARS = 200_000
 const MAX_VISIBLE_CHANGE_FILES = 500
@@ -98,6 +99,7 @@ export function ChangesPage() {
   const selected = changes.files.find(({ path }) => path === selectedPath)
   const visibleFiles = useMemo(() => filesForDisplay(changes.files), [changes.files])
   const displayPatch = patchForDisplay(selected?.patch ?? '')
+  const diffLines = useMemo(() => splitDiffLines(displayPatch.text), [displayPatch.text])
 
   if (workspace === undefined) return null
 
@@ -181,7 +183,13 @@ export function ChangesPage() {
                 </div>
               )}
               <pre className="diff-patch" tabIndex={0}>
-                {displayPatch.text}
+                {diffLines.map((line, index) => (
+                  // eslint-disable-next-line react/no-array-index-key -- diff lines have no stable identity; order is the identity
+                  <span key={index} className={`diff-line diff-line-${line.kind}`}>
+                    {line.text}
+                    {'\n'}
+                  </span>
+                ))}
               </pre>
             </Card>
           </div>

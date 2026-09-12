@@ -534,6 +534,30 @@ body {
   tab-size: 2;
 }
 
+/* Line-tinted unified diff: the spans are display:block so the tints run the
+   full width of the patch, like an editor's diff gutter. */
+.diff-line {
+  display: block;
+}
+
+.diff-line-add {
+  color: #95de64;
+  background: rgba(73, 170, 25, 0.14);
+}
+
+.diff-line-del {
+  color: #ffa39e;
+  background: rgba(207, 19, 34, 0.13);
+}
+
+.diff-line-hunk {
+  color: #69c0ff;
+}
+
+.diff-line-meta {
+  color: rgba(201, 212, 226, 0.45);
+}
+
 @media (max-width: 1000px) {
   .changes-workbench {
     grid-template-columns: 1fr;
