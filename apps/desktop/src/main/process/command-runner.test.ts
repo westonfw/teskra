@@ -161,7 +161,8 @@ describe('CommandRunner (TASK-012)', () => {
 
   it('applies maxBuffer per stream, not to the combined stdout+stderr volume', async () => {
     // 5 MiB per stream, 8 MiB ceiling: each stream fits, so the command must
-    // complete even though the combined 10 MiB exceeds the ceiling.
+    // complete even though the combined 10 MiB exceeds the ceiling. The
+    // timeout stays generous — loaded Windows runners drain pipes slowly.
     const fiveMiB = 5 * 1024 * 1024
     const result = await runner.run({
       command: NODE,
@@ -169,7 +170,7 @@ describe('CommandRunner (TASK-012)', () => {
         `process.stdout.write("x".repeat(${String(fiveMiB)}));
          process.stderr.write("y".repeat(${String(fiveMiB)}));`,
       ),
-      timeoutMs: 10_000,
+      timeoutMs: 30_000,
       maxBuffer: 8 * 1024 * 1024,
     })
     expect(result.ok).toBe(true)
