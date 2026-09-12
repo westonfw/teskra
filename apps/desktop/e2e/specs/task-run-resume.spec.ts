@@ -8,6 +8,7 @@ import {
   APP_DIR,
   REPO_ROOT,
   createGitRepo,
+  ensureProcessGone,
   openWorkspaceViaBridge,
   removeDir,
   test,
@@ -109,6 +110,7 @@ test.describe('Task Runs card resume', () => {
         .toBe(true)
 
       await app.close()
+      await ensureProcessGone(app)
       app = undefined
     } finally {
       if (app !== undefined) app.process().kill('SIGKILL')

@@ -23,6 +23,13 @@ test.describe('Terminal layout', () => {
       const grown = await view.boundingBox()
       expect(grown).not.toBeNull()
       expect(grown!.height).toBeGreaterThan(initial!.height + 100)
+
+      // Close the session so its PTY does not keep the repo cwd busy on
+      // Windows (the app deliberately does not kill PTYs on dispose).
+      await page.locator('.terminal-tabs .ant-tabs-tab-remove').first().click()
+      await expect(page.getByText('No terminals in this workspace')).toBeVisible({
+        timeout: 10_000,
+      })
     } finally {
       removeDir(repoDir)
     }

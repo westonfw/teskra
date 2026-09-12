@@ -8,6 +8,7 @@ import {
   APP_DIR,
   REPO_ROOT,
   createGitRepo,
+  ensureProcessGone,
   openWorkspaceViaBridge,
   removeDir,
   test,
@@ -127,6 +128,7 @@ test.describe('Crash recovery', () => {
         }
       }, workspace.id)
       await app.close()
+      await ensureProcessGone(app)
       app = undefined
     } finally {
       if (app !== undefined) app.process().kill('SIGKILL')

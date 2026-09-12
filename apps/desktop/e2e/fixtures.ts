@@ -68,6 +68,41 @@ export function removeDir(dir: string): void {
 }
 
 /**
+ * app.close() resolves when the app quits, but on Windows the process (or its
+ * native children) can linger and keep tempdir handles busy. Wait briefly for
+ * the process to actually die, then force-kill it before cleanup.
+ */
+export async function ensureProcessGone(app: ElectronApplication): Promise<void> {
+  let pid: number | undefined
+  try {
+    pid = app.process().pid
+  } catch {
+    // The app is already gone (Playwright may have reaped it) — nothing to do.
+    return
+  }
+  if (pid === undefined) return
+  const alive = (): boolean => {
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {
+      return false
+    }
+  }
+  const deadline = Date.now() + 8_000
+  while (alive() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 200))
+  }
+  if (alive()) {
+    try {
+      app.process().kill('SIGKILL')
+    } catch {
+      // Already exited between the check and the kill.
+    }
+  }
+}
+
+/**
  * Opens a workspace through the real IPC boundary (window.teskra bridge) and
  * returns the persisted Workspace. The dialog-driven flow is covered on
  * Windows CI; on the Linux dev host the dialog's WSL branch has no
@@ -141,7 +176,8 @@ export const test = base.extend<TeskraE2EFixtures>({
       env: launchEnv(teskraHome),
     })
     await use(app)
-    await app.close()
+    await app.close().catch(() => undefined)
+    await ensureProcessGone(app)
   },
   page: async ({ electronApp }, use) => {
     const page = await electronApp.firstWindow()
