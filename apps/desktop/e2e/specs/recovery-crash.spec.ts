@@ -9,6 +9,7 @@ import {
   REPO_ROOT,
   createGitRepo,
   ensureProcessGone,
+  hardKillElectron,
   openWorkspaceViaBridge,
   removeDir,
   test,
@@ -31,20 +32,6 @@ function launchEnv(teskraHome: string): Record<string, string> {
   env['TESKRA_HOME'] = teskraHome
   if (env['DISPLAY'] === undefined && process.platform === 'linux') env['DISPLAY'] = ':0'
   return env
-}
-
-async function waitForExit(pid: number | undefined): Promise<void> {
-  if (pid === undefined) return
-  await new Promise<void>((resolve) => {
-    const timer = setInterval(() => {
-      try {
-        process.kill(pid, 0)
-      } catch {
-        clearInterval(timer)
-        resolve()
-      }
-    }, 200)
-  })
 }
 
 test.describe('Crash recovery', () => {
@@ -81,9 +68,7 @@ test.describe('Crash recovery', () => {
       }, workspace.id)
       await page.waitForTimeout(2_000)
 
-      const pid = app.process().pid
-      app.process().kill('SIGKILL')
-      await waitForExit(pid)
+      await hardKillElectron(app)
 
       app = await electron.launch({ args: [APP_DIR], cwd: REPO_ROOT, env: launchEnv(teskraHome) })
       page = await app.firstWindow()
@@ -131,7 +116,7 @@ test.describe('Crash recovery', () => {
       await ensureProcessGone(app)
       app = undefined
     } finally {
-      if (app !== undefined) app.process().kill('SIGKILL')
+      if (app !== undefined) await hardKillElectron(app)
       removeDir(teskraHome)
       removeDir(repoDir)
     }

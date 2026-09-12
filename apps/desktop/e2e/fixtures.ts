@@ -74,6 +74,35 @@ export function removeDir(dir: string): void {
 }
 
 /**
+ * Hard-kill the app the way a crash would. On Windows a root-PID SIGKILL
+ * leaves grandchildren (renderer/utility/PTY) alive holding the userData
+ * single-instance lock, so the relaunched instance refuses to boot;
+ * taskkill /F /T takes the whole tree down at once.
+ */
+export async function hardKillElectron(app: ElectronApplication): Promise<void> {
+  const pid = app.process().pid
+  if (pid === undefined) return
+  if (process.platform === 'win32') {
+    try {
+      execFileSync('taskkill', ['/F', '/T', '/PID', String(pid)], { stdio: 'pipe' })
+    } catch {
+      // Already gone.
+    }
+  } else {
+    app.process().kill('SIGKILL')
+  }
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0)
+    } catch {
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200))
+  }
+}
+
+/**
  * app.close() resolves when the app quits, but on Windows the process (or its
  * native children) can linger and keep tempdir handles busy. Wait briefly for
  * the process to actually die, then force-kill it before cleanup.
