@@ -747,6 +747,15 @@ body {
   width: 100%;
 }
 
+/* Same shrink-wrap pattern one level down: these vertical Spaces render
+   inside stretched Space items / tab panes and must fill them explicitly. */
+.run-worktree-panel,
+.run-commands-panel,
+.permission-decision-panel,
+.review-panel-detail {
+  width: 100%;
+}
+
 .permission-rule-form {
   width: 100%;
 }
