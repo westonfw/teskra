@@ -179,6 +179,8 @@ export const zhCN: Record<TranslationKey, string> = {
 
   'wsl.unreachable': 'Teskra 无法连接到运行时服务。',
 
+  'error.transport': 'Teskra 无法连接主进程服务。',
+
   'errorSuggestion.WORKSPACE_NOT_FOUND': '检查文件夹是否仍然存在，以及其运行时是否可用。',
   'errorSuggestion.WSL_NOT_AVAILABLE': '安装或启动 WSL，然后重试该操作。',
   'errorSuggestion.WSL_DISTRO_NOT_FOUND': '在 设置 → 环境 中选择一个已安装的发行版。',

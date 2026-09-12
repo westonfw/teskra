@@ -11,6 +11,7 @@ import type {
   WorkbenchEvents,
 } from '@teskra/contracts'
 import { create } from 'zustand'
+import { transportError } from '../i18n'
 
 export interface WorkflowRunStoreBridge {
   readonly workflow: {
@@ -56,12 +57,6 @@ interface WorkflowRunState {
   clearError(): void
 }
 
-const transportError: PublicAppError = {
-  code: 'UNKNOWN',
-  message: 'Teskra could not reach the Workflow service.',
-  retryable: true,
-}
-
 const SUMMARY_RUN_STATUSES = new Set(['needs_user_review', 'completed', 'failed', 'cancelled'])
 
 export function createWorkflowRunStore(getBridge: () => WorkflowRunStoreBridge) {
@@ -91,7 +86,7 @@ export function createWorkflowRunStore(getBridge: () => WorkflowRunStoreBridge) 
           else set({ error: summary.error })
         }
       } catch {
-        if (generation === detailGeneration) set({ error: transportError })
+        if (generation === detailGeneration) set({ error: transportError() })
       }
     }
 
@@ -137,7 +132,7 @@ export function createWorkflowRunStore(getBridge: () => WorkflowRunStoreBridge) 
           }
           set({ runs: result.data, loading: false })
         } catch {
-          if (generation === loadGeneration) set({ loading: false, error: transportError })
+          if (generation === loadGeneration) set({ loading: false, error: transportError() })
         }
       },
 
@@ -163,7 +158,7 @@ export function createWorkflowRunStore(getBridge: () => WorkflowRunStoreBridge) 
           await get().selectRun(result.data.run.id)
           return result.data
         } catch {
-          set({ starting: false, error: transportError })
+          set({ starting: false, error: transportError() })
           return undefined
         }
       },

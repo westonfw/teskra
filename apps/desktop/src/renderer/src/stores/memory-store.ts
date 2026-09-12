@@ -10,6 +10,7 @@ import type {
   UpdateMemoryRequest,
 } from '@teskra/contracts'
 import { create } from 'zustand'
+import { transportError } from '../i18n'
 
 export interface MemoryStoreBridge {
   readonly memory: {
@@ -38,12 +39,6 @@ interface MemoryState {
   clearError(): void
 }
 
-const transportError: PublicAppError = {
-  code: 'UNKNOWN',
-  message: 'Teskra could not reach the Memory service.',
-  retryable: true,
-}
-
 /** Repo-local memories (`.teskra/memory/*.md`) are read-only in the UI. */
 export function isRepoLocalMemory(memory: Memory): boolean {
   return memory.source?.startsWith('file:') === true
@@ -69,7 +64,7 @@ export function createMemoryStore(getBridge: () => MemoryStoreBridge) {
         }
         set({ memories: listed.data, loading: false })
       } catch {
-        if (generation === loadGeneration) set({ loading: false, error: transportError })
+        if (generation === loadGeneration) set({ loading: false, error: transportError() })
       }
     },
 
@@ -83,7 +78,7 @@ export function createMemoryStore(getBridge: () => MemoryStoreBridge) {
         }
         return result.data
       } catch {
-        set({ error: transportError })
+        set({ error: transportError() })
         return undefined
       }
     },
@@ -126,7 +121,7 @@ async function runMutation(
     set({ saving: false })
     return true
   } catch {
-    set({ saving: false, error: transportError })
+    set({ saving: false, error: transportError() })
     return false
   }
 }

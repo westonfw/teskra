@@ -15,6 +15,7 @@ import type {
   WorktreeListRequest,
 } from '@teskra/contracts'
 import { create } from 'zustand'
+import { transportError } from '../i18n'
 
 /** TASK-071: how many entries each dashboard block previews before "view all". */
 export const DASHBOARD_PREVIEW_LIMIT = 5
@@ -97,12 +98,6 @@ interface DashboardState {
   startSynchronization(workspace: Workspace): () => void
 }
 
-const transportError: PublicAppError = {
-  code: 'UNKNOWN',
-  message: 'Teskra could not reach the workbench services.',
-  retryable: true,
-}
-
 const idle = <T>(): DashboardBlock<T> => ({ status: 'idle' })
 
 const byUpdatedAtDesc = <T extends { readonly updatedAt: string }>(left: T, right: T): number =>
@@ -168,7 +163,7 @@ export function createDashboardStore(getBridge: () => DashboardStoreBridge) {
         }
         succeed('activeTasks', generation, summarize([...result.data].sort(byUpdatedAtDesc)))
       } catch {
-        fail('activeTasks', generation, transportError)
+        fail('activeTasks', generation, transportError())
       }
     }
 
@@ -203,7 +198,7 @@ export function createDashboardStore(getBridge: () => DashboardStoreBridge) {
           workflowRuns: workflowRuns.slice(0, DASHBOARD_PREVIEW_LIMIT),
         } satisfies WaitingForYouSummary)
       } catch {
-        fail('waitingForYou', generation, transportError)
+        fail('waitingForYou', generation, transportError())
       }
     }
 
@@ -220,7 +215,7 @@ export function createDashboardStore(getBridge: () => DashboardStoreBridge) {
           .sort(byUpdatedAtDesc)
         succeed('interruptedRuns', generation, summarize(runs))
       } catch {
-        fail('interruptedRuns', generation, transportError)
+        fail('interruptedRuns', generation, transportError())
       }
     }
 
@@ -237,7 +232,7 @@ export function createDashboardStore(getBridge: () => DashboardStoreBridge) {
           .sort(byUpdatedAtDesc)
         succeed('mergeReady', generation, summarize(worktrees))
       } catch {
-        fail('mergeReady', generation, transportError)
+        fail('mergeReady', generation, transportError())
       }
     }
 
@@ -254,7 +249,7 @@ export function createDashboardStore(getBridge: () => DashboardStoreBridge) {
         }
         succeed('agentAvailability', generation, result.data)
       } catch {
-        fail('agentAvailability', generation, transportError)
+        fail('agentAvailability', generation, transportError())
       }
     }
 
@@ -271,7 +266,7 @@ export function createDashboardStore(getBridge: () => DashboardStoreBridge) {
           .sort((left, right) => failureSortKey(right).localeCompare(failureSortKey(left)))
         succeed('recentFailures', generation, summarize(runs))
       } catch {
-        fail('recentFailures', generation, transportError)
+        fail('recentFailures', generation, transportError())
       }
     }
 

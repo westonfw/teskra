@@ -9,6 +9,7 @@ import type {
   WorkbenchEvents,
 } from '@teskra/contracts'
 import { create } from 'zustand'
+import { transportError } from '../i18n'
 
 export interface CriteriaStoreBridge {
   readonly criteria: {
@@ -43,12 +44,6 @@ interface CriteriaState {
   removeCriterion(criterionId: string): Promise<boolean>
   confirmSet(setId: string): Promise<boolean>
   clearError(): void
-}
-
-const transportError: PublicAppError = {
-  code: 'UNKNOWN',
-  message: 'Teskra could not reach the Criteria service.',
-  retryable: true,
 }
 
 /** Newest version first. */
@@ -119,7 +114,7 @@ export function createCriteriaStore(getBridge: () => CriteriaStoreBridge) {
           loading: false,
         })
       } catch {
-        if (generation === loadGeneration) set({ loading: false, error: transportError })
+        if (generation === loadGeneration) set({ loading: false, error: transportError() })
       }
     },
 
@@ -150,7 +145,7 @@ export function createCriteriaStore(getBridge: () => CriteriaStoreBridge) {
         set({ saving: false })
         return true
       } catch {
-        set({ saving: false, error: transportError })
+        set({ saving: false, error: transportError() })
         return false
       }
     },
@@ -197,7 +192,7 @@ async function runMutation(
     set({ saving: false })
     return true
   } catch {
-    set({ saving: false, error: transportError })
+    set({ saving: false, error: transportError() })
     return false
   }
 }

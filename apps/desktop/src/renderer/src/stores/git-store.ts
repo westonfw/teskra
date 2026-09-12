@@ -6,6 +6,7 @@ import type {
   WorkbenchEvents,
 } from '@teskra/contracts'
 import { create } from 'zustand'
+import { transportError } from '../i18n'
 
 type GitRefreshEvent =
   | 'git.changed'
@@ -48,12 +49,6 @@ interface GitState {
   selectFile(path?: string): void
   openFile(workspaceId: string, path: string): Promise<boolean>
   clearError(): void
-}
-
-const transportError: PublicAppError = {
-  code: 'UNKNOWN',
-  message: 'Teskra could not reach the Git service.',
-  retryable: true,
 }
 
 export function createGitStore(getBridge: () => GitStoreBridge) {
@@ -139,7 +134,7 @@ export function createGitStore(getBridge: () => GitStoreBridge) {
             loading: false,
           }))
         } catch {
-          if (generation === refreshGeneration) set({ loading: false, error: transportError })
+          if (generation === refreshGeneration) set({ loading: false, error: transportError() })
         }
       })()
       refreshInFlight.set(workspaceId, pending)
@@ -171,7 +166,7 @@ export function createGitStore(getBridge: () => GitStoreBridge) {
         }
         return true
       } catch {
-        set({ error: transportError })
+        set({ error: transportError() })
         return false
       }
     },

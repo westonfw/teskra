@@ -7,6 +7,7 @@ import type {
   WorkbenchEvents,
 } from '@teskra/contracts'
 import { create } from 'zustand'
+import { transportError } from '../i18n'
 
 export interface ArtifactStoreBridge {
   readonly artifact: {
@@ -35,12 +36,6 @@ interface ArtifactState {
   /** Registers files the given Runs dropped into their artifact directories. */
   scanRuns(runIds: readonly string[]): Promise<boolean>
   clearError(): void
-}
-
-const transportError: PublicAppError = {
-  code: 'UNKNOWN',
-  message: 'Teskra could not reach the Artifact service.',
-  retryable: true,
 }
 
 export function createArtifactStore(getBridge: () => ArtifactStoreBridge) {
@@ -77,7 +72,7 @@ export function createArtifactStore(getBridge: () => ArtifactStoreBridge) {
         }
         set({ artifacts: result.data, loading: false })
       } catch {
-        if (generation === loadGeneration) set({ loading: false, error: transportError })
+        if (generation === loadGeneration) set({ loading: false, error: transportError() })
       }
     },
 
@@ -91,7 +86,7 @@ export function createArtifactStore(getBridge: () => ArtifactStoreBridge) {
         }
         return result.data ?? undefined
       } catch {
-        set({ error: transportError })
+        set({ error: transportError() })
         return undefined
       }
     },
@@ -111,7 +106,7 @@ export function createArtifactStore(getBridge: () => ArtifactStoreBridge) {
         set({ scanning: false })
         return true
       } catch {
-        set({ scanning: false, error: transportError })
+        set({ scanning: false, error: transportError() })
         return false
       }
     },

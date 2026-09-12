@@ -12,6 +12,7 @@ import type {
   WorktreeIdRequest,
 } from '@teskra/contracts'
 import { create } from 'zustand'
+import { transportError } from '../i18n'
 
 export interface RecoveryStoreBridge {
   readonly recovery: {
@@ -57,12 +58,6 @@ interface RecoveryState {
   clearError(): void
 }
 
-const transportError: PublicAppError = {
-  code: 'UNKNOWN',
-  message: 'Teskra could not reach the Recovery Center service.',
-  retryable: true,
-}
-
 export function createRecoveryStore(getBridge: () => RecoveryStoreBridge) {
   let loadGeneration = 0
   let synchronizationGeneration = 0
@@ -84,7 +79,7 @@ export function createRecoveryStore(getBridge: () => RecoveryStoreBridge) {
         }
         set({ issues: result.data.issues, generatedAt: result.data.generatedAt, loading: false })
       } catch {
-        if (generation === loadGeneration) set({ loading: false, error: transportError })
+        if (generation === loadGeneration) set({ loading: false, error: transportError() })
       }
     },
 
@@ -99,7 +94,7 @@ export function createRecoveryStore(getBridge: () => RecoveryStoreBridge) {
         await get().load(workspaceId)
         return true
       } catch {
-        set({ error: transportError })
+        set({ error: transportError() })
         return false
       } finally {
         set((state) => ({ acting: { ...state.acting, [runId]: false } }))
@@ -117,7 +112,7 @@ export function createRecoveryStore(getBridge: () => RecoveryStoreBridge) {
         await get().load(workspaceId)
         return true
       } catch {
-        set({ error: transportError })
+        set({ error: transportError() })
         return false
       } finally {
         set((state) => ({ acting: { ...state.acting, [worktreeId]: false } }))
@@ -135,7 +130,7 @@ export function createRecoveryStore(getBridge: () => RecoveryStoreBridge) {
         await get().load(workspaceId)
         return true
       } catch {
-        set({ error: transportError })
+        set({ error: transportError() })
         return false
       } finally {
         set((state) => ({ acting: { ...state.acting, [worktreeId]: false } }))

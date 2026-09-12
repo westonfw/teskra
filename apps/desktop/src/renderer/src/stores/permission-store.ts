@@ -12,6 +12,7 @@ import type {
   WorkbenchEvents,
 } from '@teskra/contracts'
 import { create } from 'zustand'
+import { transportError } from '../i18n'
 
 export interface PermissionStoreBridge {
   readonly permission: {
@@ -51,12 +52,6 @@ interface PermissionState {
   clearError(): void
 }
 
-const transportError: PublicAppError = {
-  code: 'UNKNOWN',
-  message: 'Teskra could not reach the Permission service.',
-  retryable: true,
-}
-
 export function createPermissionStore(getBridge: () => PermissionStoreBridge) {
   let auditGeneration = 0
 
@@ -78,7 +73,7 @@ export function createPermissionStore(getBridge: () => PermissionStoreBridge) {
         }
         set({ rules: result.data, loading: false })
       } catch {
-        set({ loading: false, error: transportError })
+        set({ loading: false, error: transportError() })
       }
     },
 
@@ -92,7 +87,7 @@ export function createPermissionStore(getBridge: () => PermissionStoreBridge) {
         await get().loadRules(request.workspaceId)
         return true
       } catch {
-        set({ error: transportError })
+        set({ error: transportError() })
         return false
       }
     },
@@ -107,7 +102,7 @@ export function createPermissionStore(getBridge: () => PermissionStoreBridge) {
         set({ rules: get().rules.map((rule) => (rule.id === request.ruleId ? result.data ?? rule : rule)) })
         return true
       } catch {
-        set({ error: transportError })
+        set({ error: transportError() })
         return false
       }
     },
@@ -121,7 +116,7 @@ export function createPermissionStore(getBridge: () => PermissionStoreBridge) {
         }
         await get().loadRules(workspaceId)
       } catch {
-        set({ error: transportError })
+        set({ error: transportError() })
       }
     },
 
@@ -138,7 +133,7 @@ export function createPermissionStore(getBridge: () => PermissionStoreBridge) {
         // Repository returns newest first; the UI lists chronologically.
         set({ audit: [...result.data].reverse(), loading: false })
       } catch {
-        if (generation === auditGeneration) set({ loading: false, error: transportError })
+        if (generation === auditGeneration) set({ loading: false, error: transportError() })
       }
     },
 
@@ -161,7 +156,7 @@ export function createPermissionStore(getBridge: () => PermissionStoreBridge) {
         if (result.data.persistedAs === 'rule') await get().loadRules(request.workspaceId)
         return result.data
       } catch {
-        set({ error: transportError })
+        set({ error: transportError() })
         return undefined
       }
     },

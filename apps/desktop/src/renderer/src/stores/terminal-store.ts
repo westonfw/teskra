@@ -6,6 +6,7 @@ import type {
   WorkbenchEvents,
 } from '@teskra/contracts'
 import { create } from 'zustand'
+import { transportError } from '../i18n'
 
 const MAX_HISTORY_CHARS = 2_000_000
 const EXIT_MARKER = '\r\n\x1b[90m[terminal exited]\x1b[0m\r\n'
@@ -50,12 +51,6 @@ function appendHistory(history: Readonly<Record<string, string>>, id: string, da
   return { ...history, [id]: value.slice(-MAX_HISTORY_CHARS) }
 }
 
-const transportError: PublicAppError = {
-  code: 'UNKNOWN',
-  message: 'Teskra could not reach the terminal service.',
-  retryable: true,
-}
-
 export function createTerminalStore(getBridge: () => TerminalStoreBridge) {
   let synchronizationUsers = 0
   let stopSynchronization: (() => void) | undefined
@@ -95,7 +90,7 @@ export function createTerminalStore(getBridge: () => TerminalStoreBridge) {
                 }))
               }
             })
-            .catch(() => set({ error: transportError }))
+            .catch(() => set({ error: transportError() }))
         })
         stopSynchronization = () => {
           stopOutput()
@@ -151,7 +146,7 @@ export function createTerminalStore(getBridge: () => TerminalStoreBridge) {
           }
         })
       } catch {
-        set({ loading: false, error: transportError })
+        set({ loading: false, error: transportError() })
       }
     },
 
@@ -171,7 +166,7 @@ export function createTerminalStore(getBridge: () => TerminalStoreBridge) {
         }))
         return result.data
       } catch {
-        set({ error: transportError })
+        set({ error: transportError() })
         return undefined
       }
     },
@@ -187,7 +182,7 @@ export function createTerminalStore(getBridge: () => TerminalStoreBridge) {
             return false
           }
         } catch {
-          set({ error: transportError })
+          set({ error: transportError() })
           return false
         }
       }

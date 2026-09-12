@@ -187,6 +187,8 @@ export const enUS = {
 
   'wsl.unreachable': 'Teskra could not reach the runtime service.',
 
+  'error.transport': 'Teskra could not reach the main process.',
+
   'errorSuggestion.WORKSPACE_NOT_FOUND':
     'Check that the folder still exists and that its runtime is available.',
   'errorSuggestion.WSL_NOT_AVAILABLE': 'Install or start WSL, then retry the operation.',

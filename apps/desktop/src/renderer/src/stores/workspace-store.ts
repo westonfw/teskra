@@ -6,6 +6,7 @@ import type {
   WorkspaceRuntimeRef,
 } from '@teskra/contracts'
 import { create } from 'zustand'
+import { transportError } from '../i18n'
 
 export interface WorkspaceStoreBridge {
   readonly workspace: {
@@ -27,12 +28,6 @@ interface WorkspaceState {
   selectWorkspace(id: string): void
   selectDirectory(runtime: WorkspaceRuntimeRef): Promise<string | null>
   clearError(): void
-}
-
-const transportError: PublicAppError = {
-  code: 'UNKNOWN',
-  message: 'Teskra could not reach the workspace service.',
-  retryable: true,
 }
 
 export function createWorkspaceStore(getBridge: () => WorkspaceStoreBridge) {
@@ -57,7 +52,7 @@ export function createWorkspaceStore(getBridge: () => WorkspaceStoreBridge) {
           loading: false,
         }))
       } catch {
-        set({ loading: false, error: transportError })
+        set({ loading: false, error: transportError() })
       }
     },
 
@@ -76,7 +71,7 @@ export function createWorkspaceStore(getBridge: () => WorkspaceStoreBridge) {
         }))
         return result.data
       } catch {
-        set({ loading: false, error: transportError })
+        set({ loading: false, error: transportError() })
         return undefined
       }
     },
@@ -98,7 +93,7 @@ export function createWorkspaceStore(getBridge: () => WorkspaceStoreBridge) {
         })
         return result.data
       } catch {
-        set({ error: transportError })
+        set({ error: transportError() })
         return false
       }
     },
@@ -118,7 +113,7 @@ export function createWorkspaceStore(getBridge: () => WorkspaceStoreBridge) {
         }
         return result.data
       } catch {
-        set({ error: transportError })
+        set({ error: transportError() })
         return null
       }
     },

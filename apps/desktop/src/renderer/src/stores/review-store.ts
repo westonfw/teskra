@@ -8,6 +8,7 @@ import type {
   WorkbenchEvents,
 } from '@teskra/contracts'
 import { create } from 'zustand'
+import { transportError } from '../i18n'
 
 export interface ReviewStoreBridge {
   readonly review: {
@@ -40,12 +41,6 @@ interface ReviewState {
   startScoreSynchronization(taskId: string): () => void
   synchronizeScores(taskId: string): Promise<void>
   clearError(): void
-}
-
-const transportError: PublicAppError = {
-  code: 'UNKNOWN',
-  message: 'Teskra could not reach the Review service.',
-  retryable: true,
 }
 
 const SEVERITY_RANK: Record<ReviewFindingRecord['severity'], number> = {
@@ -121,7 +116,7 @@ export function createReviewStore(getBridge: () => ReviewStoreBridge) {
         }
         set({ findings: result.data, loading: false })
       } catch {
-        if (generation === loadGeneration) set({ loading: false, error: transportError })
+        if (generation === loadGeneration) set({ loading: false, error: transportError() })
       }
     },
 
@@ -154,7 +149,7 @@ export function createReviewStore(getBridge: () => ReviewStoreBridge) {
         }
         set({ scores: result.data })
       } catch {
-        if (generation === scoreLoadGeneration) set({ error: transportError })
+        if (generation === scoreLoadGeneration) set({ error: transportError() })
       }
     },
 

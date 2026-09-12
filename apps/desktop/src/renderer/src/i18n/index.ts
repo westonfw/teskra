@@ -38,5 +38,14 @@ export function useTranslation(): Translation {
   }
 }
 
+/** Builds a localized transport error for IPC failures outside React components. */
+export function transportError(): { code: 'UNKNOWN'; message: string; retryable: true } {
+  return {
+    code: 'UNKNOWN',
+    message: translate(useLocaleStore.getState().locale, 'error.transport'),
+    retryable: true,
+  }
+}
+
 export { LOCALES, useLocaleStore, type Locale } from './locale-store'
 export type { TranslationKey, TranslationParams }

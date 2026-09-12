@@ -6,6 +6,7 @@ import type {
   WritableConfigLayer,
 } from '@teskra/contracts'
 import { create } from 'zustand'
+import { transportError } from '../i18n'
 
 interface SettingsState {
   readonly workspaceId?: string
@@ -20,12 +21,6 @@ interface SettingsState {
   save(patch: TeskraConfigLayer): Promise<boolean>
   openDirectory(kind: SystemDirectoryKind): Promise<boolean>
   clearError(): void
-}
-
-const transportError: PublicAppError = {
-  code: 'UNKNOWN',
-  message: 'Teskra could not reach the main process.',
-  retryable: true,
 }
 
 let loadGeneration = 0
@@ -62,7 +57,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           : { error: result.error, loading: false },
       )
     } catch {
-      if (generation === loadGeneration) set({ error: transportError, loading: false })
+      if (generation === loadGeneration) set({ error: transportError(), loading: false })
     }
   },
 
@@ -82,7 +77,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       )
       return result.ok
     } catch {
-      set({ error: transportError, saving: false })
+      set({ error: transportError(), saving: false })
       return false
     }
   },
@@ -94,7 +89,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       if (!result.ok) set({ error: result.error })
       return result.ok
     } catch {
-      set({ error: transportError })
+      set({ error: transportError() })
       return false
     }
   },

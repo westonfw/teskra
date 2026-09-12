@@ -11,6 +11,7 @@ import type {
   WorkspaceRuntimeRef,
 } from '@teskra/contracts'
 import { create } from 'zustand'
+import { transportError } from '../i18n'
 
 const MAX_AGENT_OUTPUT_CHARS = 10 * 1024 * 1024
 
@@ -95,12 +96,6 @@ interface AgentState {
   clearError(): void
 }
 
-const transportError: PublicAppError = {
-  code: 'UNKNOWN',
-  message: 'Teskra could not reach the Agent Registry.',
-  retryable: true,
-}
-
 export function createAgentStore(getBridge: () => AgentStoreBridge) {
   let synchronizationGeneration = 0
   let runsLoadGeneration = 0
@@ -135,7 +130,7 @@ export function createAgentStore(getBridge: () => AgentStoreBridge) {
             }
           })
           .catch(() => {
-            if (generation === synchronizationGeneration) set({ error: transportError })
+            if (generation === synchronizationGeneration) set({ error: transportError() })
           })
       }
       const stops = [
@@ -182,7 +177,7 @@ export function createAgentStore(getBridge: () => AgentStoreBridge) {
         }
         set({ runs: sortRuns(result.data), runsLoading: false })
       } catch {
-        if (generation === runsLoadGeneration) set({ runsLoading: false, error: transportError })
+        if (generation === runsLoadGeneration) set({ runsLoading: false, error: transportError() })
       }
     },
 
@@ -197,7 +192,7 @@ export function createAgentStore(getBridge: () => AgentStoreBridge) {
         set((state) => ({ runs: upsertRun(state.runs, result.data), starting: false }))
         return result.data
       } catch {
-        set({ starting: false, error: transportError })
+        set({ starting: false, error: transportError() })
         return undefined
       }
     },
@@ -213,7 +208,7 @@ export function createAgentStore(getBridge: () => AgentStoreBridge) {
         set((state) => ({ runs: upsertRun(state.runs, result.data) }))
         return result.data
       } catch {
-        set({ error: transportError })
+        set({ error: transportError() })
         return undefined
       }
     },
@@ -229,7 +224,7 @@ export function createAgentStore(getBridge: () => AgentStoreBridge) {
         set((state) => ({ runs: upsertRun(state.runs, result.data) }))
         return true
       } catch {
-        set({ error: transportError })
+        set({ error: transportError() })
         return false
       }
     },
@@ -245,7 +240,7 @@ export function createAgentStore(getBridge: () => AgentStoreBridge) {
         set((state) => ({ output: { ...state.output, [runId]: result.data } }))
         return true
       } catch {
-        set({ error: transportError })
+        set({ error: transportError() })
         return false
       }
     },
@@ -260,7 +255,7 @@ export function createAgentStore(getBridge: () => AgentStoreBridge) {
         }
         set({ definitions: result.data, loading: false })
       } catch {
-        set({ loading: false, error: transportError })
+        set({ loading: false, error: transportError() })
       }
     },
 
@@ -276,7 +271,7 @@ export function createAgentStore(getBridge: () => AgentStoreBridge) {
           detections: { ...state.detections, [agentRuntimeKey(agentId, runtime)]: result.data },
         }))
       } catch {
-        set({ error: transportError })
+        set({ error: transportError() })
       }
     },
 
@@ -298,7 +293,7 @@ export function createAgentStore(getBridge: () => AgentStoreBridge) {
           ),
         }))
       } catch {
-        set({ error: transportError })
+        set({ error: transportError() })
       }
     },
 
@@ -317,7 +312,7 @@ export function createAgentStore(getBridge: () => AgentStoreBridge) {
           },
         }))
       } catch {
-        set({ error: transportError })
+        set({ error: transportError() })
       }
     },
 
@@ -337,7 +332,7 @@ export function createAgentStore(getBridge: () => AgentStoreBridge) {
         }))
         return true
       } catch {
-        set({ error: transportError })
+        set({ error: transportError() })
         return false
       }
     },

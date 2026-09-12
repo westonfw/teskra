@@ -8,6 +8,7 @@ import type {
   WorkbenchEvents,
 } from '@teskra/contracts'
 import { create } from 'zustand'
+import { transportError } from '../i18n'
 
 export interface ReviewPanelStoreBridge {
   readonly review: {
@@ -40,12 +41,6 @@ interface ReviewPanelState {
   /** Opens (or closes, with undefined) a panel's aggregate detail. */
   selectPanel(panelId: string | undefined): Promise<void>
   clearError(): void
-}
-
-const transportError: PublicAppError = {
-  code: 'UNKNOWN',
-  message: 'Teskra could not reach the Review Panel service.',
-  retryable: true,
 }
 
 export function createReviewPanelStore(getBridge: () => ReviewPanelStoreBridge) {
@@ -91,7 +86,7 @@ export function createReviewPanelStore(getBridge: () => ReviewPanelStoreBridge) 
         const selectedId = get().selectedId
         if (selectedId !== undefined) void get().selectPanel(selectedId)
       } catch {
-        if (generation === loadGeneration) set({ loading: false, error: transportError })
+        if (generation === loadGeneration) set({ loading: false, error: transportError() })
       }
     },
 
@@ -111,7 +106,7 @@ export function createReviewPanelStore(getBridge: () => ReviewPanelStoreBridge) 
         }
         set({ detail: result.data ?? undefined })
       } catch {
-        if (generation === detailGeneration) set({ error: transportError })
+        if (generation === detailGeneration) set({ error: transportError() })
       }
     },
 

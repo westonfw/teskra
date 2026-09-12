@@ -7,6 +7,7 @@ import type {
   WorkbenchEvents,
 } from '@teskra/contracts'
 import { create } from 'zustand'
+import { transportError } from '../i18n'
 
 export interface TaskStoreBridge {
   readonly task: {
@@ -39,12 +40,6 @@ interface TaskState {
   deleteTask(id: string): Promise<boolean>
   selectTask(id?: string): void
   clearError(): void
-}
-
-const transportError: PublicAppError = {
-  code: 'UNKNOWN',
-  message: 'Teskra could not reach the Task service.',
-  retryable: true,
 }
 
 function sortTasks(tasks: readonly Task[]): Task[] {
@@ -91,7 +86,7 @@ export function createTaskStore(getBridge: () => TaskStoreBridge) {
             }
           })
           .catch(() => {
-            if (generation === synchronizationGeneration) set({ error: transportError })
+            if (generation === synchronizationGeneration) set({ error: transportError() })
           })
       }
       const stops = [
@@ -122,7 +117,7 @@ export function createTaskStore(getBridge: () => TaskStoreBridge) {
           loading: false,
         }))
       } catch {
-        if (generation === loadGeneration) set({ loading: false, error: transportError })
+        if (generation === loadGeneration) set({ loading: false, error: transportError() })
       }
     },
 
@@ -141,7 +136,7 @@ export function createTaskStore(getBridge: () => TaskStoreBridge) {
         }))
         return result.data
       } catch {
-        set({ saving: false, error: transportError })
+        set({ saving: false, error: transportError() })
         return undefined
       }
     },
@@ -157,7 +152,7 @@ export function createTaskStore(getBridge: () => TaskStoreBridge) {
         set((state) => ({ tasks: upsertTask(state.tasks, result.data), saving: false }))
         return true
       } catch {
-        set({ saving: false, error: transportError })
+        set({ saving: false, error: transportError() })
         return false
       }
     },
@@ -182,7 +177,7 @@ export function createTaskStore(getBridge: () => TaskStoreBridge) {
         })
         return true
       } catch {
-        set({ saving: false, error: transportError })
+        set({ saving: false, error: transportError() })
         return false
       }
     },
@@ -205,7 +200,7 @@ export function createTaskStore(getBridge: () => TaskStoreBridge) {
         })
         return result.data
       } catch {
-        set({ saving: false, error: transportError })
+        set({ saving: false, error: transportError() })
         return false
       }
     },
