@@ -284,6 +284,10 @@ function createAgentStepExecutor(deps: {
       const request: StartAgentRunRequest = {
         workspaceId: context.workspaceId,
         agentType: node.agent,
+        // Workflow steps are unattended: the CLI must run headless and exit
+        // when its turn ends. Interactive mode returns to the prompt instead
+        // and the run (and with it the whole workflow) never completes.
+        mode: 'exec',
         ...(context.agentRunId === undefined ? {} : { runId: context.agentRunId }),
         ...(node.role === undefined ? {} : { role: node.role }),
         ...(run.taskId === undefined ? {} : { taskId: run.taskId }),

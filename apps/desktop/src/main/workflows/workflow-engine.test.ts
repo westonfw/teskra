@@ -527,6 +527,9 @@ describe('agent step executor cancellation', () => {
     const pass = engine.start(run.id, CONTEXT)
     await flush()
     expect(startRequests).toHaveLength(1)
+    // Regression: workflow agent steps must launch headless — an interactive
+    // CLI returns to its prompt after finishing and the run never completes.
+    expect(startRequests[0]?.mode).toBe('exec')
 
     // Cancel while the launch is still in flight: the cancel must not
     // complete until the launch settled AND the run received it.
