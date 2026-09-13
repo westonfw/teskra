@@ -59,7 +59,11 @@ export interface AccountProfileRuntimeResolverDeps {
 }
 
 function fail(
-  code: 'VALIDATION_FAILED' | 'CONFLICT',
+  code:
+    | 'ACCOUNT_PROFILE_NOT_FOUND'
+    | 'ACCOUNT_PROFILE_MISMATCH'
+    | 'ACCOUNT_PROFILE_DISABLED'
+    | 'ACCOUNT_PROFILE_INCOMPATIBLE',
   message: string,
   detail: string,
 ): IpcResult<never> {
@@ -77,23 +81,30 @@ export function createAccountProfileRuntimeResolver(
           return found
         }
         const profile = found.data
-        if (profile === null || profile.agentId !== agentId) {
+        if (profile === null) {
           return fail(
-            'VALIDATION_FAILED',
-            'The selected account profile does not exist for this agent.',
+            'ACCOUNT_PROFILE_NOT_FOUND',
+            'The selected account profile does not exist.',
             `explicitProfileId=${explicitProfileId} agentId=${agentId}`,
+          )
+        }
+        if (profile.agentId !== agentId) {
+          return fail(
+            'ACCOUNT_PROFILE_MISMATCH',
+            `Account profile "${profile.name}" belongs to agent "${profile.agentId}", not "${agentId}".`,
+            `explicit profile ${profile.id} agentId=${profile.agentId} requested agent=${agentId}`,
           )
         }
         if (!profile.enabled) {
           return fail(
-            'CONFLICT',
+            'ACCOUNT_PROFILE_DISABLED',
             `Account profile "${profile.name}" is disabled. Enable it or choose another profile.`,
             `explicit profile ${profile.id} is disabled`,
           )
         }
         if (!isRuntimeCompatible(profile, workspaceRuntime)) {
           return fail(
-            'VALIDATION_FAILED',
+            'ACCOUNT_PROFILE_INCOMPATIBLE',
             `Account profile "${profile.name}" belongs to a different runtime and cannot run in this workspace.`,
             `explicit profile ${profile.id} runtime=${JSON.stringify(profile.runtime)} workspace=${JSON.stringify(workspaceRuntime)}`,
           )
@@ -117,7 +128,7 @@ export function createAccountProfileRuntimeResolver(
       const profile = found.data
       if (profile === null) {
         return fail(
-          'CONFLICT',
+          'ACCOUNT_PROFILE_NOT_FOUND',
           'The default account profile no longer exists. Set a new default in Settings.',
           `default profile ${defaultId.data} missing for agent ${agentId}`,
         )
@@ -125,7 +136,7 @@ export function createAccountProfileRuntimeResolver(
       if (!profile.enabled) {
         // §47.2 (2): deterministic error, no legacy fallback.
         return fail(
-          'CONFLICT',
+          'ACCOUNT_PROFILE_DISABLED',
           `The default account profile "${profile.name}" is disabled. Set a new default in Settings.`,
           `default profile ${profile.id} is disabled`,
         )

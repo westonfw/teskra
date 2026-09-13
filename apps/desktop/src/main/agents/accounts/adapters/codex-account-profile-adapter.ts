@@ -48,10 +48,11 @@ export interface CodexAccountProfileAdapterDeps {
   readonly hostFileExists?: (path: string) => boolean
   /**
    * Executable resolution seam mirroring cli-agent-adapter (detection cache /
-   * user override). TASK-100 wires the detector; without it the definition's
+   * user override), wired by TASK-100 compose. Receives the profile so the
+   * lookup can key on the profile's runtime; without it the definition's
    * bare command is used.
    */
-  readonly resolveExecutable?: () => string | undefined
+  readonly resolveExecutable?: (profile: AgentAccountProfile) => string | undefined
 }
 
 function fail<T>(error: InternalAppError): IpcResult<T> {
@@ -150,7 +151,7 @@ export function createCodexAccountProfileAdapter(
       return {
         ok: true,
         data: {
-          command: deps.resolveExecutable?.() ?? CODEX_AGENT.executable.command,
+          command: deps.resolveExecutable?.(profile) ?? CODEX_AGENT.executable.command,
           args: [...(CODEX_AGENT.executable.defaultArgs ?? []), 'login'],
         },
       }

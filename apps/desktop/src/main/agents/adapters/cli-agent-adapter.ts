@@ -89,6 +89,10 @@ function processEnvironment(
     ...plainWorkspaceEnv(request.workspace.env, request.runId),
     ...request.environment,
     ...launch.env,
+    // Milestone 24 §13.1: the account-profile env occupies the launch slot —
+    // after request.environment, before the system-owned TESKRA_* keys — so
+    // the profile identity always wins over workspace/request env (§13.2).
+    ...request.profileEnvironment,
     ...(request.handoffPath !== undefined ? { TESKRA_HANDOFF_PATH: request.handoffPath } : {}),
     ...(request.artifactDir !== undefined ? { TESKRA_ARTIFACT_DIR: request.artifactDir } : {}),
     TESKRA_RUN_ID: request.runId,

@@ -65,6 +65,8 @@ export interface AccountProfileAdapterRegistry {
   register(adapter: AgentAccountProfileAdapter): IpcResult<AgentAccountProfileAdapter>
   get(agentId: string): AgentAccountProfileAdapter | undefined
   has(agentId: string): boolean
+  /** Every registered adapter — used to aggregate §13.2 reserved env keys. */
+  list(): readonly AgentAccountProfileAdapter[]
 }
 
 export function createAccountProfileAdapterRegistry(
@@ -91,6 +93,7 @@ export function createAccountProfileAdapterRegistry(
     },
     get: (agentId) => adapters.get(agentId),
     has: (agentId) => adapters.has(agentId),
+    list: () => [...adapters.values()],
   }
 
   for (const adapter of initial) {

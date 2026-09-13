@@ -119,6 +119,8 @@ export interface AccountProfileManager {
   ): Promise<IpcResult<AgentAccountProfile | undefined>>
   /** Pluggable per-agent adapters (§10.4); undefined when none registered. */
   adapterFor(agentId: string): ReturnType<AccountProfileAdapterRegistry['get']>
+  /** §13.2: the union of every registered adapter's reserved env keys. */
+  reservedEnvKeys(): readonly string[]
 }
 
 export interface AccountProfileManagerDeps {
@@ -1031,6 +1033,13 @@ export function createAccountProfileManager(
 
     adapterFor(agentId) {
       return deps.adapters?.get(agentId)
+    },
+
+    reservedEnvKeys() {
+      if (deps.adapters === undefined) {
+        return []
+      }
+      return [...new Set(deps.adapters.list().flatMap((adapter) => adapter.reservedEnvKeys))]
     },
   }
 

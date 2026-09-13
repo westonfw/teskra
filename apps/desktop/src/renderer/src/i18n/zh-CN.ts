@@ -212,6 +212,14 @@ export const zhCN: Record<TranslationKey, string> = {
   'errorSuggestion.MERGE_BLOCKED': '先解决上述检查项再重试；如确认要覆盖，可使用强制合并。',
   'errorSuggestion.VALIDATION_FAILED': '检查输入的值后重试。',
   'errorSuggestion.CONFLICT': '该操作与现有状态冲突。请刷新并检查冲突项后重试。',
+  'errorSuggestion.ACCOUNT_PROFILE_NOT_FOUND':
+    '该账号 Profile 已不存在。请选择其他 Profile，或在 设置 → 账号 中重新设置默认 Profile。',
+  'errorSuggestion.ACCOUNT_PROFILE_MISMATCH':
+    '所选账号 Profile 属于另一个 Agent。请选择属于当前 Agent 的 Profile。',
+  'errorSuggestion.ACCOUNT_PROFILE_DISABLED':
+    '请在 设置 → 账号 中启用该账号 Profile，或选择其他 Profile。',
+  'errorSuggestion.ACCOUNT_PROFILE_INCOMPATIBLE':
+    '该账号 Profile 属于另一个运行时。请选择与当前工作区运行时匹配的 Profile。',
   'errorSuggestion.UNKNOWN': '重试该操作。如果问题持续存在，请从 设置 → 高级 打开日志。',
 
   // Main 进程 PublicAppError 的本地化文案（与 en-US 的 errorMessage.* 一一对应）。

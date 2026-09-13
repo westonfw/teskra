@@ -3,6 +3,7 @@ import type {
   AcceptanceCriteriaSetDetail,
   AcceptanceCriterion,
   AddCriterionRequest,
+  AgentAccountProfile,
   AgentDefinition,
   AgentDetectionRequest,
   AgentDetectionResult,
@@ -149,6 +150,31 @@ import type {
   WorkbenchEventName,
   WorkbenchEvents,
 } from '@teskra/contracts'
+
+import type {
+  CreateAccountProfileRequest,
+  UpdateAccountProfileRequest,
+} from '../agents/accounts/account-profile-manager'
+import type { AccountProfileListFilter } from '../db/repositories'
+
+/**
+ * Milestone 24 (TASK-100): account profile CRUD + per-agent default. The IPC
+ * layer (TASK-102) mounts Zod-validated channels onto this port; the login
+ * terminal channels join it there too.
+ */
+export interface AccountPort {
+  list(filter?: AccountProfileListFilter): Promise<IpcResult<readonly AgentAccountProfile[]>>
+  get(request: { id: string }): Promise<IpcResult<AgentAccountProfile | null>>
+  create(request: CreateAccountProfileRequest): Promise<IpcResult<AgentAccountProfile>>
+  update(request: {
+    id: string
+    patch: UpdateAccountProfileRequest
+  }): Promise<IpcResult<AgentAccountProfile>>
+  remove(request: { id: string; deleteHome?: boolean }): Promise<IpcResult<AgentAccountProfile>>
+  enable(request: { id: string }): Promise<IpcResult<AgentAccountProfile>>
+  setDefault(request: { agentId: string; profileId: string | null }): Promise<IpcResult<void>>
+  getDefault(request: { agentId: string }): Promise<IpcResult<string | undefined>>
+}
 
 export interface WorkspacePort {
   create(request: CreateWorkspaceRequest): IpcResult<Workspace>
@@ -400,6 +426,7 @@ export interface TeskraRuntime {
   readonly permission: PermissionPort
   readonly review: ReviewPort
   readonly agent: AgentCatalogPort
+  readonly account: AccountPort
   readonly git: GitPort
   readonly worktree: WorktreePort
   readonly maintenance: MaintenancePort

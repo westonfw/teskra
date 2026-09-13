@@ -15,6 +15,10 @@ import { createAgentDetector } from '../agents/agent-detector'
 import { createAgentHealthManager } from '../agents/agent-health-manager'
 import { createAgentManager } from '../agents/agent-manager'
 import { createDefaultAgentRegistry } from '../agents/agent-registry'
+import { createAccountProfileAdapterRegistry } from '../agents/accounts/account-profile-adapter'
+import { createAccountProfileManager } from '../agents/accounts/account-profile-manager'
+import { createClaudeAccountProfileAdapter } from '../agents/accounts/adapters/claude-account-profile-adapter'
+import { registerCodexAccountProfileAdapter } from '../agents/accounts/adapters/codex-account-profile-adapter'
 import { createClaudeAdapter } from '../agents/adapters/claude-adapter'
 import { createCodexAdapter } from '../agents/adapters/codex-adapter'
 import { createFakeAgentAdapter } from '../agents/adapters/fake-agent-adapter'
@@ -25,6 +29,7 @@ import { migrateDatabase } from '../db/migrations'
 import {
   createAgentEventRepository,
   createAgentRunRepository,
+  createAccountProfileRepository,
   createArtifactRepository,
   createCriteriaRepository,
   createHandoffRepository,
@@ -119,6 +124,7 @@ function createRepositories(connection: TeskraDatabase['connection']) {
     tasks: createTaskRepository(connection),
     agentRuns: createAgentRunRepository(connection),
     agentEvents: createAgentEventRepository(connection),
+    accountProfiles: createAccountProfileRepository(connection),
     artifacts: createArtifactRepository(connection),
     worktrees: createWorktreeRepository(connection),
     workflowRuns: createWorkflowRunRepository(connection),
@@ -337,6 +343,48 @@ export async function composeTeskraRuntime(
     registry: registeredAgents.data,
     detector: agentDetector,
   })
+  // Milestone 24 (TASK-100): the account-profile adapter registry (Codex /
+  // Claude) and the AccountProfileManager. resolveExecutable surfaces the
+  // detector's per-runtime executable override for login commands; detection
+  // itself is async and stays with the Login Terminal (TASK-102/104).
+  const accountProfileAdapters = createAccountProfileAdapterRegistry()
+  if (!accountProfileAdapters.ok) {
+    database.close()
+    return accountProfileAdapters
+  }
+  const codexAccountAdapter = registerCodexAccountProfileAdapter(accountProfileAdapters.data, {
+    commands,
+    createRuntime: runtimeFor,
+    resolveExecutable: (profile) => {
+      const override = agentDetector.getExecutableOverride({
+        agentId: profile.agentId,
+        runtime: profile.runtime,
+      })
+      return override.ok ? (override.data ?? undefined) : undefined
+    },
+  })
+  if (!codexAccountAdapter.ok) {
+    database.close()
+    return codexAccountAdapter
+  }
+  const claudeAccountAdapter = accountProfileAdapters.data.register(
+    createClaudeAccountProfileAdapter({ commands, createRuntime: runtimeFor }),
+  )
+  if (!claudeAccountAdapter.ok) {
+    database.close()
+    return claudeAccountAdapter
+  }
+  const accountProfileManager = createAccountProfileManager({
+    profiles: repositories.accountProfiles,
+    runs: repositories.agentRuns,
+    registry: registeredAgents.data,
+    paths,
+    config,
+    events,
+    adapters: accountProfileAdapters.data,
+    createRuntime: runtimeFor,
+    commands,
+  })
   const doctor = createDoctorService({
     paths,
     database,
@@ -403,6 +451,8 @@ export async function composeTeskraRuntime(
     permissions: permissionManager,
     hostProcesses,
     credentials,
+    accountProfiles: accountProfileManager,
+    resolveRuntime: runtimeFor,
     resolveConcurrency: (workspaceId) => {
       const resolved = config.resolve({ workspaceId })
       return resolved.ok ? { ok: true, data: resolved.data.config.concurrency } : resolved
@@ -819,6 +869,17 @@ export async function composeTeskraRuntime(
       list: (request = {}) => agentManager.list(request),
       getOutput: ({ runId, tailBytes }) =>
         agentManager.getOutput(runId, tailBytes === undefined ? undefined : { tailBytes }),
+    },
+    account: {
+      list: (request = {}) => accountProfileManager.list(request),
+      get: ({ id }) => accountProfileManager.get(id),
+      create: (request) => accountProfileManager.create(request),
+      update: ({ id, patch }) => accountProfileManager.update(id, patch),
+      remove: ({ id, deleteHome }) =>
+        accountProfileManager.remove(id, deleteHome === undefined ? {} : { deleteHome }),
+      enable: ({ id }) => accountProfileManager.enable(id),
+      setDefault: ({ agentId, profileId }) => accountProfileManager.setDefault(agentId, profileId),
+      getDefault: ({ agentId }) => accountProfileManager.getDefault(agentId),
     },
     workspace: {
       create: (request) => workspaceManager.create(request),

@@ -22,6 +22,17 @@ export const ERROR_CODES = [
   'VALIDATION_FAILED',
   /** A uniqueness / state precondition conflicted (e.g. duplicate configHome). */
   'CONFLICT',
+  /**
+   * Milestone 24 (§37): account-profile resolution failures, kept as distinct
+   * codes so a wrong profile id can never be mistaken for a generic bad
+   * request (TASK-100 cross-object constraints).
+   */
+  'ACCOUNT_PROFILE_NOT_FOUND',
+  /** The profile belongs to a different agent than the Run requests. */
+  'ACCOUNT_PROFILE_MISMATCH',
+  'ACCOUNT_PROFILE_DISABLED',
+  /** The profile's runtime cannot host the workspace runtime. */
+  'ACCOUNT_PROFILE_INCOMPATIBLE',
   'UNKNOWN',
 ] as const
 

@@ -7,7 +7,10 @@ import {
   providerSessionRefSchema,
   type AgentDefinition,
   type AgentStartRequest,
+  type AgentAccountProfile,
+  type AgentResumeProfileContext,
   type AgentRun,
+  type AgentRunProfileSnapshot,
   type ConcurrencyConfig,
   type IpcResult,
   type ListAgentRunsRequest,
@@ -20,6 +23,7 @@ import {
   type TaskStatus,
   type WorkbenchEvents,
   type Workspace,
+  type WorkspaceRuntimeRef,
 } from '@teskra/contracts'
 
 import type { AgentEventRepository } from '../db/repositories/agent-event-repository'
@@ -46,6 +50,10 @@ import {
 import type { ReviewCollector } from './review-collector'
 import type { RunLogStore } from './run-log-store'
 import type { CodingAgentAdapter } from './adapters/coding-agent-adapter'
+import type { AccountProfileManager } from './accounts/account-profile-manager'
+import { assertNoReservedEnvKeys } from './accounts/reserved-env-keys'
+import { projectHistoricalProfileIdentity } from './accounts/runtime-identity'
+import type { WorkspaceRuntime } from '../workspace/runtime'
 
 export interface AgentManager {
   start(request: StartAgentRunRequest): Promise<IpcResult<AgentRun>>
@@ -106,6 +114,18 @@ export interface AgentManagerDeps {
    * settled to its terminal state.
    */
   readonly hostProcesses?: Pick<HostProcessControl, 'identity' | 'terminate'>
+  /**
+   * Milestone 24 (TASK-100): account-profile resolution for the Run lifecycle.
+   * start() runs the §37 selector (explicit → default → legacy), resume()
+   * restores the historical identity from the run row (§38). Without it, any
+   * explicit accountProfileId is rejected rather than silently ignored.
+   */
+  readonly accountProfiles?: Pick<
+    AccountProfileManager,
+    'resolve' | 'get' | 'adapterFor' | 'reservedEnvKeys'
+  >
+  /** Resolves the workspace runtime object for profile env projection (§13). */
+  readonly resolveRuntime?: (ref: WorkspaceRuntimeRef) => IpcResult<WorkspaceRuntime>
 }
 
 function fail<T>(error: InternalAppError): IpcResult<T> {
@@ -171,6 +191,8 @@ interface PendingRun {
   readonly request: AgentStartRequest
   readonly resumed: boolean
   readonly resumeSession?: ProviderSessionRef
+  /** §10.5: historical profile identity attached to a native session resume. */
+  readonly resumeProfileContext?: AgentResumeProfileContext
 }
 
 const RESUME_OUTPUT_CONTEXT_CHARS = 6_000
@@ -379,7 +401,13 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     activeAdapters.set(request.runId, adapter)
     const started =
       pending.resumeSession !== undefined && adapter.resume !== undefined
-        ? await adapter.resume({ ...request, providerSession: pending.resumeSession })
+        ? await adapter.resume({
+            ...request,
+            providerSession: pending.resumeSession,
+            ...(pending.resumeProfileContext === undefined
+              ? {}
+              : { resumeProfileContext: pending.resumeProfileContext }),
+          })
         : await adapter.start(request)
     if (!started.ok) return finishFailed(request.runId, started.error)
 
@@ -554,6 +582,96 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     })
   }
 
+  /**
+   * Milestone 24 §13 (TASK-100): project a resolved account profile into the
+   * launch-slot env via the agent's AccountProfileAdapter.
+   */
+  const projectProfileForLaunch = (
+    agentType: string,
+    profile: AgentAccountProfile,
+    workspaceRuntime: WorkspaceRuntimeRef,
+  ): IpcResult<Record<string, string>> => {
+    const profileAdapter = deps.accountProfiles?.adapterFor(agentType)
+    if (profileAdapter === undefined) {
+      return fail({
+        code: 'CAPABILITY_NOT_AVAILABLE',
+        message: `No account profile adapter is registered for agent "${agentType}".`,
+        retryable: false,
+        detail: `cannot project profile ${profile.id}: no AccountProfileAdapter for ${agentType}`,
+      })
+    }
+    if (deps.resolveRuntime === undefined) {
+      return fail({
+        code: 'UNKNOWN',
+        message: 'The workspace runtime is unavailable for account profile projection.',
+        retryable: true,
+        detail: 'AgentManager has no resolveRuntime for account profile projection',
+      })
+    }
+    const runtime = deps.resolveRuntime(workspaceRuntime)
+    if (!runtime.ok) return runtime
+    const projection = profileAdapter.buildRuntimeProjection(profile, runtime.data)
+    return projection.ok ? { ok: true, data: { ...projection.data.env } } : projection
+  }
+
+  /**
+   * Milestone 24 §7/§13/§14 (TASK-100): run the §37 selector for a start
+   * request and, when a profile is selected, project its env and capture the
+   * Run snapshot. The legacy path (no profile) returns all-undefined so the
+   * launch stays byte-identical to pre-profile behavior (§50.1/§52).
+   */
+  const resolveStartProfile = async (
+    request: StartAgentRunRequest,
+    workspaceRuntime: WorkspaceRuntimeRef,
+  ): Promise<
+    IpcResult<{
+      accountProfileId?: string
+      profileEnvironment?: Record<string, string>
+      profileSnapshot?: AgentRunProfileSnapshot
+    }>
+  > => {
+    if (deps.accountProfiles === undefined) {
+      if (request.accountProfileId !== undefined) {
+        return fail({
+          code: 'CAPABILITY_NOT_AVAILABLE',
+          message:
+            'Account profiles are not available in this runtime; the run cannot be started with an explicit account profile.',
+          retryable: false,
+          detail: `start with accountProfileId=${request.accountProfileId} but no AccountProfileManager composed`,
+        })
+      }
+      return { ok: true, data: {} }
+    }
+    const resolved = await deps.accountProfiles.resolve(
+      request.agentType,
+      workspaceRuntime,
+      request.accountProfileId,
+    )
+    if (!resolved.ok) return resolved
+    const profile = resolved.data
+    if (profile === undefined) {
+      return { ok: true, data: {} }
+    }
+    const env = projectProfileForLaunch(request.agentType, profile, workspaceRuntime)
+    if (!env.ok) return env
+    // §7/§14: the snapshot records the profile AS RESOLVED — including when
+    // the selection was an explicit override — so history stays auditable.
+    return {
+      ok: true,
+      data: {
+        accountProfileId: profile.id,
+        profileEnvironment: env.data,
+        profileSnapshot: {
+          accountProfileId: profile.id,
+          accountProfileName: profile.name,
+          runtime: profile.runtime,
+          ...(profile.configHome === undefined ? {} : { configHome: profile.configHome }),
+          ...(request.model === undefined ? {} : { model: request.model }),
+        },
+      },
+    }
+  }
+
   const stopExited = deps.events.subscribe('process.exited', ({ agentRunId, exitCode, signal }) => {
     if (agentRunId === undefined || !activeAdapters.has(agentRunId)) return
     outputBatcher.flush(agentRunId)
@@ -650,6 +768,17 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
 
   const manager: AgentManager = {
     async start(request) {
+      // Milestone 24 (TASK-100 scope boundary): ExecutionProfiles only exist
+      // from TASK-109/110 — refuse loudly instead of silently dropping the
+      // field and launching with an unintended identity.
+      if (request.executionProfileId !== undefined) {
+        return fail({
+          code: 'CAPABILITY_NOT_AVAILABLE',
+          message: 'Execution profiles are not supported yet.',
+          retryable: false,
+          detail: `start with executionProfileId=${request.executionProfileId} before TASK-110`,
+        })
+      }
       const definition = deps.registry.get(request.agentType)
       const adapter = adapters.get(request.agentType)
       if (definition === undefined || adapter === undefined) {
@@ -675,6 +804,27 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       const workspace = deps.workspaces.getById(request.workspaceId)
       if (!workspace.ok) return workspace
       if (workspace.data === null) return missing('workspace', request.workspaceId)
+      // Milestone 24 §13.2 (TASK-100): reserved account-profile env keys
+      // (CODEX_HOME / CLAUDE_CONFIG_DIR) may never come from workspace or
+      // request env — reject and log, never silently drop.
+      if (deps.accountProfiles !== undefined) {
+        const reservedKeys = deps.accountProfiles.reservedEnvKeys()
+        for (const [source, env] of [
+          ['workspace.env', workspace.data.env],
+          ['request.environment', request.environment],
+        ] as const) {
+          const check = assertNoReservedEnvKeys(env, source, reservedKeys)
+          if (!check.ok) {
+            logger.warn(
+              { workspaceId: workspace.data.id, source, error: check.error },
+              'Reserved account-profile env key rejected.',
+            )
+            return check
+          }
+        }
+      }
+      const startProfile = await resolveStartProfile(request, workspace.data.runtime)
+      if (!startProfile.ok) return startProfile
       const launchWorkspace = resolveLaunchWorkspace(workspace.data)
       if (!launchWorkspace.ok) return launchWorkspace
 
@@ -790,6 +940,12 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           ...(request.worktreeId === undefined ? {} : { worktreeId: request.worktreeId }),
           ...(request.model === undefined ? {} : { model: request.model }),
           ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
+          ...(startProfile.data.accountProfileId === undefined
+            ? {}
+            : { accountProfileId: startProfile.data.accountProfileId }),
+          ...(startProfile.data.profileSnapshot === undefined
+            ? {}
+            : { profileSnapshot: startProfile.data.profileSnapshot }),
         },
         timestamp,
       )
@@ -847,6 +1003,9 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           handoffPath: runFiles.data.handoff,
           artifactDir: runFiles.data.artifacts,
           ...(request.environment === undefined ? {} : { environment: request.environment }),
+          ...(startProfile.data.profileEnvironment === undefined
+            ? {}
+            : { profileEnvironment: startProfile.data.profileEnvironment }),
         },
       }
       if (shouldQueue) {
@@ -925,6 +1084,47 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           retryable: false,
           detail: `resume run=${run.id} status=${recheck.data.status} after detection`,
         })
+      }
+
+      // Milestone 24 §38/§39 (TASK-100/112): resume restores the HISTORICAL
+      // runtime identity from the run row (accountProfileId + profileSnapshot)
+      // — never the current agent default. A run without an account profile
+      // resumes legacy, projecting nothing.
+      let profileEnvironment: Record<string, string> | undefined
+      let resumeProfileContext: AgentResumeProfileContext | undefined
+      if (run.accountProfileId !== undefined) {
+        if (deps.accountProfiles === undefined || deps.resolveRuntime === undefined) {
+          return fail({
+            code: 'CAPABILITY_NOT_AVAILABLE',
+            message:
+              'Account profiles are unavailable; the run cannot be resumed with its historical identity.',
+            retryable: true,
+            detail: `resume run=${run.id} profile=${run.accountProfileId} without account profile support`,
+          })
+        }
+        const profileRow = await deps.accountProfiles.get(run.accountProfileId)
+        if (!profileRow.ok) return profileRow
+        const profileAdapter = deps.accountProfiles.adapterFor(run.agentType)
+        if (profileAdapter === undefined) {
+          return fail({
+            code: 'CAPABILITY_NOT_AVAILABLE',
+            message: `No account profile adapter is registered for agent "${run.agentType}".`,
+            retryable: false,
+            detail: `resume run=${run.id} profile=${run.accountProfileId}`,
+          })
+        }
+        const profileRuntime = deps.resolveRuntime(workspace.data.runtime)
+        if (!profileRuntime.ok) return profileRuntime
+        const identity = projectHistoricalProfileIdentity({
+          run,
+          profile: profileRow.data,
+          adapter: profileAdapter,
+          runtime: profileRuntime.data,
+          workspaceRuntime: workspace.data.runtime,
+        })
+        if (!identity.ok) return identity
+        profileEnvironment = identity.data.env
+        resumeProfileContext = identity.data.resumeProfileContext
       }
 
       const task = run.taskId === undefined ? undefined : deps.tasks.getById(run.taskId)
@@ -1006,6 +1206,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         adapter,
         resumed: true,
         ...(resumeSession === undefined ? {} : { resumeSession }),
+        ...(resumeProfileContext === undefined ? {} : { resumeProfileContext }),
         request: {
           runId: run.id,
           workspace: launchWorkspace.data,
@@ -1031,6 +1232,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
             : { worktreePath: worktree.data.path }),
           handoffPath: runFiles.data.handoff,
           artifactDir: runFiles.data.artifacts,
+          ...(profileEnvironment === undefined ? {} : { profileEnvironment }),
         },
       }
       const timestamp = now()

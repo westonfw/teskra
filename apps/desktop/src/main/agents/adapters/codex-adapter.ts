@@ -1,4 +1,5 @@
 import type {
+  AgentResumeProfileContext,
   AgentResumeRequest,
   AgentStartRequest,
   IpcResult,
@@ -95,18 +96,11 @@ export function buildCodexResumeArguments(
 /**
  * Milestone 24 §10.5 — the profile context a Codex resume must be validated
  * against. Codex sessions live under CODEX_HOME, so per-profile homes change
- * what a resume can even see. The AgentManager wiring that populates this
- * from the run row (profileSnapshot + freshly resolved profile) is TASK-100;
- * this module owns the rules.
+ * what a resume can even see. The AgentManager populates
+ * `AgentResumeRequest.resumeProfileContext` from the run row (profileSnapshot
+ * + freshly resolved profile, TASK-100); this module owns the rules.
  */
-export interface CodexResumeProfileContext {
-  /** run.account_profile_id — its presence means this run uses a named account profile. */
-  readonly accountProfileId?: string
-  /** run.profileSnapshot.configHome captured when the original run started. */
-  readonly snapshotConfigHome?: string
-  /** configHome resolved for the current resume attempt. */
-  readonly currentConfigHome?: string
-}
+export type CodexResumeProfileContext = AgentResumeProfileContext
 
 export function validateCodexResumeProfile(
   request: AgentResumeRequest,
@@ -152,7 +146,9 @@ export function createCodexAdapter(options: CodexAdapterOptions): CodingAgentAda
       args: buildCodexArguments(request),
       providerSession: { provider: CODEX_AGENT.id },
     }),
-    buildResumeLaunch: (request) => ({ args: buildCodexResumeArguments(request) }),
+    buildResumeLaunch: (request) => ({
+      args: buildCodexResumeArguments(request, request.resumeProfileContext),
+    }),
   })
   const resume = adapter.resume
 
@@ -168,6 +164,13 @@ export function createCodexAdapter(options: CodexAdapterOptions): CodingAgentAda
             retryable: false,
           },
         }
+      }
+      // §10.5: validate the historical profile identity BEFORE building argv —
+      // a configHome mismatch or a missing session id for a profile run is a
+      // loud refusal, never a CLI-ambiguous failure or a --last guess.
+      const profileCheck = validateCodexResumeProfile(request, request.resumeProfileContext ?? {})
+      if (!profileCheck.ok) {
+        return profileCheck
       }
       if (resume === undefined) {
         return {

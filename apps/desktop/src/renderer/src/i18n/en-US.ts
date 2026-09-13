@@ -228,6 +228,14 @@ export const enUS = {
   'errorSuggestion.VALIDATION_FAILED': 'Review the entered values and try again.',
   'errorSuggestion.CONFLICT':
     'The operation conflicts with existing state. Refresh, review the conflicting item, and try again.',
+  'errorSuggestion.ACCOUNT_PROFILE_NOT_FOUND':
+    'The account profile no longer exists. Choose another profile or set a new default in Settings → Accounts.',
+  'errorSuggestion.ACCOUNT_PROFILE_MISMATCH':
+    'The selected account profile belongs to a different agent. Choose a profile for this agent.',
+  'errorSuggestion.ACCOUNT_PROFILE_DISABLED':
+    'Enable the account profile in Settings → Accounts, or choose another profile.',
+  'errorSuggestion.ACCOUNT_PROFILE_INCOMPATIBLE':
+    'The account profile targets a different runtime. Choose a profile that matches this workspace runtime.',
   'errorSuggestion.UNKNOWN':
     'Retry the operation. If it persists, open the logs from Settings → Advanced.',
 

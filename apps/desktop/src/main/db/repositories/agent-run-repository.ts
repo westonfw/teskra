@@ -1,8 +1,10 @@
 import type Database from 'better-sqlite3'
 
 import type {
+  AgentFailureClassification,
   AgentRole,
   AgentRun,
+  AgentRunProfileSnapshot,
   AgentRunStatus,
   ApprovalMode,
   ExecutionMode,
@@ -98,6 +100,13 @@ export interface CreateAgentRunInput {
   readonly providerSession?: JsonRecord
   readonly prompt?: string
   readonly startedAt?: string
+  /** Milestone 24 (migration 013): the runtime identity this run launches with. */
+  readonly accountProfileId?: string
+  readonly executionProfileId?: string
+  /** §7: profile state captured at start — the auditable truth for history. */
+  readonly profileSnapshot?: AgentRunProfileSnapshot
+  /** ADR-0010: failure classification written post-hoc (TASK-106). */
+  readonly failureClassification?: AgentFailureClassification
 }
 
 export interface UpdateAgentRunInput {
@@ -121,6 +130,11 @@ export interface UpdateAgentRunInput {
   readonly lastInputAt?: string | null
   readonly exitCode?: number | null
   readonly error?: JsonRecord | null
+  /** Migration 013 columns; null clears the value. */
+  readonly accountProfileId?: string | null
+  readonly executionProfileId?: string | null
+  readonly profileSnapshot?: AgentRunProfileSnapshot | null
+  readonly failureClassification?: AgentFailureClassification | null
 }
 
 export interface AgentRunRepository {
@@ -223,8 +237,8 @@ export function createAgentRunRepository(connection: Database.Database): AgentRu
       const inserted = execute(ENTITY, 'create', () => {
         connection
           .prepare(
-            `INSERT INTO agent_runs (id, task_id, workspace_id, workflow_run_id, workflow_step_id, agent_type, role, model, mode, approval_mode, status, worktree_id, execution_mode, criteria_set_id, provider_session_json, run_dir, prompt, started_at, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO agent_runs (id, task_id, workspace_id, workflow_run_id, workflow_step_id, agent_type, role, model, mode, approval_mode, status, worktree_id, execution_mode, criteria_set_id, provider_session_json, run_dir, prompt, started_at, account_profile_id, execution_profile_id, profile_snapshot_json, failure_classification_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             input.id,
@@ -245,6 +259,10 @@ export function createAgentRunRepository(connection: Database.Database): AgentRu
             input.runDir,
             input.prompt ?? null,
             input.startedAt ?? null,
+            input.accountProfileId ?? null,
+            input.executionProfileId ?? null,
+            encodeJson(input.profileSnapshot),
+            encodeJson(input.failureClassification),
             now,
             now,
           )
@@ -306,6 +324,24 @@ export function createAgentRunRepository(connection: Database.Database): AgentRu
       if (patch.error !== undefined) {
         sets.push('error_json = ?')
         values.push(patch.error === null ? null : encodeJson(patch.error))
+      }
+      if (patch.accountProfileId !== undefined) {
+        sets.push('account_profile_id = ?')
+        values.push(patch.accountProfileId)
+      }
+      if (patch.executionProfileId !== undefined) {
+        sets.push('execution_profile_id = ?')
+        values.push(patch.executionProfileId)
+      }
+      if (patch.profileSnapshot !== undefined) {
+        sets.push('profile_snapshot_json = ?')
+        values.push(patch.profileSnapshot === null ? null : encodeJson(patch.profileSnapshot))
+      }
+      if (patch.failureClassification !== undefined) {
+        sets.push('failure_classification_json = ?')
+        values.push(
+          patch.failureClassification === null ? null : encodeJson(patch.failureClassification),
+        )
       }
       if (sets.length === 0) {
         return repository.getById(id)

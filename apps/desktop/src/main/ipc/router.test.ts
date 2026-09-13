@@ -290,6 +290,24 @@ function fakeRuntime(): TeskraRuntime {
       list: vi.fn(() => ok([])),
       getOutput: vi.fn(() => ok('')),
     },
+    account: {
+      list: vi.fn(async () => ok([])),
+      get: vi.fn(async () => ok(null)),
+      create: vi.fn(async () => {
+        throw new Error('not used')
+      }),
+      update: vi.fn(async () => {
+        throw new Error('not used')
+      }),
+      remove: vi.fn(async () => {
+        throw new Error('not used')
+      }),
+      enable: vi.fn(async () => {
+        throw new Error('not used')
+      }),
+      setDefault: vi.fn(async () => ok(undefined)),
+      getDefault: vi.fn(async () => ok(undefined)),
+    },
     git: {
       status: vi.fn(async () => ok({ ahead: 0, behind: 0, clean: true, entries: [] })),
       branch: vi.fn(async () => ok({ current: 'main', detached: false, branches: ['main'] })),

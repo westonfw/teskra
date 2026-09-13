@@ -73,7 +73,7 @@ describe('AccountProfileRuntimeResolver (§37)', () => {
     const resolved = await resolver.resolve('codex', UBUNTU, 'acct-1')
     expect(resolved.ok).toBe(false)
     if (resolved.ok) return
-    expect(resolved.error.code).toBe('CONFLICT')
+    expect(resolved.error.code).toBe('ACCOUNT_PROFILE_DISABLED')
   })
 
   it('errors when the explicit profile is runtime-incompatible', async () => {
@@ -81,13 +81,23 @@ describe('AccountProfileRuntimeResolver (§37)', () => {
     const resolved = await resolver.resolve('codex', { kind: 'windows' }, 'acct-1')
     expect(resolved.ok).toBe(false)
     if (resolved.ok) return
-    expect(resolved.error.code).toBe('VALIDATION_FAILED')
+    expect(resolved.error.code).toBe('ACCOUNT_PROFILE_INCOMPATIBLE')
   })
 
   it('errors when the explicit profile belongs to another agent', async () => {
     const resolver = resolverWith([profile({ agentId: 'claude' })], undefined)
     const resolved = await resolver.resolve('codex', UBUNTU, 'acct-1')
     expect(resolved.ok).toBe(false)
+    if (resolved.ok) return
+    expect(resolved.error.code).toBe('ACCOUNT_PROFILE_MISMATCH')
+  })
+
+  it('errors when the explicit profile does not exist', async () => {
+    const resolver = resolverWith([], undefined)
+    const resolved = await resolver.resolve('codex', UBUNTU, 'acct-gone')
+    expect(resolved.ok).toBe(false)
+    if (resolved.ok) return
+    expect(resolved.error.code).toBe('ACCOUNT_PROFILE_NOT_FOUND')
   })
 
   it('falls back to legacy when the default is for another runtime', async () => {
@@ -101,7 +111,7 @@ describe('AccountProfileRuntimeResolver (§37)', () => {
     const resolved = await resolver.resolve('codex', UBUNTU)
     expect(resolved.ok).toBe(false)
     if (resolved.ok) return
-    expect(resolved.error.code).toBe('CONFLICT')
+    expect(resolved.error.code).toBe('ACCOUNT_PROFILE_DISABLED')
     expect(resolved.error.message).toContain('default')
   })
 
@@ -110,6 +120,6 @@ describe('AccountProfileRuntimeResolver (§37)', () => {
     const resolved = await resolver.resolve('codex', UBUNTU)
     expect(resolved.ok).toBe(false)
     if (resolved.ok) return
-    expect(resolved.error.code).toBe('CONFLICT')
+    expect(resolved.error.code).toBe('ACCOUNT_PROFILE_NOT_FOUND')
   })
 })

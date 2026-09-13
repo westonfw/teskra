@@ -102,6 +102,12 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       data: [{ id: 'codex' }, { id: 'claude' }, { id: 'kimi' }, { id: 'fake' }],
     })
     expect(runtime.agent.list({ activeOnly: true })).toEqual({ ok: true, data: [] })
+    // TASK-100: the account profile port is mounted (IPC channels are TASK-102).
+    await expect(runtime.account.list()).resolves.toEqual({ ok: true, data: [] })
+    await expect(runtime.account.getDefault({ agentId: 'codex' })).resolves.toEqual({
+      ok: true,
+      data: undefined,
+    })
     if (!created.ok) throw new Error('expected workspace')
     const task = runtime.task.create({ workspaceId: created.data.id, title: 'Compose runtime' })
     expect(task).toMatchObject({

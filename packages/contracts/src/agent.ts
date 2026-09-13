@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import { agentRunProfileSnapshotSchema } from './agent-account'
+import { agentRunProfileSnapshotSchema, configHomeSchema } from './agent-account'
 import { agentFailureClassificationSchema } from './agent-failure'
 import {
   IPC_TEXT_MAX,
@@ -264,6 +264,14 @@ export const agentStartRequestSchema = z.strictObject({
   handoffPath: z.string().optional(),
   artifactDir: z.string().optional(),
   environment: z.record(z.string(), z.string()).optional(),
+  /**
+   * Milestone 24 §13.1: the resolved account-profile env (CODEX_HOME /
+   * CLAUDE_CONFIG_DIR), populated by the AgentManager after profile
+   * resolution. It merges AFTER `environment` (the launch slot) and before
+   * the system-owned TESKRA_* keys, so a profile identity always wins over
+   * workspace/request env.
+   */
+  profileEnvironment: z.record(z.string(), z.string()).optional(),
 })
 export type AgentStartRequest = z.infer<typeof agentStartRequestSchema>
 
@@ -276,8 +284,26 @@ export const providerSessionRefSchema = z.strictObject({
 })
 export type ProviderSessionRef = z.infer<typeof providerSessionRefSchema>
 
+/**
+ * Milestone 24 §10.5/§38 — the historical profile identity a resume is
+ * validated against. Populated by the AgentManager from the run row
+ * (`accountProfileId` + `profileSnapshot.configHome`) and the freshly read
+ * profile record; the CLI adapter (e.g. Codex) refuses a resume whose account
+ * changed and never falls back to "last session" for a profile run.
+ */
+export const agentResumeProfileContextSchema = z.strictObject({
+  /** run.accountProfileId — its presence means this run uses a named account profile. */
+  accountProfileId: z.string().min(1).optional(),
+  /** run.profileSnapshot.configHome captured when the original run started. */
+  snapshotConfigHome: configHomeSchema.optional(),
+  /** configHome resolved for the current resume attempt. */
+  currentConfigHome: configHomeSchema.optional(),
+})
+export type AgentResumeProfileContext = z.infer<typeof agentResumeProfileContextSchema>
+
 export const agentResumeRequestSchema = agentStartRequestSchema.extend({
   providerSession: providerSessionRefSchema,
+  resumeProfileContext: agentResumeProfileContextSchema.optional(),
 })
 export type AgentResumeRequest = z.infer<typeof agentResumeRequestSchema>
 

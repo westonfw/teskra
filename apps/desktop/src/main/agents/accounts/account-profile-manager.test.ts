@@ -528,7 +528,7 @@ describe('AccountProfileManager resolve (TASK-097, §37 selector)', () => {
     const result = await fixture.manager.resolve('codex', { kind: 'windows' }, created.id)
     expect(result.ok).toBe(false)
     if (result.ok) return
-    expect(result.error.code).toBe('VALIDATION_FAILED')
+    expect(result.error.code).toBe('ACCOUNT_PROFILE_INCOMPATIBLE')
   })
 
   it('errors on an explicit disabled profile', async () => {
@@ -538,7 +538,7 @@ describe('AccountProfileManager resolve (TASK-097, §37 selector)', () => {
     const result = await fixture.manager.resolve('codex', UBUNTU, created.id)
     expect(result.ok).toBe(false)
     if (result.ok) return
-    expect(result.error.code).toBe('CONFLICT')
+    expect(result.error.code).toBe('ACCOUNT_PROFILE_DISABLED')
   })
 
   it('errors on a disabled default and does NOT fall back to legacy (§47.2 (2))', async () => {
@@ -553,7 +553,7 @@ describe('AccountProfileManager resolve (TASK-097, §37 selector)', () => {
     const result = await fixture.manager.resolve('codex', UBUNTU)
     expect(result.ok).toBe(false)
     if (result.ok) return
-    expect(result.error.code).toBe('CONFLICT')
+    expect(result.error.code).toBe('ACCOUNT_PROFILE_DISABLED')
     expect(result.error.message).toContain('default')
   })
 })
