@@ -1,0 +1,8 @@
+{
+  "stdout": [
+    "Fake Agent started",
+    "Reviewing the diff: it documents how quota exceeded errors are classified.",
+    "Fake Agent completed"
+  ],
+  "exitCode": 0
+}

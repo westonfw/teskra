@@ -21,7 +21,9 @@ import { createAccountLoginService } from '../agents/accounts/account-login-serv
 import { createClaudeAccountProfileAdapter } from '../agents/accounts/adapters/claude-account-profile-adapter'
 import { registerCodexAccountProfileAdapter } from '../agents/accounts/adapters/codex-account-profile-adapter'
 import { createClaudeAdapter } from '../agents/adapters/claude-adapter'
+import { createClaudeFailureClassifier } from '../agents/adapters/claude-failure-classifier'
 import { createCodexAdapter } from '../agents/adapters/codex-adapter'
+import { createCodexFailureClassifier } from '../agents/adapters/codex-failure-classifier'
 import { createFakeAgentAdapter } from '../agents/adapters/fake-agent-adapter'
 import { createKimiAdapter } from '../agents/adapters/kimi-adapter'
 import { createRunLogStore } from '../agents/run-log-store'
@@ -462,6 +464,8 @@ export async function composeTeskraRuntime(
     hostProcesses,
     credentials,
     accountProfiles: accountProfileManager,
+    // TASK-105 (§17): post-hoc failure classification for Codex / Claude runs.
+    failureClassifiers: [createCodexFailureClassifier(), createClaudeFailureClassifier()],
     resolveRuntime: runtimeFor,
     resolveConcurrency: (workspaceId) => {
       const resolved = config.resolve({ workspaceId })

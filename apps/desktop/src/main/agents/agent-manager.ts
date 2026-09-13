@@ -50,6 +50,7 @@ import {
 import type { ReviewCollector } from './review-collector'
 import type { RunLogStore } from './run-log-store'
 import type { CodingAgentAdapter } from './adapters/coding-agent-adapter'
+import type { AgentFailureClassifier } from './adapters/failure-classifier'
 import type { AccountProfileManager } from './accounts/account-profile-manager'
 import { assertNoReservedEnvKeys } from './accounts/reserved-env-keys'
 import { projectHistoricalProfileIdentity } from './accounts/runtime-identity'
@@ -124,6 +125,13 @@ export interface AgentManagerDeps {
     AccountProfileManager,
     'resolve' | 'get' | 'adapterFor' | 'reservedEnvKeys'
   >
+  /**
+   * TASK-105 (§17 / ADR-0010): per-agent failure classifiers. Runs of an
+   * agent without a registered classifier keep a NULL
+   * failure_classification_json — classification is best-effort metadata,
+   * never a lifecycle gate.
+   */
+  readonly failureClassifiers?: readonly AgentFailureClassifier[]
   /** Resolves the workspace runtime object for profile env projection (§13). */
   readonly resolveRuntime?: (ref: WorkspaceRuntimeRef) => IpcResult<WorkspaceRuntime>
 }
@@ -210,6 +218,9 @@ interface PendingRun {
 
 const RESUME_OUTPUT_CONTEXT_CHARS = 6_000
 
+/** §17.3: only a bounded tail of the terminal log feeds the classifier. */
+const CLASSIFICATION_TAIL_BYTES = 16 * 1024
+
 export function buildResumeContext(
   run: Pick<AgentRun, 'id' | 'prompt'>,
   recentOutput: string,
@@ -233,6 +244,9 @@ export function buildResumeContext(
 export function createAgentManager(deps: AgentManagerDeps): AgentManager {
   const logger = getLogger('agent')
   const adapters = new Map(deps.adapters.map((adapter) => [adapter.definition.id, adapter]))
+  const failureClassifiers = new Map(
+    (deps.failureClassifiers ?? []).map((classifier) => [classifier.agentId, classifier]),
+  )
   const activeAdapters = new Map<string, CodingAgentAdapter>()
   const pendingRuns = new Map<string, PendingRun>()
   const cancelRequested = new Set<string>()
@@ -382,12 +396,57 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     deps.events.emit('task.updated', { taskId: run.taskId })
   }
 
+  /**
+   * TASK-105 (§17.0 (a) / §17.2): failure classification is post-hoc — it
+   * runs only once the Run is already on its way to `failed` (the process
+   * exited non-zero, or the launch itself failed). Nothing here ever kills a
+   * process or changes a Run/Profile state based on live-stream text.
+   */
+  const failureClassifierFor = (runId: string): AgentFailureClassifier | undefined => {
+    if (failureClassifiers.size === 0) return undefined
+    const run = deps.runs.getById(runId)
+    if (!run.ok) {
+      logger.warn(
+        { runId, error: run.error },
+        'Failed to read the Agent run for failure classification.',
+      )
+      return undefined
+    }
+    if (run.data === null) return undefined
+    return failureClassifiers.get(run.data.agentType)
+  }
+
+  const readClassificationTail = (runId: string): string => {
+    const tail = deps.runLogs.readTerminalTail(runId, CLASSIFICATION_TAIL_BYTES)
+    if (!tail.ok) {
+      logger.warn(
+        { runId, error: tail.error },
+        'Failed to read the output tail for failure classification.',
+      )
+      return ''
+    }
+    return tail.data ?? ''
+  }
+
   const finishFailed = (runId: string, error: PublicAppError): IpcResult<AgentRun> => {
     const finishedAt = now()
+    // TASK-105: a launch-time failure has no exit code; the adapter error
+    // plus whatever output exists still feeds the classifier (§17.2).
+    const classifier = failureClassifierFor(runId)
+    const failureClassification = classifier?.classify({
+      outputTail: [readClassificationTail(runId), error.message]
+        .filter((part) => part.length > 0)
+        .join('\n'),
+    })
     appendEvent(runId, 'agent.failed', { error })
     const updated = deps.runs.update(
       runId,
-      { status: 'failed', finishedAt, error: { ...error } },
+      {
+        status: 'failed',
+        finishedAt,
+        error: { ...error },
+        ...(failureClassification === undefined ? {} : { failureClassification }),
+      },
       finishedAt,
     )
     activeAdapters.delete(runId)
@@ -739,6 +798,14 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
             retryable: true,
           }
         : undefined
+    // TASK-105 (§17.0 (a)): only a FAILED exit is classified — cancelled and
+    // completed runs have no failure reason to record.
+    const classifier = status === 'failed' ? failureClassifierFor(agentRunId) : undefined
+    const failureClassification = classifier?.classify({
+      exitCode,
+      ...(signal === undefined ? {} : { signal }),
+      outputTail: readClassificationTail(agentRunId),
+    })
     appendEvent(agentRunId, `agent.${status}`, {
       exitCode,
       ...(signal === undefined ? {} : { signal }),
@@ -751,6 +818,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         exitCode,
         finishedAt,
         ...(error === undefined ? {} : { error: { ...error } }),
+        ...(failureClassification === undefined ? {} : { failureClassification }),
       },
       finishedAt,
     )

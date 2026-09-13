@@ -136,4 +136,18 @@ describe('Fake Agent scenarios (TASK-083)', () => {
     expect(result.exitCode).toBe(0)
     expect(() => JSON.parse(readFileSync(handoffPath, 'utf8'))).toThrow()
   })
+
+  it('rate-limit prints the quota error with a reset hint and exits non-zero (TASK-105)', async () => {
+    const result = await runScenario('rate-limit')
+    expect(result.exitCode).toBe(1)
+    expect(result.stderr).toContain('rate limit reached')
+    expect(result.stderr).toContain('resets at 2026-10-01T00:00:00.000Z')
+  })
+
+  it('quota-mention only TALKS about quota text and still exits zero (§17.0 negative)', async () => {
+    const result = await runScenario('quota-mention')
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain('quota exceeded')
+    expect(result.stdout).toContain('Fake Agent completed')
+  })
 })

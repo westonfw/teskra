@@ -1,0 +1,8 @@
+{
+  "stdout": ["Fake Agent started"],
+  "stderr": [
+    "Error: rate limit reached for this account",
+    "Your usage limit resets at 2026-10-01T00:00:00.000Z"
+  ],
+  "exitCode": 1
+}

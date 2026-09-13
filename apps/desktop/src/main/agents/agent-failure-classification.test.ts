@@ -1,0 +1,383 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+import Database from 'better-sqlite3'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import type {
+  AgentDetectionResult,
+  AgentRun,
+  IpcResult,
+  WorkbenchEvents,
+  WorkspaceRuntimeRef,
+} from '@teskra/contracts'
+
+import { createConfigService } from '../config/config-service'
+import { migrateDatabase } from '../db/migrations'
+import {
+  createAccountProfileRepository,
+  createAgentEventRepository,
+  createAgentRunRepository,
+  createHandoffRepository,
+  createTaskRepository,
+  createWorkspaceRepository,
+  createWorktreeRepository,
+} from '../db/repositories'
+import { createEventBus, type EventBus } from '../events/event-bus'
+import { createTeskraPaths } from '../paths'
+import type { ProcessStartRequest } from '../process/process-manager'
+import type { WorkspaceRuntime } from '../workspace/runtime'
+import { createFakeAgentAdapter } from './adapters/fake-agent-adapter'
+import { createCodexFailureClassifier } from './adapters/codex-failure-classifier'
+import { createAgentManager, type AgentManager } from './agent-manager'
+import { createAgentRegistry } from './agent-registry'
+import { FAKE_AGENT } from './definitions/fake'
+import { createRunLogStore } from './run-log-store'
+import { createAccountProfileAdapterRegistry } from './accounts/account-profile-adapter'
+import {
+  createAccountProfileManager,
+  type AccountProfileManager,
+} from './accounts/account-profile-manager'
+
+/**
+ * TASK-105 (§17 / §56.3) — Agent Run failure classification end to end:
+ * Fake Agent scenario output → AgentManager → classifier →
+ * agent_runs.failure_classification_json, including the §17.0 negative case
+ * (matching text while the process RUNS must not terminate or reclassify
+ * anything) and the restart read-back.
+ *
+ * Uses the REAL Fake Agent adapter with a fake ProcessManager: the scenario
+ * JSON files drive the emitted output/exit, so the test stays in lockstep
+ * with what tools/fake-agent.js would print.
+ */
+
+const UBUNTU: WorkspaceRuntimeRef = { kind: 'wsl', distro: 'ubuntu-22.04' }
+const SCENARIOS = fileURLToPath(
+  new URL('../../../../../tools/fake-agent-scenarios', import.meta.url),
+)
+const FAKE_SCRIPT = fileURLToPath(new URL('../../../../../tools/fake-agent.js', import.meta.url))
+const FAKE_HOME = '/home/u/.teskra/agent-profiles/fake/work'
+
+interface ScenarioFile {
+  readonly stdout?: readonly string[]
+  readonly stderr?: readonly string[]
+  readonly exitCode?: number
+}
+
+function loadScenario(name: string): ScenarioFile {
+  return JSON.parse(readFileSync(join(SCENARIOS, `${name}.json`), 'utf8')) as ScenarioFile
+}
+
+const databases: Database.Database[] = []
+const directories: string[] = []
+const managers: AgentManager[] = []
+
+afterEach(async () => {
+  for (const manager of managers.splice(0)) await manager.dispose()
+  for (const database of databases.splice(0)) database.close()
+  for (const directory of directories.splice(0))
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+})
+
+function requireOk<T>(result: IpcResult<T>): T {
+  if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+  return result.data
+}
+
+const FAKE_RUNTIME = { ref: UBUNTU } as unknown as WorkspaceRuntime
+
+interface CapturedProcesses {
+  readonly adapter: Pick<
+    import('../process/process-manager').ProcessManager,
+    'start' | 'write' | 'resize' | 'stop'
+  >
+  readonly starts: ProcessStartRequest[]
+}
+
+function fakeProcesses(): CapturedProcesses {
+  const starts: ProcessStartRequest[] = []
+  return {
+    starts,
+    adapter: {
+      start: (request: ProcessStartRequest) => {
+        starts.push(request)
+        return {
+          ok: true as const,
+          data: {
+            id: request.id,
+            pid: 4242,
+            startedAt: '2026-09-12T00:00:01.000Z',
+            runtime: request.runtime,
+          } as import('../process/process-manager').ManagedProcess,
+        }
+      },
+      write: () => ({ ok: true as const, data: undefined }),
+      resize: () => ({ ok: true as const, data: undefined }),
+      stop: () =>
+        Promise.resolve({
+          ok: true as const,
+          data: { exit: { processId: 'agent-run:x', exitCode: 0 }, stage: 'terminate' as const },
+        }),
+    },
+  }
+}
+
+interface Fixture {
+  readonly directory: string
+  readonly databaseFile: string
+  readonly connection: Database.Database
+  readonly events: EventBus<WorkbenchEvents>
+  readonly manager: AgentManager
+  readonly accountProfiles: AccountProfileManager
+  readonly processes: CapturedProcesses
+  readonly profiles: ReturnType<typeof createAccountProfileRepository>
+}
+
+function setup(options: { withClassifiers?: boolean } = {}): Fixture {
+  const directory = mkdtempSync(join(tmpdir(), 'teskra-task105-'))
+  directories.push(directory)
+  const databaseFile = join(directory, 'teskra.db')
+  const paths = createTeskraPaths({ TESKRA_HOME: join(directory, 'data') })
+
+  const connection = new Database(databaseFile)
+  connection.pragma('foreign_keys = ON')
+  requireOk(migrateDatabase(connection))
+  databases.push(connection)
+
+  const workspaces = createWorkspaceRepository(connection)
+  const tasks = createTaskRepository(connection)
+  const runs = createAgentRunRepository(connection)
+  const agentEvents = createAgentEventRepository(connection)
+  const handoffs = createHandoffRepository(connection)
+  const worktrees = createWorktreeRepository(connection)
+  const profiles = createAccountProfileRepository(connection)
+  requireOk(
+    workspaces.create(
+      { id: 'workspace-1', name: 'Demo', runtime: UBUNTU, path: '/repo' },
+      '2026-09-12T00:00:00.000Z',
+    ),
+  )
+
+  const registry = requireOk(createAgentRegistry([FAKE_AGENT]))
+  const events = createEventBus<WorkbenchEvents>()
+  const config = createConfigService({ paths, workspaces })
+  const resolveRuntime = (): IpcResult<WorkspaceRuntime> => ({ ok: true, data: FAKE_RUNTIME })
+
+  // A minimal account-profile adapter for the fake agent: projection only.
+  const profileAdapters = requireOk(
+    createAccountProfileAdapterRegistry([
+      {
+        agentId: FAKE_AGENT.id,
+        reservedEnvKeys: [],
+        buildRuntimeProjection: () => ({ ok: true as const, data: { env: {} } }),
+        detectStatus: () =>
+          Promise.resolve({
+            ok: true as const,
+            data: { status: 'unknown' },
+          }),
+        buildLoginCommand: () => ({
+          ok: true as const,
+          data: { command: 'node', args: [FAKE_SCRIPT, '--scenario', 'success'] },
+        }),
+      },
+    ]),
+  )
+  const accountProfiles = createAccountProfileManager({
+    profiles,
+    runs,
+    registry,
+    paths,
+    config,
+    events,
+    adapters: profileAdapters,
+    createRuntime: resolveRuntime,
+  })
+
+  const processes = fakeProcesses()
+  const detector = {
+    detect: vi.fn(async ({ agentId }: { agentId: string }) => ({
+      ok: true as const,
+      data: {
+        agentId,
+        runtime: UBUNTU,
+        installed: true,
+        executable: agentId,
+        version: 'test',
+        overridden: false,
+        fromCache: false,
+        checkedAt: '2026-09-12T00:00:00.000Z',
+      } satisfies AgentDetectionResult,
+    })),
+    getExecutableOverride: vi.fn(() => ({ ok: true as const, data: null })),
+  }
+  const fakeAdapter = createFakeAgentAdapter({
+    processes: processes.adapter,
+    detector,
+    resolveRuntime,
+    scriptPath: FAKE_SCRIPT,
+  })
+
+  let nextRun = 1
+  const manager = createAgentManager({
+    registry,
+    adapters: [fakeAdapter],
+    runs,
+    agentEvents,
+    handoffs,
+    workspaces,
+    tasks,
+    worktrees,
+    events,
+    paths,
+    runLogs: createRunLogStore({ paths }),
+    createRunId: () => `run-${String(nextRun++)}`,
+    now: () => '2026-09-12T00:00:02.000Z',
+    accountProfiles,
+    resolveRuntime,
+    ...(options.withClassifiers === false
+      ? {}
+      : {
+          // The REAL Codex classifier, keyed to the fake agent (§56.3
+          // "fake-codex-rate-limit": scenario realism without burning quota).
+          failureClassifiers: [{ ...createCodexFailureClassifier(), agentId: FAKE_AGENT.id }],
+        }),
+  })
+  managers.push(manager)
+  return {
+    directory,
+    databaseFile,
+    connection,
+    events,
+    manager,
+    accountProfiles,
+    processes,
+    profiles,
+  }
+}
+
+/** Replay a scenario file through the ProcessManager event stream. */
+function emitScenario(
+  fixture: Fixture,
+  runId: string,
+  scenario: ScenarioFile,
+  options: { exit?: boolean } = {},
+): void {
+  const start = fixture.processes.starts.find((candidate) => candidate.agentRunId === runId)
+  if (start === undefined) throw new Error(`no process started for ${runId}`)
+  for (const line of scenario.stdout ?? []) {
+    fixture.events.emit('process.output', {
+      processId: start.id,
+      agentRunId: runId,
+      data: `${line}\n`,
+    })
+  }
+  for (const line of scenario.stderr ?? []) {
+    fixture.events.emit('process.output', {
+      processId: start.id,
+      agentRunId: runId,
+      data: `${line}\n`,
+    })
+  }
+  if (options.exit !== false) {
+    fixture.events.emit('process.exited', {
+      processId: start.id,
+      agentRunId: runId,
+      exitCode: scenario.exitCode ?? 0,
+    })
+  }
+}
+
+function runOf(fixture: Fixture, runId: string): AgentRun {
+  const run = requireOk(fixture.manager.get(runId))
+  if (run === null) throw new Error(`run ${runId} missing`)
+  return run
+}
+
+async function startWithProfile(fixture: Fixture): Promise<{ runId: string; profileId: string }> {
+  const profile = requireOk(
+    await fixture.accountProfiles.create({
+      agentId: FAKE_AGENT.id,
+      name: 'Fake Work',
+      authType: 'external',
+      runtime: UBUNTU,
+      configHome: FAKE_HOME,
+    }),
+  )
+  const started = requireOk(
+    await fixture.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: FAKE_AGENT.id,
+      accountProfileId: profile.id,
+    }),
+  )
+  return { runId: started.id, profileId: profile.id }
+}
+
+describe('Agent failure classification (TASK-105, §17 / §56.3)', () => {
+  it('fake-codex-rate-limit: Run failed + classification persisted; restart reads kind and resetAt back', async () => {
+    const fixture = setup()
+    const { runId } = await startWithProfile(fixture)
+
+    emitScenario(fixture, runId, loadScenario('rate-limit'))
+
+    const run = runOf(fixture, runId)
+    expect(run.status).toBe('failed')
+    expect(run.exitCode).toBe(1)
+    expect(run.failureClassification).toEqual({
+      kind: 'rate-limited',
+      retryable: true,
+      resetAt: '2026-10-01T00:00:00.000Z',
+      evidence: 'Error: rate limit reached for this account',
+    })
+
+    // §17.2 / §56.3: after a full restart (fresh connection over the same
+    // database file) the classification must still read back.
+    fixture.connection.close()
+    const reopened = new Database(fixture.databaseFile, { readonly: true })
+    try {
+      const runs = createAgentRunRepository(reopened)
+      const restored = requireOk(runs.getById(runId))
+      expect(restored?.status).toBe('failed')
+      expect(restored?.failureClassification).toEqual(run.failureClassification)
+    } finally {
+      reopened.close()
+    }
+  })
+
+  it('negative (§17.0): quota text while RUNNING kills nothing; a clean exit completes without classification and leaves the profile untouched', async () => {
+    const fixture = setup()
+    const { runId, profileId } = await startWithProfile(fixture)
+    const scenario = loadScenario('quota-mention')
+
+    // The process is still running when the matching text appears.
+    emitScenario(fixture, runId, scenario, { exit: false })
+    let run = runOf(fixture, runId)
+    expect(run.status).toBe('running')
+    expect(run.failureClassification).toBeUndefined()
+    expect(requireOk(fixture.profiles.getById(profileId))?.status).toBe('unknown')
+
+    // …and a clean exit afterwards is just a completed Run.
+    fixture.events.emit('process.exited', {
+      processId: fixture.processes.starts.find((start) => start.agentRunId === runId)?.id ?? '',
+      agentRunId: runId,
+      exitCode: scenario.exitCode ?? 0,
+    })
+    run = runOf(fixture, runId)
+    expect(run.status).toBe('completed')
+    expect(run.failureClassification).toBeUndefined()
+    expect(requireOk(fixture.profiles.getById(profileId))?.status).toBe('unknown')
+  })
+
+  it('without a registered classifier the Run still fails, with a NULL classification (best-effort metadata)', async () => {
+    const fixture = setup({ withClassifiers: false })
+    const { runId } = await startWithProfile(fixture)
+
+    emitScenario(fixture, runId, loadScenario('rate-limit'))
+
+    const run = runOf(fixture, runId)
+    expect(run.status).toBe('failed')
+    expect(run.failureClassification).toBeUndefined()
+  })
+})
