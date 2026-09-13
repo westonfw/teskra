@@ -138,7 +138,7 @@ describe('ConfigService.resolve — layer order', () => {
       },
       watchdog: { stalledThresholdMs: 60_000 }, // run override beats all
       environment: { defaultDistro: null },
-      agents: { executableOverrides: {}, defaultAccountProfiles: {} },
+      agents: { executableOverrides: {}, defaultAccountProfiles: {}, defaultExecutionProfiles: {} },
       review: { mediumBlockThreshold: 0 }, // default untouched
       retention: { mergedWorktreeDays: 1, completedRunLogsDays: 30, discardedRunDays: 30 },
     })

@@ -33,6 +33,14 @@ export const ERROR_CODES = [
   'ACCOUNT_PROFILE_DISABLED',
   /** The profile's runtime cannot host the workspace runtime. */
   'ACCOUNT_PROFILE_INCOMPATIBLE',
+  /**
+   * Milestone 24 (§14 / TASK-110): execution-profile resolution failures,
+   * distinct from the account codes so a wrong execution profile id is never
+   * mistaken for a bad account reference.
+   */
+  'EXECUTION_PROFILE_NOT_FOUND',
+  /** The execution profile belongs to a different agent than the Run requests. */
+  'EXECUTION_PROFILE_MISMATCH',
   'UNKNOWN',
 ] as const
 
