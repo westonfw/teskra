@@ -35,6 +35,7 @@ import { RunWorktreePanel } from '../tasks/run-worktree-panel'
 import { AgentPicker } from './agent-picker'
 import { AgentRunTerminal } from './agent-run-terminal'
 import { restartAgentRunRequest, shortDuration } from './agent-watchdog'
+import { RateLimitAlert } from './rate-limit-alert'
 
 type Translate = (key: TranslationKey, params?: TranslationParams) => string
 
@@ -365,6 +366,7 @@ export function AgentCatalogPage() {
             onCancel={() => void cancelRun(selectedRun.id)}
             onRestart={() => void handleRestart(selectedRun)}
             onResume={() => void handleResume(selectedRun)}
+            onOpenRun={(next) => void handleOpenRun(next)}
           />
         )}
       </Drawer>
@@ -462,6 +464,7 @@ interface RunDetailProps {
   readonly onCancel: () => void
   readonly onRestart: () => void
   readonly onResume: () => void
+  readonly onOpenRun: (run: AgentRun) => void
 }
 
 function RunDetail({
@@ -475,6 +478,7 @@ function RunDetail({
   onCancel,
   onRestart,
   onResume,
+  onOpenRun,
 }: RunDetailProps) {
   const { t } = useTranslation()
   const workspace = useWorkspaceStore((state) => state.current)
@@ -504,6 +508,7 @@ function RunDetail({
           }
         />
       )}
+      <RateLimitAlert run={run} onOpenRun={onOpenRun} />
       {watchdog.possiblyStalled && (
         <Alert
           type="warning"

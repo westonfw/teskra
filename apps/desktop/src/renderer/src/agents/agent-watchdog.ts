@@ -6,6 +6,8 @@ export function restartAgentRunRequest(run: AgentRun): StartAgentRunRequest {
     workspaceId: run.workspaceId,
     agentType: run.agentType,
     taskId: run.taskId,
+    accountProfileId: run.accountProfileId,
+    executionProfileId: run.executionProfileId,
     role: run.role,
     model: run.model,
     approvalMode: run.approvalMode,

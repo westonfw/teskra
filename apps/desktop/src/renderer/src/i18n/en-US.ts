@@ -753,6 +753,30 @@ export const enUS = {
 
   'accounts.select.label': 'Account',
   'accounts.select.auto': 'Auto (default account)',
+
+  'rateLimit.title': '⚠ Usage limit reached',
+  'rateLimit.resetAt': 'Reset: {time}',
+  'rateLimit.resetUnknown': 'Reset time unknown',
+  'rateLimit.continue': 'Continue with another account',
+  'rateLimit.retry': 'Retry',
+  'rateLimit.wait': 'Wait',
+  'rateLimit.authRequired.title': 'Sign-in required',
+  'rateLimit.authRequired.description':
+    'This account must sign in again before the run can continue.',
+  'rateLimit.authExpired.title': 'Sign-in expired',
+  'rateLimit.authExpired.description':
+    'This account’s session has expired. Sign in again, then continue the run.',
+  'rateLimit.relogin': 'Sign in again',
+
+  'continueModal.title': 'Continue {task} with',
+  'continueModal.sameAgent': 'Same Agent · {agent}',
+  'continueModal.otherAgents': 'Other Agents',
+  'continueModal.empty': 'No account is currently available for this workspace runtime.',
+  'continueModal.reuseWorktree': 'Reuse current worktree',
+  'continueModal.carryHandoff': 'Carry handoff',
+  'continueModal.confirm': 'Continue',
+  'continueModal.error.sourceNotStopped':
+    'The source process could not be stopped. Wait a moment and try again.',
 } as const
 
 export type TranslationKey = keyof typeof enUS

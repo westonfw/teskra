@@ -27,6 +27,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { AgentPicker } from '../agents/agent-picker'
 import { AgentRunTerminal } from '../agents/agent-run-terminal'
+import { RateLimitAlert } from '../agents/rate-limit-alert'
 import { AccountSelect } from '../accounts/account-select'
 import { useAccountProfileStore } from '../accounts/account-profile-store'
 import { AppErrorAlert } from '../components/app-error-alert'
@@ -486,6 +487,7 @@ export function TaskPage() {
               <Tag>{t(`runs.status.${openRun.status}`)}</Tag>
               <Typography.Text code>{openRun.id}</Typography.Text>
             </Space>
+            <RateLimitAlert run={openRun} onOpenRun={(next) => void handleOpenRun(next)} />
             <Tabs
               className="run-detail-tabs"
               items={[

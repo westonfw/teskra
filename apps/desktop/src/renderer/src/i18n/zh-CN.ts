@@ -709,4 +709,25 @@ export const zhCN: Record<TranslationKey, string> = {
 
   'accounts.select.label': '账号',
   'accounts.select.auto': '自动（默认账号）',
+
+  'rateLimit.title': '⚠ 已达用量上限',
+  'rateLimit.resetAt': '重置时间：{time}',
+  'rateLimit.resetUnknown': '重置时间未知',
+  'rateLimit.continue': '换个账号继续',
+  'rateLimit.retry': '重试',
+  'rateLimit.wait': '等待',
+  'rateLimit.authRequired.title': '需要登录',
+  'rateLimit.authRequired.description': '该账号需要重新登录后才能继续此 Run。',
+  'rateLimit.authExpired.title': '登录已过期',
+  'rateLimit.authExpired.description': '该账号的登录状态已过期，请重新登录后继续此 Run。',
+  'rateLimit.relogin': '重新登录',
+
+  'continueModal.title': '继续 {task}，使用',
+  'continueModal.sameAgent': '同 Agent · {agent}',
+  'continueModal.otherAgents': '其他 Agent',
+  'continueModal.empty': '当前工作区运行时下暂无可用账号。',
+  'continueModal.reuseWorktree': '复用当前 Worktree',
+  'continueModal.carryHandoff': '携带 Handoff 上下文',
+  'continueModal.confirm': '继续',
+  'continueModal.error.sourceNotStopped': '源进程未能停止，请稍后重试。',
 }

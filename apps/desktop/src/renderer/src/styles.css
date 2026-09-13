@@ -1284,3 +1284,31 @@ body {
 .account-verify-fail {
   color: var(--ant-color-error, #ff4d4f);
 }
+
+.rate-limit-evidence {
+  margin-bottom: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.continuation-modal-body,
+.continuation-modal-body > .ant-space-item {
+  width: 100%;
+}
+
+.continuation-candidate-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.continuation-candidate-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.continuation-candidate {
+  margin-inline-start: 0;
+}
