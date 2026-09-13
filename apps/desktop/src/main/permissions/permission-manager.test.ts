@@ -481,7 +481,10 @@ describe('PermissionManager.prepareRunPermission (TASK-065 + TASK-077)', () => {
     const document = JSON.parse(readFileSync(prepared.data.configPath as string, 'utf8')) as {
       permissions: { allow?: string[]; deny?: string[]; defaultMode: string }
     }
-    expect(document.permissions.allow).toEqual(['Bash(npm test)'])
+    expect(document.permissions.allow).toEqual([
+      `Edit(${runDir.replaceAll('\\', '/')}/**)`,
+      'Bash(npm test)',
+    ])
     expect(document.permissions.deny).toEqual(['Bash(rm *)'])
   })
 

@@ -1536,7 +1536,11 @@ describe('AgentManager permission projection (TASK-077)', () => {
     const expectedPath = join(files.data.directory, 'permission-settings.json')
     expect(request?.permissionConfigPath).toBe(expectedPath)
     expect(JSON.parse(readFileSync(expectedPath, 'utf8'))).toEqual({
-      permissions: { defaultMode: 'plan' },
+      permissions: {
+        // 'default', not 'plan': plan mode would also block the handoff write.
+        defaultMode: 'default',
+        allow: [`Edit(${files.data.directory.replaceAll('\\', '/')}/**)`],
+      },
     })
   })
 

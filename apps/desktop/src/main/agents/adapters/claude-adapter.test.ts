@@ -97,7 +97,7 @@ describe('ClaudeAdapter arguments (TASK-027)', () => {
     ])
   })
 
-  it('projects read-only to plan mode and headless to --print', () => {
+  it('projects read-only to default mode (plan would block the handoff) and headless to --print', () => {
     expect(
       buildClaudeArguments(
         { ...request, mode: 'exec', prompt: 'Analyze only', approvalMode: 'read-only' },
@@ -105,7 +105,7 @@ describe('ClaudeAdapter arguments (TASK-027)', () => {
       ),
     ).toEqual([
       '--permission-mode',
-      'plan',
+      'default',
       '--session-id',
       '550e8400-e29b-41d4-a716-446655440001',
       '--print',
@@ -156,11 +156,33 @@ describe('ClaudeAdapter arguments (TASK-027)', () => {
       ),
     ).toEqual([
       '--permission-mode',
-      'plan',
+      'default',
       '--settings',
       '/runs/run-claude-1/permission-settings.json',
       '--session-id',
       '550e8400-e29b-41d4-a716-446655440002',
+    ])
+  })
+
+  it('grants the run directory via --add-dir so the handoff stays writable (ADR-0004)', () => {
+    expect(
+      buildClaudeArguments(
+        {
+          ...request,
+          workspace: { ...request.workspace, runtime: { kind: 'windows' } },
+          approvalMode: 'safe-auto',
+          handoffPath: 'C:\\Users\\u\\.teskra\\runs\\run-claude-1\\handoff.json',
+          artifactDir: 'C:\\Users\\u\\.teskra\\runs\\run-claude-1\\artifacts',
+        },
+        '550e8400-e29b-41d4-a716-446655440003',
+      ),
+    ).toEqual([
+      '--permission-mode',
+      'acceptEdits',
+      '--add-dir',
+      'C:\\Users\\u\\.teskra\\runs\\run-claude-1',
+      '--session-id',
+      '550e8400-e29b-41d4-a716-446655440003',
     ])
   })
 })
@@ -249,15 +271,18 @@ describe('ClaudeAdapter process contract (TASK-027)', () => {
     })
     expect(result.ok).toBe(true)
 
-    // The --settings argument and the handoff/artifact env values all reach
-    // the WSL-side process in /mnt/c form; the host keeps using the originals.
+    // The --settings argument, the run-directory --add-dir grant and the
+    // handoff/artifact env values all reach the WSL-side process in /mnt/c
+    // form; the host keeps using the originals.
     expect(deps.processes.start).toHaveBeenCalledWith(
       expect.objectContaining({
         args: [
           '--permission-mode',
-          'plan',
+          'default',
           '--settings',
           '/mnt/c/Users/u/.teskra/runs/run-claude-1/permission-settings.json',
+          '--add-dir',
+          '/mnt/c/Users/u/.teskra/runs/run-claude-1',
           '--session-id',
           sessionId,
           'Review',

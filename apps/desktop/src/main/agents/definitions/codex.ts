@@ -8,7 +8,13 @@ export const CODEX_AGENT: AgentDefinition = {
     interactive: true,
     headless: true,
     resume: true,
-    readOnlyMode: true,
+    // Deliberately false: Codex's `--sandbox read-only` cannot write ANY file,
+    // so a read-only reviewer could never write its handoff (ADR-0004) —
+    // observed on a real run where both apply_patch and direct writes were
+    // denied, and the CLI offers no writable-root grant under read-only.
+    // ReviewerService therefore isolates Codex reviews with the
+    // disposable-snapshot tier instead (ADR-0002 environmental boundary).
+    readOnlyMode: false,
     modelSelection: true,
   },
   prompt: {

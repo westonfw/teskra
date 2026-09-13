@@ -105,7 +105,9 @@ describe('Codex permission projection (TASK-077)', () => {
 describe('Claude Code permission projection (TASK-077)', () => {
   it('maps every approval mode to a valid Claude --permission-mode', () => {
     const expected = {
-      'read-only': 'plan',
+      // 'default', not 'plan': plan mode blocks every non-read-only tool,
+      // including the handoff write the Run contract requires (ADR-0004).
+      'read-only': 'default',
       manual: 'default',
       'safe-auto': 'acceptEdits',
       'full-auto': 'bypassPermissions',
@@ -143,9 +145,23 @@ describe('Claude Code permission projection (TASK-077)', () => {
     })
   })
 
+  it('grants Edit on the Run directory so the handoff stays writable (ADR-0004)', () => {
+    expect(
+      CLAUDE_PERMISSION_MAPPING.buildConfig?.(
+        profile('read-only'),
+        'C:\\Users\\u\\.teskra\\runs\\r-1',
+      )?.document,
+    ).toEqual({
+      permissions: {
+        defaultMode: 'default',
+        allow: ['Edit(C:/Users/u/.teskra/runs/r-1/**)'],
+      },
+    })
+  })
+
   it('omits empty rule lists from the settings document', () => {
     expect(CLAUDE_PERMISSION_MAPPING.buildConfig?.(profile('read-only'))?.document).toEqual({
-      permissions: { defaultMode: 'plan' },
+      permissions: { defaultMode: 'default' },
     })
   })
 
@@ -160,7 +176,11 @@ describe('Claude Code permission projection (TASK-077)', () => {
     const configPath = prepared.data?.configPath
     expect(configPath).toBe(join(dir, 'permission-settings.json'))
     expect(JSON.parse(readFileSync(configPath as string, 'utf8'))).toEqual({
-      permissions: { defaultMode: 'default', deny: ['Bash(git push *)'] },
+      permissions: {
+        defaultMode: 'default',
+        allow: [`Edit(${dir.replaceAll('\\', '/')}/**)`],
+        deny: ['Bash(git push *)'],
+      },
     })
   })
 })

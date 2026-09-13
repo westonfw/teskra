@@ -7,7 +7,11 @@ import {
   CLAUDE_PERMISSION_MAPPING,
   permissionProfileForApprovalMode,
 } from '../permissions/permission-projection'
-import { createCliAgentAdapter, type CliAgentAdapterOptions } from './cli-agent-adapter'
+import {
+  agentHandoffDir,
+  createCliAgentAdapter,
+  type CliAgentAdapterOptions,
+} from './cli-agent-adapter'
 import type { CodingAgentAdapter } from './coding-agent-adapter'
 
 export interface ClaudeAdapterOptions extends Omit<
@@ -26,8 +30,14 @@ function permissionArguments(request: AgentStartRequest): string[] {
 }
 
 function commonArguments(request: AgentStartRequest): string[] {
+  const handoffDir = agentHandoffDir(request)
   return [
     ...permissionArguments(request),
+    // ADR-0004: the Run directory (handoff + artifacts) sits outside the
+    // workdir; --add-dir makes it a working directory so file edits there are
+    // permitted (acceptEdits auto-accepts only inside working dirs). The
+    // settings file's Edit(<runDir>/**) grant covers the default mode.
+    ...(handoffDir === undefined ? [] : ['--add-dir', handoffDir]),
     ...(request.model === undefined ? [] : ['--model', request.model]),
   ]
 }

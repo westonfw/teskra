@@ -1,12 +1,19 @@
 import type { IPty } from 'node-pty'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { AgentResumeRequest, AgentStartRequest, WorkbenchEvents } from '@teskra/contracts'
+import type {
+  AgentDetectionResult,
+  AgentResumeRequest,
+  AgentStartRequest,
+  IpcResult,
+  WorkbenchEvents,
+} from '@teskra/contracts'
 
 import { createEventBus } from '../../events/event-bus'
 import { createProcessManager, type ProcessManagerDeps } from '../../process/process-manager'
 import { createWorkspaceRuntime } from '../../workspace/runtime'
 import type { AgentDetector } from '../agent-detector'
+import { agentProcessId } from './cli-agent-adapter'
 import { buildCodexArguments, buildCodexResumeArguments, createCodexAdapter } from './codex-adapter'
 
 const baseRequest: AgentStartRequest = {
@@ -107,6 +114,71 @@ describe('CodexAdapter arguments (TASK-026)', () => {
         },
       }),
     ).toEqual(['--sandbox', 'read-only', '--ask-for-approval', 'on-request'])
+  })
+})
+
+describe('CodexAdapter handoff writable root (ADR-0004)', () => {
+  const windowsRequest: AgentStartRequest = {
+    ...baseRequest,
+    workspace: { ...baseRequest.workspace, runtime: { kind: 'windows' } },
+    handoffPath: 'C:\\Users\\u\\.teskra\\runs\\run-codex-1\\handoff.json',
+    artifactDir: 'C:\\Users\\u\\.teskra\\runs\\run-codex-1\\artifacts',
+  }
+  const RUN_DIR = 'C:\\Users\\u\\.teskra\\runs\\run-codex-1'
+
+  it('grants the run directory as a writable root under workspace-write modes', () => {
+    expect(
+      buildCodexArguments({
+        ...windowsRequest,
+        mode: 'exec',
+        prompt: 'Ship it',
+        approvalMode: 'safe-auto',
+      }),
+    ).toEqual([
+      '--sandbox',
+      'workspace-write',
+      '--ask-for-approval',
+      'on-request',
+      '-c',
+      `sandbox_workspace_write.writable_roots=[${JSON.stringify(RUN_DIR)}]`,
+      'exec',
+      'Ship it',
+    ])
+  })
+
+  it('omits the writable root under the read-only sandbox (the CLI has no such mechanism)', () => {
+    expect(buildCodexArguments({ ...windowsRequest, approvalMode: 'read-only' })).toEqual([
+      '--sandbox',
+      'read-only',
+      '--ask-for-approval',
+      'on-request',
+    ])
+  })
+
+  it('omits the writable root when the launch carries no handoff path', () => {
+    expect(buildCodexArguments({ ...baseRequest, approvalMode: 'safe-auto' })).toEqual([
+      '--sandbox',
+      'workspace-write',
+      '--ask-for-approval',
+      'on-request',
+    ])
+  })
+
+  it('grants the runtime-scoped (posix) run directory on WSL launches', () => {
+    expect(
+      buildCodexArguments({
+        ...baseRequest,
+        approvalMode: 'full-auto',
+        handoffPath: '/mnt/c/Users/u/.teskra/runs/run-codex-1/handoff.json',
+      }),
+    ).toEqual([
+      '--sandbox',
+      'workspace-write',
+      '--ask-for-approval',
+      'never',
+      '-c',
+      'sandbox_workspace_write.writable_roots=["/mnt/c/Users/u/.teskra/runs/run-codex-1"]',
+    ])
   })
 })
 
@@ -229,5 +301,126 @@ describe('CodexAdapter process integration (TASK-026)', () => {
     })
     expect(result).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
     expect(processes.start).not.toHaveBeenCalled()
+  })
+})
+
+describe('CliAgentAdapter launch command resolution', () => {
+  const hostNativeRuntime = {
+    ref: baseRequest.workspace.runtime,
+    hostNative: true,
+    resolveCommand: (command: string, args: readonly string[] = [], cwd?: string) => ({
+      executable: command,
+      args,
+      cwd,
+    }),
+    resolveTerminal: () => ({ ok: true as const, data: { command: 'bash', args: [] } }),
+    resolveCwd: (path: string) => path,
+    resolveHostPath: (path: string) => ({ ok: true as const, data: path }),
+    resolveDataRoot: () => '/home/test',
+    validate: () => ({ ok: true as const, data: { kind: 'wsl' as const, hostNative: true } }),
+  }
+
+  function setup(options: {
+    detection: IpcResult<AgentDetectionResult>
+    override?: string | null
+  }) {
+    const processes = {
+      start: vi.fn(() => ({
+        ok: true as const,
+        data: {
+          id: agentProcessId(baseRequest.runId),
+          pid: 4646,
+          workspaceId: baseRequest.workspace.id,
+          agentRunId: baseRequest.runId,
+          startedAt: '2026-09-10T00:00:00.000Z',
+        },
+      })),
+      write: vi.fn(),
+      resize: vi.fn(),
+      stop: vi.fn(),
+    }
+    const adapter = createCodexAdapter({
+      processes,
+      detector: {
+        detect: vi.fn(async () => options.detection),
+        getExecutableOverride: vi.fn(() => ({
+          ok: true as const,
+          data: options.override ?? null,
+        })),
+      },
+      resolveRuntime: () => ({ ok: true as const, data: hostNativeRuntime }),
+    })
+    return { adapter, processes }
+  }
+
+  function detectionResult(
+    overrides: Partial<AgentDetectionResult>,
+  ): IpcResult<AgentDetectionResult> {
+    return {
+      ok: true,
+      data: {
+        agentId: 'codex',
+        runtime: baseRequest.workspace.runtime,
+        installed: true,
+        overridden: false,
+        fromCache: false,
+        checkedAt: '2026-09-10T00:00:00.000Z',
+        ...overrides,
+      },
+    }
+  }
+
+  it('launches with the full executable path resolved by detection', async () => {
+    const { adapter, processes } = setup({
+      detection: detectionResult({
+        executable: 'C:\\Users\\u\\AppData\\Roaming\\npm\\codex.cmd',
+      }),
+    })
+
+    const started = await adapter.start(baseRequest)
+    expect(started.ok).toBe(true)
+    expect(processes.start).toHaveBeenCalledWith(
+      expect.objectContaining({ command: 'C:\\Users\\u\\AppData\\Roaming\\npm\\codex.cmd' }),
+    )
+  })
+
+  it('falls back to the bare command when detection says not installed', async () => {
+    const { adapter, processes } = setup({
+      detection: detectionResult({
+        installed: false,
+        executable: 'C:\\npm\\codex.cmd',
+        error: 'not found',
+      }),
+    })
+
+    const started = await adapter.start(baseRequest)
+    expect(started.ok).toBe(true)
+    expect(processes.start).toHaveBeenCalledWith(expect.objectContaining({ command: 'codex' }))
+  })
+
+  it('falls back to the bare command when detection itself fails', async () => {
+    const { adapter, processes } = setup({
+      detection: {
+        ok: false,
+        error: { code: 'UNKNOWN', message: 'probe failed', retryable: true },
+      },
+    })
+
+    const started = await adapter.start(baseRequest)
+    expect(started.ok).toBe(true)
+    expect(processes.start).toHaveBeenCalledWith(expect.objectContaining({ command: 'codex' }))
+  })
+
+  it('keeps the executable override when detection cannot confirm an install', async () => {
+    const { adapter, processes } = setup({
+      override: '/opt/codex-custom',
+      detection: detectionResult({ installed: false, error: 'not found' }),
+    })
+
+    const started = await adapter.start(baseRequest)
+    expect(started.ok).toBe(true)
+    expect(processes.start).toHaveBeenCalledWith(
+      expect.objectContaining({ command: '/opt/codex-custom' }),
+    )
   })
 })

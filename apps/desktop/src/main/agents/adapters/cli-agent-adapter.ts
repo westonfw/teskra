@@ -9,6 +9,8 @@ import type {
 } from '@teskra/contracts'
 import { isWorkspaceSecretRef } from '@teskra/contracts'
 
+import path from 'node:path'
+
 import { getLogger } from '../../logger'
 import type { ProcessManager, ProcessStartRequest } from '../../process/process-manager'
 import { resolveRuntimePath, type WorkspaceRuntime } from '../../workspace/runtime'
@@ -37,6 +39,22 @@ export interface CliAgentAdapterOptions {
 
 export function agentProcessId(runId: string): string {
   return `agent-run:${runId}`
+}
+
+/**
+ * The Run directory the Agent must be able to WRITE (handoff + artifacts,
+ * ADR-0004): the dirname of the runtime-scoped handoff path. Agent CLIs
+ * sandbox writes to the workdir by default, so without an explicit grant the
+ * agent literally cannot write its handoff — observed on a real Codex run
+ * where both apply_patch and direct writes were denied.
+ */
+export function agentHandoffDir(request: AgentStartRequest): string | undefined {
+  if (request.handoffPath === undefined) {
+    return undefined
+  }
+  return request.workspace.runtime.kind === 'windows'
+    ? path.win32.dirname(request.handoffPath)
+    : path.posix.dirname(request.handoffPath)
 }
 
 /**
@@ -104,10 +122,10 @@ function runtimeScopedPaths(
 
 /** Shared process plumbing; provider-specific argument construction stays in each Adapter. */
 export function createCliAgentAdapter(options: CliAgentAdapterOptions): CodingAgentAdapter {
-  const startProcess = (
+  const startProcess = async (
     request: AgentStartRequest,
     buildLaunch: (request: AgentStartRequest) => CliAgentLaunch,
-  ): IpcResult<AgentProcessHandle> => {
+  ): Promise<IpcResult<AgentProcessHandle>> => {
     const runtime = options.resolveRuntime(request.workspace.runtime)
     if (!runtime.ok) return runtime
     const override = options.detector.getExecutableOverride({
@@ -116,11 +134,25 @@ export function createCliAgentAdapter(options: CliAgentAdapterOptions): CodingAg
     })
     if (!override.ok) return override
 
+    // Launch with the full path detection resolved (e.g. the `codex.cmd`
+    // where.exe line) instead of the bare command name — node-pty's
+    // CreateProcess cannot resolve npm shims from PATH. Detection results
+    // are cached (5 min TTL), so this adds at most one probe per TTL window;
+    // any detection failure falls back to the previous behavior.
+    const detected = await options.detector.detect({
+      agentId: options.definition.id,
+      runtime: request.workspace.runtime,
+    })
+    const command =
+      detected.ok && detected.data.installed && detected.data.executable !== undefined
+        ? detected.data.executable
+        : (override.data ?? options.definition.executable.command)
+
     const scoped = runtimeScopedPaths(runtime.data, request)
     const launch = buildLaunch(scoped)
     const startRequest: ProcessStartRequest = {
       id: agentProcessId(request.runId),
-      command: override.data ?? options.definition.executable.command,
+      command,
       args: [
         ...(options.baseArgs ?? options.definition.executable.defaultArgs ?? []),
         ...launch.args,
@@ -159,7 +191,7 @@ export function createCliAgentAdapter(options: CliAgentAdapterOptions): CodingAg
     },
 
     start(request) {
-      return Promise.resolve(startProcess(request, options.buildLaunch))
+      return startProcess(request, options.buildLaunch)
     },
 
     send(runId, input) {
@@ -179,11 +211,9 @@ export function createCliAgentAdapter(options: CliAgentAdapterOptions): CodingAg
   const buildResumeLaunch = options.buildResumeLaunch
   if (buildResumeLaunch !== undefined) {
     adapter.resume = (request) =>
-      Promise.resolve(
-        startProcess(request, (scoped) => ({
-          ...buildResumeLaunch({ ...scoped, providerSession: request.providerSession }),
-        })),
-      )
+      startProcess(request, (scoped) => ({
+        ...buildResumeLaunch({ ...scoped, providerSession: request.providerSession }),
+      }))
   }
 
   return adapter

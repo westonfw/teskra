@@ -1,11 +1,19 @@
-import type { AgentResumeRequest, AgentStartRequest } from '@teskra/contracts'
+import type {
+  AgentResumeRequest,
+  AgentStartRequest,
+  TeskraPermissionProfile,
+} from '@teskra/contracts'
 
 import { CODEX_AGENT } from '../definitions/codex'
 import {
   CODEX_PERMISSION_MAPPING,
   permissionProfileForApprovalMode,
 } from '../permissions/permission-projection'
-import { createCliAgentAdapter, type CliAgentAdapterOptions } from './cli-agent-adapter'
+import {
+  agentHandoffDir,
+  createCliAgentAdapter,
+  type CliAgentAdapterOptions,
+} from './cli-agent-adapter'
 import type { CodingAgentAdapter } from './coding-agent-adapter'
 
 export type CodexAdapterOptions = Omit<
@@ -14,16 +22,42 @@ export type CodexAdapterOptions = Omit<
 >
 
 /** TASK-077: approval/sandbox args come from the shared policy projection mapping. */
-function permissionArguments(request: AgentStartRequest): string[] {
-  const profile =
+function profileFor(request: AgentStartRequest): TeskraPermissionProfile {
+  return (
     request.permissionProfile ??
     permissionProfileForApprovalMode(CODEX_AGENT.id, request.approvalMode ?? 'safe-auto')
+  )
+}
+
+function permissionArguments(profile: TeskraPermissionProfile): string[] {
   return CODEX_PERMISSION_MAPPING.buildArgs?.(profile) ?? []
 }
 
+/**
+ * ADR-0004: Codex's `workspace-write` sandbox covers only the workdir, so the
+ * Run directory (handoff + artifacts) must be granted as an extra writable
+ * root — otherwise the agent cannot write its handoff at all (observed on a
+ * real run: both apply_patch and direct writes were denied). Verified against
+ * codex CLI 0.154.0: `-c sandbox_workspace_write.writable_roots=[...]` must
+ * precede the `exec` subcommand. The read-only sandbox has no writable-root
+ * mechanism, so reviewers use the snapshot isolation tier instead.
+ */
+function writableRootArguments(
+  profile: TeskraPermissionProfile,
+  request: AgentStartRequest,
+): string[] {
+  const handoffDir = agentHandoffDir(request)
+  if (handoffDir === undefined || profile.approvalMode === 'read-only') {
+    return []
+  }
+  return ['-c', `sandbox_workspace_write.writable_roots=[${JSON.stringify(handoffDir)}]`]
+}
+
 function commonArguments(request: AgentStartRequest): string[] {
+  const profile = profileFor(request)
   return [
-    ...permissionArguments(request),
+    ...permissionArguments(profile),
+    ...writableRootArguments(profile, request),
     ...(request.model === undefined ? [] : ['--model', request.model]),
   ]
 }

@@ -21,10 +21,11 @@ import { createWorktreeManager, type WorktreeManager } from '../git/worktree-man
 import { createTeskraPaths } from '../paths'
 import { createCommandRunner, type CommandRunner } from '../process/command-runner'
 import { createWorkspaceRuntime } from '../workspace/runtime'
-import { buildCodexArguments } from './adapters/codex-adapter'
+import { buildClaudeArguments } from './adapters/claude-adapter'
 import type { CodingAgentAdapter } from './adapters/coding-agent-adapter'
 import { createAgentManager, type AgentManager } from './agent-manager'
 import { createDefaultAgentRegistry } from './agent-registry'
+import { CLAUDE_AGENT } from './definitions/claude'
 import { CODEX_AGENT } from './definitions/codex'
 import { FAKE_AGENT } from './definitions/fake'
 import { createReviewerService, type ReviewerService } from './reviewer-service'
@@ -77,7 +78,11 @@ interface Fixture {
   readonly tasks: ReturnType<typeof createTaskRepository>
   readonly events: EventBus<WorkbenchEvents>
   readonly commands: CommandRunner
-  readonly adapters: { readonly codex: CodingAgentAdapter; readonly fake: CodingAgentAdapter }
+  readonly adapters: {
+    readonly codex: CodingAgentAdapter
+    readonly claude: CodingAgentAdapter
+    readonly fake: CodingAgentAdapter
+  }
   readonly repoDir: string
 }
 
@@ -142,11 +147,12 @@ async function setup(): Promise<Fixture> {
   const registry = createDefaultAgentRegistry(true)
   if (!registry.ok) throw new Error(registry.error.message)
   const codex = mockAdapter(CODEX_AGENT)
+  const claude = mockAdapter(CLAUDE_AGENT)
   const fake = mockAdapter(FAKE_AGENT)
   let tick = 0
   const agents = createAgentManager({
     registry: registry.data,
-    adapters: [codex, fake],
+    adapters: [codex, claude, fake],
     runs,
     agentEvents: createAgentEventRepository(database),
     handoffs: createHandoffRepository(database),
@@ -176,7 +182,7 @@ async function setup(): Promise<Fixture> {
     tasks,
     events,
     commands,
-    adapters: { codex, fake },
+    adapters: { codex, claude, fake },
     repoDir,
   }
 }
@@ -244,7 +250,7 @@ describe('ReviewerService (TASK-052)', () => {
     const result = requireOk(
       await fixture.service.startReview({
         workspaceId: 'workspace-1',
-        agentType: 'codex',
+        agentType: 'claude',
         targetWorktreeId: implement.worktree.id,
         prompt: 'Review the change.',
       }),
@@ -257,7 +263,7 @@ describe('ReviewerService (TASK-052)', () => {
       worktreeId: implement.worktree.id,
       status: 'running',
     })
-    const start = vi.mocked(fixture.adapters.codex.start).mock.calls.at(-1)?.[0]
+    const start = vi.mocked(fixture.adapters.claude.start).mock.calls.at(-1)?.[0]
     expect(start).toMatchObject({
       approvalMode: 'read-only',
       // Reviewers are unattended workers: headless by default so the CLI
@@ -266,13 +272,14 @@ describe('ReviewerService (TASK-052)', () => {
       worktreePath: implement.worktree.path,
       prompt: 'Review the change.',
     })
-    // The real Codex Adapter translates that request into its own read-only
-    // mechanism (ADR-0002 policy projection).
-    expect(start === undefined ? [] : buildCodexArguments(start)).toEqual(
-      expect.arrayContaining(['--sandbox', 'read-only', '--ask-for-approval', 'on-request']),
+    // The real Claude Adapter translates that request into its own read-only
+    // mechanism (ADR-0002 policy projection): 'default' mode — 'plan' would
+    // also block the handoff write the Run contract requires (ADR-0004).
+    expect(start === undefined ? [] : buildClaudeArguments(start, 'review-session')).toEqual(
+      expect.arrayContaining(['--permission-mode', 'default']),
     )
 
-    finishRun(fixture, result.run.id, 'codex')
+    finishRun(fixture, result.run.id, 'claude')
 
     // The review left the implement worktree untouched: clean tree, and the
     // record keeps its state/isolation (snapshot cleanup must not fire).
@@ -292,22 +299,22 @@ describe('ReviewerService (TASK-052)', () => {
     const result = requireOk(
       await fixture.service.startReview({
         workspaceId: 'workspace-1',
-        agentType: 'codex',
+        agentType: 'claude',
         targetRunId: implement.runId,
         prompt: 'Review the change.',
       }),
     )
 
     expect(result.isolation).toBe('worktree-readonly')
-    const start = vi.mocked(fixture.adapters.codex.start).mock.calls.at(-1)?.[0]
+    const start = vi.mocked(fixture.adapters.claude.start).mock.calls.at(-1)?.[0]
     expect(start?.environment).toEqual({ TESKRA_REVIEW_TARGET_RUN_ID: implement.runId })
 
     // Without a resolvable target there is nothing to attribute.
     const untargeted = requireOk(
-      await fixture.service.startReview({ workspaceId: 'workspace-1', agentType: 'codex' }),
+      await fixture.service.startReview({ workspaceId: 'workspace-1', agentType: 'claude' }),
     )
     expect(untargeted.isolation).toBe('shared-readonly')
-    const second = vi.mocked(fixture.adapters.codex.start).mock.calls.at(-1)?.[0]
+    const second = vi.mocked(fixture.adapters.claude.start).mock.calls.at(-1)?.[0]
     expect(second?.environment).toBeUndefined()
   })
 
@@ -317,7 +324,7 @@ describe('ReviewerService (TASK-052)', () => {
     const result = requireOk(
       await fixture.service.startReview({
         workspaceId: 'workspace-1',
-        agentType: 'codex',
+        agentType: 'claude',
         prompt: 'Review the workspace.',
       }),
     )
@@ -325,7 +332,7 @@ describe('ReviewerService (TASK-052)', () => {
     expect(result.isolation).toBe('shared-readonly')
     expect(result.run).toMatchObject({ role: 'reviewer', approvalMode: 'read-only' })
     expect(result.run.worktreeId).toBeUndefined()
-    const start = vi.mocked(fixture.adapters.codex.start).mock.calls.at(-1)?.[0]
+    const start = vi.mocked(fixture.adapters.claude.start).mock.calls.at(-1)?.[0]
     expect(start).toMatchObject({ approvalMode: 'read-only' })
     expect(start?.worktreePath).toBeUndefined()
   })
@@ -341,7 +348,7 @@ describe('ReviewerService (TASK-052)', () => {
     const result = requireOk(
       await fixture.service.startReview({
         workspaceId: 'workspace-1',
-        agentType: 'codex',
+        agentType: 'claude',
         taskId: 'task-1',
       }),
     )
@@ -376,7 +383,7 @@ describe('ReviewerService (TASK-052)', () => {
     const second = requireOk(
       await fixture.service.startReview({
         workspaceId: 'workspace-1',
-        agentType: 'codex',
+        agentType: 'claude',
         taskId: 'task-1',
       }),
     )
@@ -384,6 +391,29 @@ describe('ReviewerService (TASK-052)', () => {
     expect(second.isolation).toBe('worktree-readonly')
     expect(second.run.worktreeId).toBe(implement.worktree.id)
     expect(second.run.worktreeId).not.toBe(snapshotId)
+  })
+
+  it('sandboxes a Codex reviewer in a disposable snapshot (its read-only sandbox cannot write the handoff)', async () => {
+    // Codex's `--sandbox read-only` blocks every write, including the handoff
+    // file the Run contract requires (ADR-0004) — observed on a real run. So
+    // CODEX_AGENT declares readOnlyMode: false and reviews get the
+    // environmental boundary instead (ADR-0002).
+    const fixture = await setup()
+    const implement = await implementRun(fixture, 'impl-1')
+
+    const result = requireOk(
+      await fixture.service.startReview({
+        workspaceId: 'workspace-1',
+        agentType: 'codex',
+        targetRunId: implement.runId,
+        prompt: 'Review the change.',
+      }),
+    )
+
+    expect(result.isolation).toBe('disposable-snapshot')
+    expect(result.run.worktreeId).not.toBe(implement.worktree.id)
+    const start = vi.mocked(fixture.adapters.codex.start).mock.calls.at(-1)?.[0]
+    expect(start?.approvalMode).not.toBe('read-only')
   })
 
   it('sandboxes a reviewer without read-only support in a discarded disposable snapshot', async () => {
