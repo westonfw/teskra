@@ -64,6 +64,13 @@ export type EnvironmentConfig = z.infer<typeof environmentConfigSchema>
 /** TASK-023: machine-specific Agent executable paths, keyed by Agent + runtime target. */
 export const agentsConfigSchema = z.strictObject({
   executableOverrides: z.record(z.string().min(1), z.string().min(1).nullable()),
+  /**
+   * Milestone 24 §15: per-Agent default account profile (agentId →
+   * agent_account_profiles.id); null / absent = no default → legacy CLI
+   * environment (§37.1 / §50.1). Machine-local, lives in the global layer
+   * (the agents group is global-only).
+   */
+  defaultAccountProfiles: z.record(z.string().min(1), z.string().min(1).nullable()),
 })
 export type AgentsConfig = z.infer<typeof agentsConfigSchema>
 
@@ -121,7 +128,7 @@ export const DEFAULT_CONFIG: TeskraConfig = {
   concurrency: { maxGlobalRuns: 4, maxRunsPerWorkspace: 3, maxRunsPerAgent: 2 },
   watchdog: { stalledThresholdMs: 10 * 60 * 1000 },
   environment: { defaultDistro: null },
-  agents: { executableOverrides: {} },
+  agents: { executableOverrides: {}, defaultAccountProfiles: {} },
   review: { mediumBlockThreshold: 0 },
   // plan §135: merged worktrees are collected quickly; run logs and discarded
   // runs get a longer window for post-hoc audit (ADR-0002).

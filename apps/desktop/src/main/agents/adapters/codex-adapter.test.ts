@@ -318,6 +318,11 @@ describe('CliAgentAdapter launch command resolution', () => {
     resolveCwd: (path: string) => path,
     resolveHostPath: (path: string) => ({ ok: true as const, data: path }),
     resolveDataRoot: () => '/home/test',
+    resolveAgentProfilesRoot: () => '/home/test/agent-profiles',
+    resolveAgentProfileHome: (agentId: string, slug: string) => ({
+      ok: true as const,
+      data: `/home/test/agent-profiles/${agentId}/${slug}`,
+    }),
     validate: () => ({ ok: true as const, data: { kind: 'wsl' as const, hostNative: true } }),
   }
 

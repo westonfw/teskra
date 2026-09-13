@@ -9,6 +9,13 @@ import { type InternalAppError, toPublicError } from './errors'
 /** The single directory name every Teskra data root is built from. */
 export const TESKRA_DATA_DIR = '.teskra'
 
+/**
+ * Milestone 24 (design doc §9): per-runtime root for Agent account profile
+ * homes, directly under the data root. The runtime is NOT a path segment —
+ * it selects which data root applies (§9.1).
+ */
+export const AGENT_PROFILES_DIR = 'agent-profiles'
+
 export interface RunPaths {
   readonly directory: string
   readonly manifest: string
@@ -96,6 +103,22 @@ export interface TeskraPaths {
    * repoConfig().
    */
   repoWorkflowsDir(repoRoot: string): string
+  /**
+   * <home>/agent-profiles (Milestone 24 §9.1) — the host-side trusted root
+   * for Agent account profile homes. Resolution only, no I/O.
+   */
+  agentProfilesRoot(): string
+  /**
+   * <home>/agent-profiles/<agentId>/<slug> (§9.1 / §9.2) — PURE resolution,
+   * never touches the filesystem, so the Manager can INSERT first (unique
+   * index blocks concurrent creation) and only then create the directory.
+   */
+  resolveAgentProfileHome(agentId: string, slug: string): IpcResult<string>
+  /**
+   * Creates a previously resolved profile home (§9.2: only AFTER the INSERT
+   * succeeded). The absolute path must come from resolveAgentProfileHome.
+   */
+  createAgentProfileHome(absolutePath: string): IpcResult<void>
 }
 
 function invalidSegmentError(kind: string, value: string): InternalAppError {
@@ -118,7 +141,7 @@ function mkdirFailedError(path: string, cause: unknown): InternalAppError {
 }
 
 /** A path segment must not be empty, "." / "..", or contain separators. */
-function isValidSegment(value: string): boolean {
+export function isValidPathSegment(value: string): boolean {
   return value.length > 0 && value !== '.' && value !== '..' && !/[/\\]/.test(value)
 }
 
@@ -138,7 +161,7 @@ export function createTeskraPaths(env: NodeJS.ProcessEnv = process.env): TeskraP
   }
 
   const runDir = (runId: string): IpcResult<string> => {
-    if (!isValidSegment(runId)) {
+    if (!isValidPathSegment(runId)) {
       return { ok: false, error: toPublicError(invalidSegmentError('runId', runId)) }
     }
     return ensureDir(join(home(), 'runs', runId))
@@ -195,6 +218,22 @@ export function createTeskraPaths(env: NodeJS.ProcessEnv = process.env): TeskraP
     },
     repoWorkflowsDir(repoRoot: string) {
       return join(repoRoot, TESKRA_DATA_DIR, 'workflows')
+    },
+    agentProfilesRoot() {
+      return join(home(), AGENT_PROFILES_DIR)
+    },
+    resolveAgentProfileHome(agentId, slug) {
+      if (!isValidPathSegment(agentId)) {
+        return { ok: false, error: toPublicError(invalidSegmentError('agentId', agentId)) }
+      }
+      if (!isValidPathSegment(slug)) {
+        return { ok: false, error: toPublicError(invalidSegmentError('slug', slug)) }
+      }
+      return { ok: true, data: join(home(), AGENT_PROFILES_DIR, agentId, slug) }
+    },
+    createAgentProfileHome(absolutePath) {
+      const created = ensureDir(absolutePath)
+      return created.ok ? { ok: true, data: undefined } : created
     },
   }
 }

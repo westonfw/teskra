@@ -504,6 +504,12 @@ describe('WorktreeManager (TASK-043)', () => {
         data: `\\\\wsl.localhost\\Ubuntu\\${path.replaceAll('/', '\\')}`,
       }),
       resolveDataRoot: () => '/home/wsluser/.teskra',
+      resolveAgentProfilesRoot: () => '/home/wsluser/.teskra/agent-profiles',
+      resolveAgentProfileHome: (agentId, slug) => ({
+        ok: true,
+        data: `/home/wsluser/.teskra/agent-profiles/${agentId}/${slug}`,
+      }),
+
       validate: () => ({ ok: true, data: { kind: 'wsl', hostNative: false } }),
     }
     const requests: CommandRequest[] = []

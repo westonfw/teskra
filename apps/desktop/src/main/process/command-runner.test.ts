@@ -246,6 +246,12 @@ describe('CommandRunner (TASK-012)', () => {
       resolveCwd: (p) => p,
       resolveHostPath: (p) => ({ ok: true, data: p }),
       resolveDataRoot: () => '/unused',
+      resolveAgentProfilesRoot: () => '/unused/agent-profiles',
+      resolveAgentProfileHome: (agentId, slug) => ({
+        ok: true,
+        data: `/unused/agent-profiles/${agentId}/${slug}`,
+      }),
+
       validate: () => ({ ok: true, data: { kind: 'wsl', hostNative: false } }),
     }
     const result = await runner.run({

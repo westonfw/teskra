@@ -201,6 +201,11 @@ describe('GitManager (TASK-035)', () => {
       resolveCwd: (path) => path,
       resolveHostPath: (path) => ({ ok: true, data: path }),
       resolveDataRoot: () => 'C:\\data',
+      resolveAgentProfilesRoot: () => 'C:\\data/agent-profiles',
+      resolveAgentProfileHome: (agentId, slug) => ({
+        ok: true,
+        data: `C:\\data/agent-profiles/${agentId}/${slug}`,
+      }),
       validate: () => ({ ok: true, data: { kind: 'windows', hostNative: true } }),
     }
     const commands: CommandRunner = {

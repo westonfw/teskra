@@ -1,4 +1,5 @@
 import type { DiffPatchResult } from './git'
+import type { AccountProfileStatus } from './agent-account'
 import type { PublicAppError } from './error'
 import type { ReviewPanelStatus } from './review'
 import type { WorkflowRunStatus, WorkflowStepStatus } from './workflow'
@@ -153,6 +154,31 @@ export interface WorkbenchEvents {
     taskId: string
     status: ReviewPanelStatus
   }
+
+  /** Milestone 24 §42: account profile lifecycle (audit rows are TASK-116's). */
+  'account.created': {
+    profileId: string
+    agentId: string
+  }
+  'account.updated': {
+    profileId: string
+    agentId: string
+  }
+  'account.status_changed': {
+    profileId: string
+    agentId: string
+    status: AccountProfileStatus
+    previousStatus: AccountProfileStatus
+  }
+  'account.login_required': {
+    profileId: string
+    agentId: string
+  }
+  'account.limited': {
+    profileId: string
+    agentId: string
+    limitedUntil?: string
+  }
 }
 
 export type WorkbenchEventName = keyof WorkbenchEvents
@@ -188,6 +214,11 @@ export const WORKBENCH_EVENT_NAMES = [
   'workflow.run_updated',
   'workflow.step_updated',
   'review.panel_updated',
+  'account.created',
+  'account.updated',
+  'account.status_changed',
+  'account.login_required',
+  'account.limited',
 ] as const satisfies readonly WorkbenchEventName[]
 
 export const RENDERER_EVENT_CHANNEL = 'teskra:event' as const

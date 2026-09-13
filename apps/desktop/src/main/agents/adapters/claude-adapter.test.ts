@@ -20,6 +20,11 @@ const runtime: WorkspaceRuntime = {
   resolveCwd: (path) => path,
   resolveHostPath: (path) => ({ ok: true, data: path }),
   resolveDataRoot: () => '/home/test',
+  resolveAgentProfilesRoot: () => '/home/test/agent-profiles',
+  resolveAgentProfileHome: (agentId, slug) => ({
+    ok: true,
+    data: `/home/test/agent-profiles/${agentId}/${slug}`,
+  }),
   validate: () => ({ ok: true, data: { kind: 'wsl', hostNative: true } }),
 }
 

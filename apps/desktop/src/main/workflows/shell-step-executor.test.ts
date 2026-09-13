@@ -55,6 +55,12 @@ const passthroughRuntime: WorkspaceRuntime = {
   resolveDataRoot() {
     return '/tmp'
   },
+  resolveAgentProfilesRoot() {
+    return '/tmp/agent-profiles'
+  },
+  resolveAgentProfileHome(agentId: string, slug: string) {
+    return { ok: true as const, data: `/tmp/agent-profiles/${agentId}/${slug}` }
+  },
   validate(): IpcResult<RuntimeStatus> {
     return { ok: true, data: { kind: 'wsl', hostNative: true } }
   },

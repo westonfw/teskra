@@ -147,4 +147,35 @@ describe('createTeskraPaths (ADR-0003 / TASK-078)', () => {
     // [Windows 验证] separator correctness on win32 is asserted structurally
     // here via node:path; on-device verification is pending.
   })
+
+  it('resolves agent profile homes purely and creates them only on demand (§9.2)', () => {
+    const dir = makeTempHome()
+    const paths = createTeskraPaths({ TESKRA_HOME: dir })
+
+    expect(paths.agentProfilesRoot()).toBe(join(dir, 'agent-profiles'))
+    const resolved = paths.resolveAgentProfileHome('codex', 'work')
+    expect(resolved).toEqual({
+      ok: true,
+      data: join(dir, 'agent-profiles', 'codex', 'work'),
+    })
+    // Pure resolution: nothing was created on disk.
+    expect(existsSync(join(dir, 'agent-profiles'))).toBe(false)
+    if (!resolved.ok) throw new Error('expected resolution to succeed')
+
+    const created = paths.createAgentProfileHome(resolved.data)
+    expect(created).toEqual({ ok: true, data: undefined })
+    expect(existsSync(join(dir, 'agent-profiles', 'codex', 'work'))).toBe(true)
+  })
+
+  it('rejects invalid agentId / slug segments for profile homes', () => {
+    const dir = makeTempHome()
+    const paths = createTeskraPaths({ TESKRA_HOME: dir })
+
+    for (const bad of ['..', '.', '', 'a/b', 'a\\b']) {
+      expect(paths.resolveAgentProfileHome(bad, 'work').ok).toBe(false)
+      expect(paths.resolveAgentProfileHome('codex', bad).ok).toBe(false)
+    }
+    const valid = paths.resolveAgentProfileHome('codex', 'work')
+    expect(valid.ok).toBe(true)
+  })
 })

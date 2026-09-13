@@ -43,6 +43,12 @@ function stubPaths(): TeskraPaths {
     repoPromptsDir: (repoRoot) => `${repoRoot}/.teskra/prompts`,
     repoWorkflowsDir: (repoRoot) => `${repoRoot}/.teskra/workflows`,
     repoMemoryDir: (repoRoot) => `${repoRoot}/.teskra/memory`,
+    agentProfilesRoot: () => `/teskra-home/agent-profiles`,
+    resolveAgentProfileHome: (agentId, slug) => ({
+      ok: true,
+      data: `/teskra-home/agent-profiles/${agentId}/${slug}`,
+    }),
+    createAgentProfileHome: () => ({ ok: true, data: undefined }),
   }
 }
 
@@ -132,7 +138,7 @@ describe('ConfigService.resolve — layer order', () => {
       },
       watchdog: { stalledThresholdMs: 60_000 }, // run override beats all
       environment: { defaultDistro: null },
-      agents: { executableOverrides: {} },
+      agents: { executableOverrides: {}, defaultAccountProfiles: {} },
       review: { mediumBlockThreshold: 0 }, // default untouched
       retention: { mergedWorktreeDays: 1, completedRunLogsDays: 30, discardedRunDays: 30 },
     })

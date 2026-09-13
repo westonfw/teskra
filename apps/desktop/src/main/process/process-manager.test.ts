@@ -92,6 +92,12 @@ const runtime: WorkspaceRuntime = {
   resolveCwd: (path) => path,
   resolveHostPath: (path) => ({ ok: true, data: path }),
   resolveDataRoot: () => '/home/test/.teskra',
+  resolveAgentProfilesRoot: () => '/home/test/.teskra/agent-profiles',
+  resolveAgentProfileHome: (agentId, slug) => ({
+    ok: true,
+    data: `/home/test/.teskra/agent-profiles/${agentId}/${slug}`,
+  }),
+
   validate: () => ({ ok: true, data: { kind: 'wsl', hostNative: false } }),
 }
 
@@ -103,6 +109,12 @@ const windowsRuntime: WorkspaceRuntime = {
   resolveCwd: (path) => path,
   resolveHostPath: (path) => ({ ok: true, data: path }),
   resolveDataRoot: () => 'C:\\Users\\test',
+  resolveAgentProfilesRoot: () => 'C:\\Users\\test/agent-profiles',
+  resolveAgentProfileHome: (agentId, slug) => ({
+    ok: true,
+    data: `C:\\Users\\test/agent-profiles/${agentId}/${slug}`,
+  }),
+
   validate: () => ({ ok: true, data: { kind: 'windows', hostNative: true } }),
 }
 

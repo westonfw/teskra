@@ -42,6 +42,12 @@ function stubPaths(): TeskraPaths {
     repoPromptsDir: (repoRoot) => `${repoRoot}/.teskra/prompts`,
     repoWorkflowsDir: (repoRoot) => `${repoRoot}/.teskra/workflows`,
     repoMemoryDir: (repoRoot) => `${repoRoot}/.teskra/memory`,
+    agentProfilesRoot: () => `${HOST_HOME}/agent-profiles`,
+    resolveAgentProfileHome: (agentId, slug) => ({
+      ok: true,
+      data: `${HOST_HOME}/agent-profiles/${agentId}/${slug}`,
+    }),
+    createAgentProfileHome: () => ({ ok: true, data: undefined }),
   }
 }
 
@@ -162,6 +168,11 @@ describe('WindowsRuntime', () => {
       data: 'C:\\dev\\demo\\file.ts',
     })
     expect(runtime.resolveDataRoot()).toBe(HOST_HOME)
+    expect(runtime.resolveAgentProfilesRoot()).toBe(`${HOST_HOME}/agent-profiles`)
+    expect(runtime.resolveAgentProfileHome('codex', 'work')).toEqual({
+      ok: true,
+      data: `${HOST_HOME}/agent-profiles/codex/work`,
+    })
     expect(runtime.validate()).toEqual({
       ok: true,
       data: { kind: 'windows', hostNative: true },
@@ -328,6 +339,30 @@ describe('WslRuntime (Windows host)', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.data.resolveDataRoot()).toBe('/home/debian/.teskra')
+  })
+
+  it('resolves agent profile homes on the WSL side (Milestone 24 §9.1)', () => {
+    const result = createWorkspaceRuntime(
+      ref,
+      deps({
+        wsl: {
+          available: true,
+          version: '2.4.11.0',
+          homeDirs: { 'Ubuntu-24.04': '/home/u' },
+        },
+      }),
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const runtime = result.data
+    expect(runtime.resolveAgentProfilesRoot()).toBe('/home/u/.teskra/agent-profiles')
+    expect(runtime.resolveAgentProfileHome('codex', 'work')).toEqual({
+      ok: true,
+      data: '/home/u/.teskra/agent-profiles/codex/work',
+    })
+    const invalid = runtime.resolveAgentProfileHome('codex', '../escape')
+    expect(invalid.ok).toBe(false)
+    if (!invalid.ok) expect(invalid.error.code).toBe('VALIDATION_FAILED')
   })
 })
 

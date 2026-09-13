@@ -64,15 +64,15 @@ export interface CreateAccountProfileInput {
   readonly id: string
   readonly agentId: string
   readonly name: string
-  readonly description?: string
+  readonly description?: string | undefined
   readonly authType: AccountAuthType
   readonly runtime: WorkspaceRuntimeRef
-  readonly configHome?: string
-  readonly maxConcurrentRuns?: number
+  readonly configHome?: string | undefined
+  readonly maxConcurrentRuns?: number | undefined
   /** Defaults to 'unknown'. */
-  readonly status?: AccountProfileStatus
+  readonly status?: AccountProfileStatus | undefined
   /** Defaults to true. */
-  readonly enabled?: boolean
+  readonly enabled?: boolean | undefined
 }
 
 /** `null` clears a nullable column; `undefined` leaves it untouched. */

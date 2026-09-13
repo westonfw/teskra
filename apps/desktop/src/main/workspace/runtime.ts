@@ -3,7 +3,13 @@ import { posix, win32 } from 'node:path'
 import type { IpcResult, TerminalShell, WorkspaceRuntimeRef } from '@teskra/contracts'
 
 import { type InternalAppError, toPublicError } from '../errors'
-import { createTeskraPaths, TESKRA_DATA_DIR, type TeskraPaths } from '../paths'
+import {
+  AGENT_PROFILES_DIR,
+  createTeskraPaths,
+  isValidPathSegment,
+  TESKRA_DATA_DIR,
+  type TeskraPaths,
+} from '../paths'
 import { windowsPathToWsl } from './wsl-paths'
 
 /**
@@ -86,6 +92,17 @@ export interface WorkspaceRuntime {
    * workspaces this is the WSL-side `~/.teskra`, not a `C:\…` path.
    */
   resolveDataRoot(): string
+  /**
+   * Milestone 24 §9.1: <dataRoot>/agent-profiles inside THIS runtime — the
+   * per-runtime trusted root for account profile homes. Pure resolution.
+   */
+  resolveAgentProfilesRoot(): string
+  /**
+   * §9.1/§9.2: <agent-profiles root>/<agentId>/<slug> inside THIS runtime.
+   * PURE resolution, no I/O — the AccountProfileManager INSERTs first and
+   * only then creates the directory.
+   */
+  resolveAgentProfileHome(agentId: string, slug: string): IpcResult<string>
   /** Environment validation; returns structured errors, never throws. */
   validate(): IpcResult<RuntimeStatus>
 }
@@ -198,6 +215,26 @@ function unsupportedShell(
   })
 }
 
+function invalidSegment(kind: string, value: string): IpcResult<string> {
+  return fail({
+    code: 'VALIDATION_FAILED',
+    message: `Invalid ${kind}.`,
+    retryable: false,
+    detail: `${kind} must be a single non-empty path segment, got ${JSON.stringify(value)}`,
+  })
+}
+
+/** §9.1 formula for runtimes whose data root is not the host TeskraPaths home. */
+function resolvePosixProfileHome(root: string, agentId: string, slug: string): IpcResult<string> {
+  if (!isValidPathSegment(agentId)) {
+    return invalidSegment('agentId', agentId)
+  }
+  if (!isValidPathSegment(slug)) {
+    return invalidSegment('slug', slug)
+  }
+  return { ok: true, data: posix.join(root, agentId, slug) }
+}
+
 function createWindowsRuntime(
   ref: WorkspaceRuntimeRef,
   hostPlatform: string,
@@ -228,6 +265,12 @@ function createWindowsRuntime(
     },
     resolveDataRoot() {
       return paths.home()
+    },
+    resolveAgentProfilesRoot() {
+      return paths.agentProfilesRoot()
+    },
+    resolveAgentProfileHome(agentId, slug) {
+      return paths.resolveAgentProfileHome(agentId, slug)
     },
     validate() {
       if (!hostNative) {
@@ -269,6 +312,12 @@ function createNativePosixRuntime(ref: WorkspaceRuntimeRef, paths: TeskraPaths):
     resolveDataRoot() {
       return paths.home()
     },
+    resolveAgentProfilesRoot() {
+      return paths.agentProfilesRoot()
+    },
+    resolveAgentProfileHome(agentId, slug) {
+      return paths.resolveAgentProfileHome(agentId, slug)
+    },
     validate() {
       return { ok: true, data: { kind: ref.kind, hostNative: true } }
     },
@@ -304,6 +353,22 @@ function createWslRuntime(
   const distro = ref.distro ?? wsl?.defaultDistro
 
   const distroArgs = (): string[] => (distro === undefined ? [] : ['-d', distro])
+
+  const resolveDataRoot = (): string => {
+    // ADR-0003: WSL worktrees must live inside the WSL filesystem, so the
+    // data root is the WSL-side ~/.teskra — never the host C:\… one. The
+    // home must come from THIS runtime's distro: each distro has its own
+    // filesystem, and the resolved path is used verbatim as a --cd / quoted
+    // bash cwd, where a tilde would never expand.
+    const home = distro === undefined ? undefined : lookupHomeDir(wsl?.homeDirs, distro)
+    if (home !== undefined) {
+      return posix.join(home, TESKRA_DATA_DIR)
+    }
+    // Degraded fallback when detection could not probe the distro home.
+    return posix.join('~', TESKRA_DATA_DIR)
+  }
+
+  const resolveAgentProfilesRoot = (): string => posix.join(resolveDataRoot(), AGENT_PROFILES_DIR)
 
   return {
     ref,
@@ -358,18 +423,10 @@ function createWslRuntime(
       const hostTail = normalized.slice(1).replaceAll('/', '\\')
       return { ok: true, data: `\\\\wsl.localhost\\${distro}\\${hostTail}` }
     },
-    resolveDataRoot() {
-      // ADR-0003: WSL worktrees must live inside the WSL filesystem, so the
-      // data root is the WSL-side ~/.teskra — never the host C:\… one. The
-      // home must come from THIS runtime's distro: each distro has its own
-      // filesystem, and the resolved path is used verbatim as a --cd / quoted
-      // bash cwd, where a tilde would never expand.
-      const home = distro === undefined ? undefined : lookupHomeDir(wsl?.homeDirs, distro)
-      if (home !== undefined) {
-        return posix.join(home, TESKRA_DATA_DIR)
-      }
-      // Degraded fallback when detection could not probe the distro home.
-      return posix.join('~', TESKRA_DATA_DIR)
+    resolveDataRoot: resolveDataRoot,
+    resolveAgentProfilesRoot: resolveAgentProfilesRoot,
+    resolveAgentProfileHome(agentId, slug) {
+      return resolvePosixProfileHome(resolveAgentProfilesRoot(), agentId, slug)
     },
     validate() {
       if (wsl?.available === false) {

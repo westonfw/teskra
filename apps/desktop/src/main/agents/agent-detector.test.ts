@@ -22,7 +22,7 @@ function config() {
       data: {
         config: {
           ...DEFAULT_CONFIG,
-          agents: { executableOverrides: { ...overrides } },
+          agents: { executableOverrides: { ...overrides }, defaultAccountProfiles: {} },
         },
         sources: {},
         warnings: [],

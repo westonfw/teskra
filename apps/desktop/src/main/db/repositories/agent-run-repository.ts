@@ -130,6 +130,8 @@ export interface AgentRunRepository {
   listByTask(taskId: string): IpcResult<AgentRun[]>
   listByWorkflowRun(workflowRunId: string): IpcResult<AgentRun[]>
   listByWorkspace(workspaceId: string): IpcResult<AgentRun[]>
+  /** TASK-097: every run that references an account profile (any status). */
+  listByAccountProfile(accountProfileId: string): IpcResult<AgentRun[]>
   /** Statuses matching the idx_agent_runs_active partial index. */
   listActive(): IpcResult<AgentRun[]>
   delete(id: string): IpcResult<boolean>
@@ -345,6 +347,14 @@ export function createAgentRunRepository(connection: Database.Database): AgentRu
         'listByWorkspace',
         'SELECT * FROM agent_runs WHERE workspace_id = ? ORDER BY created_at DESC',
         workspaceId,
+      )
+    },
+
+    listByAccountProfile(accountProfileId) {
+      return queryRows(
+        'listByAccountProfile',
+        'SELECT * FROM agent_runs WHERE account_profile_id = ? ORDER BY created_at DESC',
+        accountProfileId,
       )
     },
 
