@@ -99,6 +99,7 @@ const bridge: TeskraBridge = {
     start: (request) => invoke(IPC_CHANNELS.agentRunStart, request),
     startReview: (request) => invoke(IPC_CHANNELS.agentRunReviewStart, request),
     resume: (request) => invoke(IPC_CHANNELS.agentRunResume, request),
+    continueWithProfile: (request) => invoke(IPC_CHANNELS.agentRunContinueWithProfile, request),
     send: (request) => invoke(IPC_CHANNELS.agentRunSend, request),
     resize: (request) => invoke(IPC_CHANNELS.agentRunResize, request),
     cancel: (request) => invoke(IPC_CHANNELS.agentRunCancel, request),

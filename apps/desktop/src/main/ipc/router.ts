@@ -271,6 +271,10 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.agent.resume(request)),
   )
   register(
+    ipcChannelDefinitions.agentRunContinueWithProfile,
+    withRuntime((runtime, request) => runtime.agent.continueWithProfile(request)),
+  )
+  register(
     ipcChannelDefinitions.accountList,
     withRuntime((runtime, request) => runtime.account.list(request)),
   )

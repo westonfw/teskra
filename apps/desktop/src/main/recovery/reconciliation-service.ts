@@ -18,6 +18,7 @@ import { getLogger } from '../logger'
 import type { CommandRunner } from '../process/command-runner'
 import type { HostProcessControl } from '../process/host-processes'
 import type { ProcessManager } from '../process/process-manager'
+import { terminateSurvivorProcess } from '../process/survivor'
 import type { RunLogStore } from '../agents/run-log-store'
 import type { WorkspaceRuntime } from '../workspace/runtime'
 
@@ -196,75 +197,25 @@ export function createReconciliationService(
 
       /**
        * P0-2: the in-process registry is empty after a restart, so probe the
-       * recorded pid before declaring a run's process dead. A live survivor
+       * recorded pid before declaring a run's process dead. The survivor
+       * judgment (identity token verification, probe-only legacy fallback,
+       * verified terminate) lives in ONE place — process/survivor.ts —
+       * shared with cross-profile continuation (§19.5). A live survivor
        * cannot be re-adopted (its PTY handle died with the previous
        * instance), so it is terminated — resuming onto a worktree a live
-       * Agent still writes to would double-write.
-       *
-       * A pid alone does not name a process: after a reboot or pid wraparound
-       * the recorded number belongs to an unrelated process, and killing it
-       * (on Windows `taskkill /T /F` takes the whole tree) would be an
-       * arbitrary kill. Runs that carry a pid identity token (migration 011)
-       * are verified against a fresh start-time read; a mismatch — or a gone
-       * pid — means the recorded process is dead, without touching whatever
-       * owns the pid now. A FAILED identity read (PowerShell policy-blocked,
-       * startup ps timeout) is neither dead nor verified: the run is left
-       * active ('alive') for manual handling — interrupting it would invite
-       * the resume double-write, and probing-then-killing would reopen the
-       * arbitrary-kill path the token exists to close. The exit for such a
-       * run is an explicit user cancel(): AgentManager settles a non-terminal
-       * run without an adapter binding straight to 'cancelled' (terminal,
-       * non-resumable), releasing its concurrency slot. Legacy rows without
-       * a token keep the probe-only behavior.
+       * Agent still writes to would double-write. A run whose survivor is
+       * reported 'alive' (identity unreadable, or termination failed) keeps
+       * its active status; the exit for such a run is an explicit user
+       * cancel(): AgentManager settles a non-terminal run without an
+       * adapter binding straight to 'cancelled' (terminal, non-resumable),
+       * releasing its concurrency slot.
        */
       const terminateSurvivor = async (run: AgentRun): Promise<'none' | 'terminated' | 'alive'> => {
-        if (deps.hostProcesses === undefined || run.pid === undefined) return 'none'
-        const hostProcesses = deps.hostProcesses
-        const pid = run.pid
-        if (run.pidIdentity !== undefined) {
-          const identity = await hostProcesses.identity(pid)
-          if (!identity.ok) {
-            logger.warn(
-              { runId: run.id, pid, error: identity.error },
-              'Host pid identity read failed; the run is left active rather than risking an arbitrary kill.',
-            )
-            survivingRunIds.push(run.id)
-            return 'alive'
-          }
-          if (identity.data === null) return 'none'
-          if (identity.data !== run.pidIdentity) {
-            logger.warn(
-              { runId: run.id, pid },
-              'The recorded pid now belongs to an unrelated process; treating the Agent process as dead.',
-            )
-            return 'none'
-          }
-        } else {
-          // Legacy rows (pre-011): probe-only liveness, as before tokens.
-          const probe = await hostProcesses.probe(pid)
-          if (!probe.ok) {
-            logger.warn(
-              { runId: run.id, pid, error: probe.error },
-              'Host pid probe failed; treating the process as dead.',
-            )
-            return 'none'
-          }
-          if (!probe.data) return 'none'
+        const outcome = await terminateSurvivorProcess(deps.hostProcesses, run)
+        if (outcome === 'alive') {
+          survivingRunIds.push(run.id)
         }
-        const terminated = await hostProcesses.terminate(pid)
-        if (terminated.ok) {
-          logger.warn(
-            { runId: run.id, pid: run.pid },
-            'Terminated a surviving Agent process from a previous instance.',
-          )
-          return 'terminated'
-        }
-        logger.error(
-          { runId: run.id, pid: run.pid, error: terminated.error },
-          "A previous instance's Agent process is still alive and could not be terminated; the run is left active.",
-        )
-        survivingRunIds.push(run.id)
-        return 'alive'
+        return outcome
       }
 
       for (const run of active.data) {

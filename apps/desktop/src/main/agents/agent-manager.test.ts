@@ -111,7 +111,7 @@ function setup(
   concurrency?: ConcurrencyConfig,
   failAgentEventWrites = false,
   credentials?: CredentialStore,
-  hostProcesses?: Pick<HostProcessControl, 'identity' | 'terminate'>,
+  hostProcesses?: Pick<HostProcessControl, 'probe' | 'identity' | 'terminate'>,
 ): TestContext {
   const connection = new Database(':memory:')
   connection.pragma('foreign_keys = ON')
@@ -262,6 +262,7 @@ describe('AgentManager (TASK-028)', () => {
     const context = setup(undefined, false, undefined, {
       identity,
       terminate: vi.fn(async () => ({ ok: true as const, data: undefined })),
+      probe: vi.fn(async () => ({ ok: true as const, data: false })),
     })
     const started = await context.manager.start({
       workspaceId: 'workspace-1',
@@ -288,6 +289,7 @@ describe('AgentManager (TASK-028)', () => {
     const context = setup(undefined, false, undefined, {
       identity,
       terminate: vi.fn(async () => ({ ok: true as const, data: undefined })),
+      probe: vi.fn(async () => ({ ok: true as const, data: false })),
     })
     const started = await context.manager.start({
       workspaceId: 'workspace-1',
@@ -313,6 +315,7 @@ describe('AgentManager (TASK-028)', () => {
     const context = setup(undefined, false, undefined, {
       identity,
       terminate: vi.fn(async () => ({ ok: true as const, data: undefined })),
+      probe: vi.fn(async () => ({ ok: true as const, data: false })),
     })
     const started = context.manager.start({
       workspaceId: 'workspace-1',
@@ -400,7 +403,11 @@ describe('AgentManager (TASK-028)', () => {
         }),
     )
     const terminate = vi.fn(async (): Promise<IpcResult<void>> => ({ ok: true, data: undefined }))
-    const context = setup(undefined, false, undefined, { identity, terminate })
+    const context = setup(undefined, false, undefined, {
+      identity,
+      terminate,
+      probe: vi.fn(async () => ({ ok: true as const, data: false })),
+    })
     const runDir = context.paths.runDir('run-1')
     if (!runDir.ok) throw new Error(runDir.error.message)
     const created = context.runs.create({
@@ -765,7 +772,11 @@ describe('AgentManager (TASK-028)', () => {
       data: 'start-token-A',
     }))
     const terminate = vi.fn(async (): Promise<IpcResult<void>> => ({ ok: true, data: undefined }))
-    const context = setup(undefined, false, undefined, { identity, terminate })
+    const context = setup(undefined, false, undefined, {
+      identity,
+      terminate,
+      probe: vi.fn(async () => ({ ok: true as const, data: false })),
+    })
     const runDir = context.paths.runDir('run-1')
     if (!runDir.ok) throw new Error(runDir.error.message)
     const created = context.runs.create({
@@ -798,7 +809,11 @@ describe('AgentManager (TASK-028)', () => {
       vi.fn(async (): Promise<IpcResult<string | null>> => ({ ok: true, data: 'other-token' })),
     ]) {
       const terminate = vi.fn(async (): Promise<IpcResult<void>> => ({ ok: true, data: undefined }))
-      const context = setup(undefined, false, undefined, { identity, terminate })
+      const context = setup(undefined, false, undefined, {
+        identity,
+        terminate,
+        probe: vi.fn(async () => ({ ok: true as const, data: false })),
+      })
       const runDir = context.paths.runDir('run-1')
       if (!runDir.ok) throw new Error(runDir.error.message)
       const created = context.runs.create({
@@ -873,7 +888,11 @@ describe('AgentManager (TASK-028)', () => {
         }),
     )
     const terminate = vi.fn(async (): Promise<IpcResult<void>> => ({ ok: true, data: undefined }))
-    const context = setup(undefined, false, undefined, { identity, terminate })
+    const context = setup(undefined, false, undefined, {
+      identity,
+      terminate,
+      probe: vi.fn(async () => ({ ok: true as const, data: false })),
+    })
     const runDir = context.paths.runDir('run-1')
     if (!runDir.ok) throw new Error(runDir.error.message)
     const created = context.runs.create({

@@ -22,6 +22,7 @@ import type {
   BuildContextRequest,
   BuiltContext,
   CancelAccountLoginRequest,
+  ContinueAgentRunRequest,
   CreateAccountProfileRequest,
   CreateCriteriaSetRequest,
   CreateTaskRequest,
@@ -349,6 +350,8 @@ export interface AgentCatalogPort {
   start(request: StartAgentRunRequest): Promise<IpcResult<AgentRun>>
   startReview(request: StartReviewRunRequest): Promise<IpcResult<ReviewRunStartResult>>
   resume(request: ResumeAgentRunRequest): Promise<IpcResult<AgentRun>>
+  /** TASK-107 (§19/§28): continue a run under a different account identity. */
+  continueWithProfile(request: ContinueAgentRunRequest): Promise<IpcResult<AgentRun>>
   send(request: SendAgentRunInputRequest): Promise<IpcResult<void>>
   resize(request: ResizeAgentRunRequest): IpcResult<void>
   cancel(request: AgentRunIdRequest): Promise<IpcResult<AgentRun>>

@@ -62,6 +62,7 @@ import {
   type StartAgentRunRequest,
   type StartReviewRunRequest,
 } from './agent'
+import { continueAgentRunRequestSchema, type ContinueAgentRunRequest } from './agent-continuation'
 import {
   artifactContentSchema,
   artifactIdRequestSchema,
@@ -417,6 +418,7 @@ export const IPC_CHANNELS = {
   agentRunList: 'teskra:agent-run:list',
   agentRunOutput: 'teskra:agent-run:output',
   agentRunResume: 'teskra:agent-run:resume',
+  agentRunContinueWithProfile: 'teskra:agent:continue-with-profile',
   accountList: 'teskra:account:list',
   accountGet: 'teskra:account:get',
   accountCreate: 'teskra:account:create',
@@ -782,6 +784,13 @@ export const agentRunOutputChannel = channel(
 export const agentRunResumeChannel = channel(
   IPC_CHANNELS.agentRunResume,
   resumeAgentRunRequestSchema,
+  agentRunSchema,
+)
+// TASK-107 (Milestone 24 §19/§28): cross-profile continuation — a NEW run on
+// the same task + worktree under a different account identity.
+export const agentRunContinueWithProfileChannel = channel(
+  IPC_CHANNELS.agentRunContinueWithProfile,
+  continueAgentRunRequestSchema,
   agentRunSchema,
 )
 // TASK-102 (Milestone 24 §28): account profile CRUD + default + status detect.
@@ -1224,6 +1233,7 @@ export const ipcChannelDefinitions = {
   agentRunList: agentRunListChannel,
   agentRunOutput: agentRunOutputChannel,
   agentRunResume: agentRunResumeChannel,
+  agentRunContinueWithProfile: agentRunContinueWithProfileChannel,
   accountList: accountListChannel,
   accountGet: accountGetChannel,
   accountCreate: accountCreateChannel,
@@ -1392,6 +1402,7 @@ export interface TeskraBridge {
     list(request?: ListAgentRunsRequest): Promise<IpcResult<AgentRun[]>>
     getOutput(request: AgentRunOutputRequest): Promise<IpcResult<string>>
     resume(request: ResumeAgentRunRequest): Promise<IpcResult<AgentRun>>
+    continueWithProfile(request: ContinueAgentRunRequest): Promise<IpcResult<AgentRun>>
   }
   /**
    * TASK-102 (Milestone 24 §28/§24.2): account profile CRUD + default + detect,

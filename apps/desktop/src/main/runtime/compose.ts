@@ -479,6 +479,9 @@ export async function composeTeskraRuntime(
     runLogs,
     permissions: permissionManager,
     hostProcesses,
+    processes: processManager,
+    artifacts: repositories.artifacts,
+    criteria: repositories.criteria,
     credentials,
     accountProfiles: accountProfileManager,
     // TASK-105 (§17): post-hoc failure classification for Codex / Claude runs.
@@ -905,6 +908,7 @@ export async function composeTeskraRuntime(
       start: (request) => agentManager.start(request),
       startReview: (request) => reviewerService.startReview(request),
       resume: (request) => resumeService.resume(request),
+      continueWithProfile: (request) => agentManager.continueWithProfile(request),
       send: (request) => agentManager.send(request),
       resize: (request) => agentManager.resize(request),
       cancel: ({ runId }) => agentManager.cancel(runId),

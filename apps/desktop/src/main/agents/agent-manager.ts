@@ -5,13 +5,16 @@ import {
   DEFAULT_CONFIG,
   isWorkspaceSecretRef,
   providerSessionRefSchema,
+  type AgentContinuationReason,
   type AgentDefinition,
+  type AgentFailureClassification,
   type AgentStartRequest,
   type AgentAccountProfile,
   type AgentResumeProfileContext,
   type AgentRun,
   type AgentRunProfileSnapshot,
   type ConcurrencyConfig,
+  type ContinueAgentRunRequest,
   type IpcResult,
   type ListAgentRunsRequest,
   type ProviderSessionRef,
@@ -32,6 +35,8 @@ import type {
   AppendAccountEventInput,
 } from '../db/repositories/account-event-repository'
 import type { AgentRunRepository } from '../db/repositories/agent-run-repository'
+import type { ArtifactRepository } from '../db/repositories/artifact-repository'
+import type { CriteriaRepository } from '../db/repositories/criteria-repository'
 import type { HandoffRepository } from '../db/repositories/handoff-repository'
 import type { TaskRepository } from '../db/repositories/task-repository'
 import type { WorkspaceRepository } from '../db/repositories/workspace-repository'
@@ -41,11 +46,14 @@ import { type InternalAppError, toPublicError } from '../errors'
 import { getLogger } from '../logger'
 import type { TeskraPaths } from '../paths'
 import type { HostProcessControl } from '../process/host-processes'
+import type { ProcessManager } from '../process/process-manager'
+import { terminateSurvivorProcess } from '../process/survivor'
 import { buildHandoffContext } from '@teskra/shared'
 import { resolveEnvReferences, type CredentialStore } from '../security/credential-store'
 import type { AgentRegistry } from './agent-registry'
 import { createAgentOutputBatcher } from './agent-output-batcher'
 import { createHandoffCollector, type HandoffCollector } from './handoff-collector'
+import { buildAgentContinuation, buildContinuationPrompt } from './continuation-builder'
 import type { AgentPermissionPreparer } from '../permissions/permission-manager'
 import {
   prepareAgentPermission,
@@ -73,6 +81,27 @@ export interface AgentManager {
    * the option is set (P1-6 — long runs no longer require a full read).
    */
   getOutput(runId: string, options?: { tailBytes?: number }): IpcResult<string>
+  /**
+   * TASK-107 (§19.3/§19.4/§19.5): the single transition entry for flow B —
+   * registers "terminal intent: failed + this classification" BEFORE stopping
+   * the process, so the process.exited branch never rewrites it as a plain
+   * cancel. Idempotent: an already failed+classified run returns success
+   * without touching the process; other terminal states are an error (the
+   * caller must use flow A). A stop timeout or an unkillable survivor aborts
+   * with an error and leaves the run untouched.
+   */
+  failAndStop(
+    runId: string,
+    classification: AgentFailureClassification,
+  ): Promise<IpcResult<AgentRun>>
+  /**
+   * TASK-107 (§19.2/§19.3): cross-profile continuation. Terminal source run →
+   * flow A (no state change on the source); live source run → flow B
+   * (failAndStop first). The target run is a NEW run on the same task and the
+   * same worktree under the requested account identity, prompted with the
+   * continuation context (§20).
+   */
+  continueWithProfile(request: ContinueAgentRunRequest): Promise<IpcResult<AgentRun>>
   /** Stops every active run (P0-2 shutdown), then detaches from the EventBus. */
   dispose(): Promise<void>
 }
@@ -125,7 +154,18 @@ export interface AgentManagerDeps {
    * identity-verified stop of a previous-instance process before the run is
    * settled to its terminal state.
    */
-  readonly hostProcesses?: Pick<HostProcessControl, 'identity' | 'terminate'>
+  readonly hostProcesses?: Pick<HostProcessControl, 'probe' | 'identity' | 'terminate'>
+  /**
+   * TASK-107 (§19.3 flow B): failAndStop stops the source process through
+   * the PTY authority's interrupt → terminate → kill ladder. Without it,
+   * failAndStop on a run with a live process is rejected rather than
+   * falling back to a blind pid kill.
+   */
+  readonly processes?: Pick<ProcessManager, 'stop'>
+  /** TASK-107 (§20): artifact ids folded into the continuation context. */
+  readonly artifacts?: Pick<ArtifactRepository, 'listByRun'>
+  /** TASK-107 (§20): acceptance criteria folded into the continuation context. */
+  readonly criteria?: Pick<CriteriaRepository, 'getSetById' | 'listCriteria'>
   /**
    * Milestone 24 (TASK-100): account-profile resolution for the Run lifecycle.
    * start() runs the §37 selector (explicit → default → legacy), resume()
@@ -173,6 +213,15 @@ function isTerminal(run: AgentRun): boolean {
   return ['completed', 'failed', 'cancelled', 'interrupted'].includes(run.status)
 }
 
+/** TASK-107 (§19.3): the error recorded on a fail-and-stopped run. */
+function failStopError(classification: AgentFailureClassification): PublicAppError {
+  return {
+    code: 'UNKNOWN',
+    message: `The Agent run was stopped to continue with another account (${classification.kind}).`,
+    retryable: true,
+  }
+}
+
 function runningForLimits(runs: readonly AgentRun[]): AgentRun[] {
   return runs.filter((run) => run.status !== 'queued')
 }
@@ -190,6 +239,24 @@ function unisolatedWriteConflict(
       run.worktreeId === undefined &&
       run.approvalMode !== 'read-only',
   )
+}
+
+/**
+ * TASK-107 (§19.3 step 3) — the worktree reservation invariant
+ * `unisolatedWriteConflict()` cannot express: one worktree hosts at most ONE
+ * non-terminal run. It is what makes continuation flow A/B safe — after the
+ * source run is confirmed terminal, no other live run may be writing the
+ * worktree the target run is about to reuse. `runs` is the non-terminal set
+ * (listActive), so a terminal source run never conflicts with its own
+ * continuation.
+ */
+function worktreeRunConflict(
+  runs: readonly AgentRun[],
+  worktreeId: string | undefined,
+  excludeRunId?: string,
+): AgentRun | undefined {
+  if (worktreeId === undefined) return undefined
+  return runs.find((run) => run.worktreeId === worktreeId && run.id !== excludeRunId)
 }
 
 /**
@@ -261,6 +328,12 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
   const activeAdapters = new Map<string, CodingAgentAdapter>()
   const pendingRuns = new Map<string, PendingRun>()
   const cancelRequested = new Set<string>()
+  /**
+   * TASK-107 (§19.3): run ids whose terminal intent is `failed` + this
+   * classification, registered BEFORE the process is stopped so the
+   * process.exited branch never rewrites the run as a plain cancel.
+   */
+  const failStopIntents = new Map<string, AgentFailureClassification>()
   /**
    * In-flight adapterless cancels, claimed BEFORE the first await: a second
    * cancel() of the same run awaits the same execution instead of running
@@ -508,6 +581,40 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     return { ok: true, data: updated.data }
   }
 
+  /**
+   * TASK-107 (§19.3): settles a fail-and-stop run whose process is confirmed
+   * dead without a process.exited event ever reaching this instance (queued
+   * run, or a previous instance's process). Same durability/notification
+   * duties as the process.exited path, with the pre-registered
+   * classification instead of a fresh one.
+   */
+  const settleFailedStop = (
+    run: AgentRun,
+    classification: AgentFailureClassification,
+  ): IpcResult<AgentRun> => {
+    const finishedAt = now()
+    const error = failStopError(classification)
+    appendEvent(run.id, 'agent.failed', { error, classification })
+    const updated = deps.runs.update(
+      run.id,
+      { status: 'failed', finishedAt, error: { ...error }, failureClassification: classification },
+      finishedAt,
+    )
+    activeAdapters.delete(run.id)
+    cancelRequested.delete(run.id)
+    failStopIntents.delete(run.id)
+    if (updated.ok && updated.data !== null) persistRunManifest(updated.data)
+    closeRunLogs(run.id)
+    collectHandoff(run.id)
+    deps.events.emit('agent.failed', { runId: run.id, error })
+    if (!updated.ok) return updated
+    if (updated.data === null) return missing('Agent run', run.id)
+    auditRateLimited(updated.data)
+    synchronizeTaskStatus(updated.data)
+    scheduleQueueAdvance()
+    return { ok: true, data: updated.data }
+  }
+
   const launch = async (pending: PendingRun): Promise<IpcResult<AgentRun>> => {
     const { adapter, request } = pending
     const current = deps.runs.getById(request.runId)
@@ -641,6 +748,9 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
             if (
               unisolatedWriteConflict(active, run.workspaceId, run.worktreeId, run.approvalMode) ===
                 undefined &&
+              // TASK-107 (§19.3): one worktree hosts at most one non-terminal
+              // run; the queued candidate stays queued while it is occupied.
+              worktreeRunConflict(active, run.worktreeId, run.id) === undefined &&
               hasCapacity(active, run, policy.data, profileLimit.data)
             ) {
               selected = { run, pending }
@@ -836,25 +946,44 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
   const stopExited = deps.events.subscribe('process.exited', ({ agentRunId, exitCode, signal }) => {
     if (agentRunId === undefined || !activeAdapters.has(agentRunId)) return
     outputBatcher.flush(agentRunId)
-    const cancelled = cancelRequested.delete(agentRunId)
-    const status = cancelled ? 'cancelled' : exitCode === 0 ? 'completed' : 'failed'
+    // TASK-107 (§19.3): a registered fail-and-stop intent wins over both the
+    // plain-cancel and the exit-code branches — the run lands on failed with
+    // the pre-registered classification, never on cancelled.
+    const failStop = failStopIntents.get(agentRunId)
+    failStopIntents.delete(agentRunId)
+    const cancelIntent = cancelRequested.delete(agentRunId)
+    const cancelled = failStop === undefined && cancelIntent
+    const status =
+      failStop !== undefined
+        ? 'failed'
+        : cancelled
+          ? 'cancelled'
+          : exitCode === 0
+            ? 'completed'
+            : 'failed'
     const finishedAt = now()
     const error: PublicAppError | undefined =
-      status === 'failed'
-        ? {
-            code: 'UNKNOWN',
-            message: `Agent process exited with code ${String(exitCode)}.`,
-            retryable: true,
-          }
-        : undefined
+      failStop !== undefined
+        ? failStopError(failStop)
+        : status === 'failed'
+          ? {
+              code: 'UNKNOWN',
+              message: `Agent process exited with code ${String(exitCode)}.`,
+              retryable: true,
+            }
+          : undefined
     // TASK-105 (§17.0 (a)): only a FAILED exit is classified — cancelled and
-    // completed runs have no failure reason to record.
-    const classifier = status === 'failed' ? failureClassifierFor(agentRunId) : undefined
-    const failureClassification = classifier?.classify({
-      exitCode,
-      ...(signal === undefined ? {} : { signal }),
-      outputTail: readClassificationTail(agentRunId),
-    })
+    // completed runs have no failure reason to record. A fail-and-stop run
+    // keeps its pre-registered classification; no re-classification.
+    const classifier =
+      status === 'failed' && failStop === undefined ? failureClassifierFor(agentRunId) : undefined
+    const failureClassification =
+      failStop ??
+      classifier?.classify({
+        exitCode,
+        ...(signal === undefined ? {} : { signal }),
+        outputTail: readClassificationTail(agentRunId),
+      })
     appendEvent(agentRunId, `agent.${status}`, {
       exitCode,
       ...(signal === undefined ? {} : { signal }),
@@ -1079,6 +1208,17 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           params: { runId: conflict.id },
           retryable: true,
           detail: `workspace=${workspace.data.id} conflicting run=${conflict.id}`,
+        })
+      }
+      // TASK-107 (§19.3): one worktree hosts at most one non-terminal run.
+      const worktreeConflict = worktreeRunConflict(active, request.worktreeId)
+      if (worktreeConflict !== undefined) {
+        return fail({
+          code: 'VALIDATION_FAILED',
+          message: `Agent run "${worktreeConflict.id}" is still active on this worktree. Stop it before starting another run here.`,
+          params: { runId: worktreeConflict.id },
+          retryable: true,
+          detail: `worktree=${request.worktreeId ?? ''} conflicting run=${worktreeConflict.id}`,
         })
       }
       const shouldQueue =
@@ -1357,6 +1497,17 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           detail: `resume run=${run.id} conflict=${conflict.id}`,
         })
       }
+      // TASK-107 (§19.3): one worktree hosts at most one non-terminal run.
+      const resumeWorktreeConflict = worktreeRunConflict(active, run.worktreeId, run.id)
+      if (resumeWorktreeConflict !== undefined) {
+        return fail({
+          code: 'VALIDATION_FAILED',
+          message: `Agent run "${resumeWorktreeConflict.id}" is still active on this worktree. Stop it before resuming here.`,
+          params: { runId: resumeWorktreeConflict.id },
+          retryable: true,
+          detail: `resume run=${run.id} worktree=${run.worktreeId ?? ''} conflict=${resumeWorktreeConflict.id}`,
+        })
+      }
       const shouldQueue =
         listed.data.some((candidate) => candidate.status === 'queued') ||
         !hasCapacity(active, run, policy.data, resumeProfileMaxConcurrentRuns)
@@ -1571,8 +1722,240 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       return updated.data === null ? missing('Agent run', runId) : { ok: true, data: updated.data }
     },
 
-    get: (runId) => deps.runs.getById(runId),
+    async failAndStop(runId, classification) {
+      const current = deps.runs.getById(runId)
+      if (!current.ok) return current
+      if (current.data === null) return missing('Agent run', runId)
+      const run = current.data
+      // §19.4 row 1: already failed WITH a classification — repeat calls and
+      // the common "the process already exited on its own" path succeed
+      // without touching anything.
+      if (run.status === 'failed' && run.failureClassification !== undefined) {
+        return { ok: true, data: run }
+      }
+      if (isTerminal(run)) {
+        // §19.4: completed / cancelled / interrupted (and failed WITHOUT a
+        // classification) belong to flow A — failing them is a caller error.
+        return fail({
+          code: 'VALIDATION_FAILED',
+          message: `Agent run "${runId}" is already ${run.status}; continue it directly instead of failing it.`,
+          retryable: false,
+          detail: `failAndStop run=${runId} status=${run.status} — terminal runs go through continuation flow A`,
+        })
+      }
+      if (run.status === 'queued') {
+        // Never launched: there is no process to stop.
+        pendingRuns.delete(runId)
+        return settleFailedStop(run, classification)
+      }
 
+      // §19.3: register the terminal intent BEFORE stopping, so the
+      // process.exited branch writes failed + classification, not cancelled.
+      failStopIntents.set(runId, classification)
+      const abort = <T>(result: IpcResult<T>): IpcResult<T> => {
+        failStopIntents.delete(runId)
+        return result
+      }
+
+      if (run.processId !== undefined) {
+        if (deps.processes === undefined) {
+          return abort(
+            fail({
+              code: 'CAPABILITY_NOT_AVAILABLE',
+              message: 'The Agent process cannot be stopped in this runtime.',
+              retryable: false,
+              detail: `failAndStop run=${runId} without a ProcessManager`,
+            }),
+          )
+        }
+        const stopped = await deps.processes.stop(run.processId)
+        if (stopped.ok) {
+          // §19.4: a successful stop IS the process exit. The exit event was
+          // emitted before stop() returned, so the row is already terminal —
+          // the settle below is only the defensive path for an exit event
+          // that never reached this instance.
+          const settled = deps.runs.getById(runId)
+          if (!settled.ok) return settled
+          if (settled.data === null) return missing('Agent run', runId)
+          if (isTerminal(settled.data)) return { ok: true, data: settled.data }
+          return settleFailedStop(settled.data, classification)
+        }
+        if (stopped.error.code === 'COMMAND_TIMEOUT') {
+          // §19.4: the process survived interrupt → terminate → kill — abort.
+          return abort(
+            fail({
+              code: 'COMMAND_TIMEOUT',
+              message:
+                'The source Agent process did not exit in time; the continuation was aborted.',
+              retryable: true,
+              detail: `failAndStop run=${runId} process=${run.processId} survived the kill ladder`,
+            }),
+          )
+        }
+        if (stopped.error.code !== 'PROCESS_NOT_FOUND') {
+          return abort(stopped)
+        }
+        // §19.5: not found only means THIS instance is not managing the
+        // process — probe before declaring it dead (below).
+      }
+
+      const survivor = await terminateSurvivorProcess(deps.hostProcesses, run)
+      if (survivor === 'alive') {
+        return abort(
+          fail({
+            code: 'CONFLICT',
+            message:
+              'The source Agent process is still alive and could not be terminated; the continuation was aborted.',
+            retryable: true,
+            detail: `failAndStop run=${runId} pid=${String(run.pid)} survivor=alive`,
+          }),
+        )
+      }
+      // Dead (or just terminated with identity verification): settle the row
+      // ourselves — no process.exited event exists for a process this
+      // instance never owned.
+      return settleFailedStop(run, classification)
+    },
+
+    async continueWithProfile(request) {
+      const current = deps.runs.getById(request.sourceRunId)
+      if (!current.ok) return current
+      if (current.data === null) return missing('Agent run', request.sourceRunId)
+      let source = current.data
+
+      if (!isTerminal(source)) {
+        // §19.3 flow B: the source is still running — fail it with a
+        // classification first (failAndStop is the ONLY writer of
+        // failed + classification on a live run).
+        const classifier = failureClassifierFor(source.id)
+        const classification: AgentFailureClassification = classifier?.classify({
+          outputTail: readClassificationTail(source.id),
+        }) ?? { kind: 'unknown', retryable: true }
+        const stopped = await manager.failAndStop(source.id, classification)
+        if (!stopped.ok) return stopped
+        source = stopped.data
+      } else if (source.pid !== undefined) {
+        // §19.3 flow A step 1: a terminal row alone does not prove the
+        // process is gone (a settle path may have finalized the row while a
+        // survivor lived on) — verify with the same pid-identity judgment
+        // reconciliation uses before reusing the worktree.
+        const survivor = await terminateSurvivorProcess(deps.hostProcesses, source)
+        if (survivor === 'alive') {
+          return fail({
+            code: 'CONFLICT',
+            message:
+              'The source Agent process is still alive and could not be terminated; the continuation was aborted.',
+            retryable: true,
+            detail: `continue run=${source.id} pid=${String(source.pid)} survivor=alive`,
+          })
+        }
+      }
+
+      // §41: the reason rides both audit events and the continuation context.
+      const reason: AgentContinuationReason =
+        source.failureClassification?.kind === 'rate-limited'
+          ? 'rate-limit'
+          : source.status === 'failed'
+            ? 'agent-failure'
+            : 'manual-switch'
+
+      // §20: the continuation context package (best-effort enrichments — a
+      // missing handoff / artifact / criteria read never blocks the switch).
+      const outputTail = readClassificationTail(source.id)
+      const handoff = deps.handoffs.getByRunId(source.id)
+      if (!handoff.ok) return handoff
+      const artifactIds = deps.artifacts?.listByRun(source.id)
+      if (artifactIds !== undefined && !artifactIds.ok) return artifactIds
+      let acceptanceCriteria: unknown[] | undefined
+      if (source.criteriaSetId !== undefined && deps.criteria !== undefined) {
+        const criteria = deps.criteria.listCriteria(source.criteriaSetId)
+        if (!criteria.ok) return criteria
+        acceptanceCriteria = criteria.data.map((criterion) => ({
+          id: criterion.id,
+          description: criterion.description,
+          required: criterion.required,
+        }))
+      }
+      const continuation = buildAgentContinuation({
+        sourceRun: source,
+        reason,
+        handoff: handoff.data,
+        ...(artifactIds === undefined
+          ? {}
+          : { artifactIds: artifactIds.data.map((artifact) => artifact.id) }),
+        ...(acceptanceCriteria === undefined ? {} : { acceptanceCriteria }),
+        outputTail,
+      })
+      const prompt = buildContinuationPrompt(continuation, {
+        ...(source.prompt === undefined ? {} : { originalPrompt: source.prompt }),
+        outputTail,
+      })
+
+      // §19.3 steps 3–4 / §21: same task, same worktree (the reservation
+      // invariant is enforced inside start), NEW run under the target
+      // identity. The §37 selector inside start validates
+      // targetAccountProfileId against targetAgentId (match / enabled /
+      // runtime compatibility).
+      const started = await manager.start({
+        workspaceId: source.workspaceId,
+        agentType: request.targetAgentId,
+        ...(source.taskId === undefined ? {} : { taskId: source.taskId }),
+        ...(source.worktreeId === undefined ? {} : { worktreeId: source.worktreeId }),
+        executionMode: source.executionMode,
+        ...(source.mode === undefined ? {} : { mode: source.mode }),
+        ...(source.approvalMode === undefined ? {} : { approvalMode: source.approvalMode }),
+        ...(source.model === undefined ? {} : { model: source.model }),
+        ...(request.targetAccountProfileId === undefined
+          ? {}
+          : { accountProfileId: request.targetAccountProfileId }),
+        ...(request.targetExecutionProfileId === undefined
+          ? {}
+          : { executionProfileId: request.targetExecutionProfileId }),
+        prompt,
+      })
+      if (!started.ok) return started
+      const target = started.data
+
+      // §41: both continuation audit events are keyed to the target run;
+      // the payload carries both sides of the switch.
+      const auditPayload = {
+        ...(source.taskId === undefined ? {} : { taskId: source.taskId }),
+        sourceRunId: source.id,
+        targetRunId: target.id,
+        reason,
+      }
+      appendAccountEvent({
+        ...(target.accountProfileId === undefined ? {} : { profileId: target.accountProfileId }),
+        runId: target.id,
+        eventType: 'agent.continuation_created',
+        payload: {
+          ...auditPayload,
+          previousAgentId: source.agentType,
+          targetAgentId: target.agentType,
+          ...(source.accountProfileId === undefined
+            ? {}
+            : { previousAccountProfileId: source.accountProfileId }),
+          ...(target.accountProfileId === undefined
+            ? {}
+            : { targetAccountProfileId: target.accountProfileId }),
+        },
+      })
+      if (source.accountProfileId !== target.accountProfileId) {
+        appendAccountEvent({
+          ...(target.accountProfileId === undefined ? {} : { profileId: target.accountProfileId }),
+          runId: target.id,
+          eventType: 'agent.account_switched',
+          payload: {
+            ...auditPayload,
+            ...(source.accountProfileId === undefined ? {} : { from: source.accountProfileId }),
+            ...(target.accountProfileId === undefined ? {} : { to: target.accountProfileId }),
+          },
+        })
+      }
+      return { ok: true, data: target }
+    },
+
+    get: (runId) => deps.runs.getById(runId),
     getOutput: (runId, options) => readOutput(runId, options?.tailBytes),
 
     list(request = {}) {
@@ -1637,6 +2020,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       activeAdapters.clear()
       pendingRuns.clear()
       cancelRequested.clear()
+      failStopIntents.clear()
       adapterlessCancels.clear()
       // Drain the output the cancels produced only AFTER unsubscribing: the
       // subscription is the batcher's only push source, so from here no 32ms
