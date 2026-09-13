@@ -14,7 +14,13 @@ import { createProcessManager, type ProcessManagerDeps } from '../../process/pro
 import { createWorkspaceRuntime } from '../../workspace/runtime'
 import type { AgentDetector } from '../agent-detector'
 import { agentProcessId } from './cli-agent-adapter'
-import { buildCodexArguments, buildCodexResumeArguments, createCodexAdapter } from './codex-adapter'
+import {
+  buildCodexArguments,
+  buildCodexResumeArguments,
+  createCodexAdapter,
+  validateCodexResumeProfile,
+  type CodexResumeProfileContext,
+} from './codex-adapter'
 
 const baseRequest: AgentStartRequest = {
   runId: 'run-codex-1',
@@ -114,6 +120,78 @@ describe('CodexAdapter arguments (TASK-026)', () => {
         },
       }),
     ).toEqual(['--sandbox', 'read-only', '--ask-for-approval', 'on-request'])
+  })
+})
+
+describe('CodexAdapter resume profile guard (TASK-098, §10.5)', () => {
+  const resumeRequest: AgentResumeRequest = {
+    ...baseRequest,
+    prompt: 'Continue from the failure',
+    providerSession: { provider: 'codex', sessionId: '0199-codex-session' },
+  }
+  const sameHome: CodexResumeProfileContext = {
+    accountProfileId: 'acct_codex_personal',
+    snapshotConfigHome: '/home/u/.teskra/agent-profiles/codex/personal',
+    currentConfigHome: '/home/u/.teskra/agent-profiles/codex/personal',
+  }
+
+  it('rejects resume when the resolved profile configHome changed (§10.5 (1))', () => {
+    const result = validateCodexResumeProfile(resumeRequest, {
+      ...sameHome,
+      currentConfigHome: '/home/u/.teskra/agent-profiles/codex/work',
+    })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('CONFLICT')
+    expect(result.error.message).toContain('Continuation')
+  })
+
+  it('rejects resume when the snapshot home exists but no profile resolves now', () => {
+    const result = validateCodexResumeProfile(resumeRequest, {
+      ...sameHome,
+      currentConfigHome: undefined,
+    })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('CONFLICT')
+  })
+
+  it('allows resume when the configHome matches and a session id exists', () => {
+    expect(validateCodexResumeProfile(resumeRequest, sameHome)).toEqual({
+      ok: true,
+      data: undefined,
+    })
+  })
+
+  it('disables the --last fallback for account-profile runs (§10.5 (2))', () => {
+    const withoutSession: AgentResumeRequest = {
+      ...resumeRequest,
+      providerSession: { provider: 'codex' },
+    }
+
+    const result = validateCodexResumeProfile(withoutSession, sameHome)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('VALIDATION_FAILED')
+    expect(result.error.message).toContain('--last')
+
+    // Even an ungated argument build must not emit --last: the CLI errors out
+    // instead of silently resuming whatever session is last in that home.
+    const args = buildCodexResumeArguments(withoutSession, sameHome)
+    expect(args).not.toContain('--last')
+  })
+
+  it('keeps the legacy --last fallback for runs without an account profile', () => {
+    const withoutSession: AgentResumeRequest = {
+      ...resumeRequest,
+      providerSession: { provider: 'codex' },
+    }
+
+    expect(validateCodexResumeProfile(withoutSession, {})).toEqual({ ok: true, data: undefined })
+    expect(buildCodexResumeArguments(withoutSession)).toContain('--last')
+    expect(buildCodexResumeArguments(withoutSession, {})).toContain('--last')
   })
 })
 

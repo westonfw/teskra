@@ -1,6 +1,7 @@
 import type {
   AgentResumeRequest,
   AgentStartRequest,
+  IpcResult,
   TeskraPermissionProfile,
 } from '@teskra/contracts'
 
@@ -71,15 +72,76 @@ export function buildCodexArguments(request: AgentStartRequest): readonly string
   ]
 }
 
-export function buildCodexResumeArguments(request: AgentResumeRequest): readonly string[] {
+export function buildCodexResumeArguments(
+  request: AgentResumeRequest,
+  profile?: CodexResumeProfileContext,
+): readonly string[] {
   const sessionId = request.providerSession.sessionId ?? request.providerSession.threadId
+  // §10.5 (2): never fall back to `--last` for an account-profile run — it
+  // picks the last session in whatever CODEX_HOME is active, very likely
+  // another run's. Callers must gate on validateCodexResumeProfile() first;
+  // omitting the flag here keeps even an ungated call from silently resuming
+  // the wrong account's session (the CLI errors out instead of guessing).
+  const lastFallbackAllowed = profile?.accountProfileId === undefined
   return [
     ...commonArguments(request),
     ...(request.mode === 'exec' ? (CODEX_AGENT.prompt.headlessArgs ?? ['exec']) : []),
     'resume',
-    ...(sessionId === undefined ? ['--last'] : [sessionId]),
+    ...(sessionId !== undefined ? [sessionId] : lastFallbackAllowed ? ['--last'] : []),
     ...(request.prompt === undefined ? [] : [request.prompt]),
   ]
+}
+
+/**
+ * Milestone 24 §10.5 — the profile context a Codex resume must be validated
+ * against. Codex sessions live under CODEX_HOME, so per-profile homes change
+ * what a resume can even see. The AgentManager wiring that populates this
+ * from the run row (profileSnapshot + freshly resolved profile) is TASK-100;
+ * this module owns the rules.
+ */
+export interface CodexResumeProfileContext {
+  /** run.account_profile_id — its presence means this run uses a named account profile. */
+  readonly accountProfileId?: string
+  /** run.profileSnapshot.configHome captured when the original run started. */
+  readonly snapshotConfigHome?: string
+  /** configHome resolved for the current resume attempt. */
+  readonly currentConfigHome?: string
+}
+
+export function validateCodexResumeProfile(
+  request: AgentResumeRequest,
+  profile: CodexResumeProfileContext,
+): IpcResult<void> {
+  if (profile.accountProfileId === undefined) {
+    return { ok: true, data: undefined }
+  }
+  // §10.5 (1): a profile switch makes the recorded session unreachable.
+  // Refuse loudly instead of letting the CLI fail ambiguously — the designed
+  // path forward is a Continuation run with the new profile (§39).
+  if (profile.snapshotConfigHome !== profile.currentConfigHome) {
+    return {
+      ok: false,
+      error: {
+        code: 'CONFLICT',
+        message:
+          'This session belongs to a different account profile and cannot be resumed. Start a Continuation run with the new profile instead.',
+        retryable: false,
+      },
+    }
+  }
+  const sessionId = request.providerSession.sessionId ?? request.providerSession.threadId
+  if (sessionId === undefined) {
+    return {
+      ok: false,
+      error: {
+        code: 'VALIDATION_FAILED',
+        message:
+          'This run has no recorded Codex session id; the --last fallback is disabled for account-profile runs.',
+        retryable: false,
+      },
+    }
+  }
+  return { ok: true, data: undefined }
 }
 
 export function createCodexAdapter(options: CodexAdapterOptions): CodingAgentAdapter {
