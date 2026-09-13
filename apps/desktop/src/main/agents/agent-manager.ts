@@ -27,6 +27,10 @@ import {
 } from '@teskra/contracts'
 
 import type { AgentEventRepository } from '../db/repositories/agent-event-repository'
+import type {
+  AccountEventRepository,
+  AppendAccountEventInput,
+} from '../db/repositories/account-event-repository'
 import type { AgentRunRepository } from '../db/repositories/agent-run-repository'
 import type { HandoffRepository } from '../db/repositories/handoff-repository'
 import type { TaskRepository } from '../db/repositories/task-repository'
@@ -78,6 +82,13 @@ export interface AgentManagerDeps {
   readonly adapters: readonly CodingAgentAdapter[]
   readonly runs: AgentRunRepository
   readonly agentEvents: AgentEventRepository
+  /**
+   * TASK-116 (§41): audit sink for the Run-related account events
+   * (agent.profile_selected / agent.rate_limited; TASK-107 adds
+   * agent.continuation_created / agent.account_switched). Appends are
+   * best-effort: failures are logged, never fatal to the Run lifecycle.
+   */
+  readonly accountEvents?: Pick<AccountEventRepository, 'append'>
   readonly handoffs: HandoffRepository
   readonly workspaces: WorkspaceRepository
   readonly tasks: TaskRepository
@@ -304,6 +315,23 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     }
   }
 
+  /**
+   * TASK-116 (§41): account audit events live ONLY in `account_events` (they
+   * are not Run-log events); appends are best-effort like appendEvent.
+   */
+  const appendAccountEvent = (input: AppendAccountEventInput): void => {
+    if (deps.accountEvents === undefined) {
+      return
+    }
+    const appended = deps.accountEvents.append(input, now())
+    if (!appended.ok) {
+      logger.error(
+        { eventType: input.eventType, runId: input.runId, error: appended.error },
+        'Failed to persist the account audit event.',
+      )
+    }
+  }
+
   const persistRunManifest = (run: AgentRun): void => {
     const written = deps.runLogs.writeRun(run)
     if (!written.ok) {
@@ -428,6 +456,26 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     return tail.data ?? ''
   }
 
+  /** TASK-116 (§41): a run whose terminal classification is a rate limit. */
+  const auditRateLimited = (run: AgentRun): void => {
+    const classification = run.failureClassification
+    if (classification?.kind !== 'rate-limited') {
+      return
+    }
+    appendAccountEvent({
+      ...(run.accountProfileId === undefined ? {} : { profileId: run.accountProfileId }),
+      runId: run.id,
+      eventType: 'agent.rate_limited',
+      payload: {
+        agentType: run.agentType,
+        ...(run.taskId === undefined ? {} : { taskId: run.taskId }),
+        ...(run.accountProfileId === undefined ? {} : { accountProfileId: run.accountProfileId }),
+        retryable: classification.retryable,
+        ...(classification.resetAt === undefined ? {} : { resetAt: classification.resetAt }),
+      },
+    })
+  }
+
   const finishFailed = (runId: string, error: PublicAppError): IpcResult<AgentRun> => {
     const finishedAt = now()
     // TASK-105: a launch-time failure has no exit code; the adapter error
@@ -455,6 +503,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     deps.events.emit('agent.failed', { runId, error })
     if (!updated.ok) return updated
     if (updated.data === null) return missing('Agent run', runId)
+    auditRateLimited(updated.data)
     synchronizeTaskStatus(updated.data)
     return { ok: true, data: updated.data }
   }
@@ -827,6 +876,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       logger.error({ runId: agentRunId, error: updated.error }, 'Failed to finish Agent run.')
     } else if (updated.data !== null) {
       persistRunManifest(updated.data)
+      auditRateLimited(updated.data)
       synchronizeTaskStatus(updated.data)
     }
     closeRunLogs(agentRunId)
@@ -1106,6 +1156,25 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       }
       appendEvent(runId, 'agent.created', { agentType: definition.id, executionMode })
       deps.events.emit('agent.created', { runId })
+      // TASK-116 (§41): audit which account identity the Run was launched
+      // with — explicit pin or agent default (§37), recorded as resolved.
+      if (
+        startProfile.data.accountProfileId !== undefined &&
+        startProfile.data.profileSnapshot !== undefined
+      ) {
+        appendAccountEvent({
+          profileId: startProfile.data.accountProfileId,
+          runId,
+          eventType: 'agent.profile_selected',
+          payload: {
+            agentType: definition.id,
+            accountProfileId: startProfile.data.accountProfileId,
+            accountProfileName: startProfile.data.profileSnapshot.accountProfileName,
+            source: request.accountProfileId !== undefined ? 'explicit' : 'default',
+            ...(request.taskId === undefined ? {} : { taskId: request.taskId }),
+          },
+        })
+      }
       synchronizeTaskStatus(created.data)
 
       const pending: PendingRun = {

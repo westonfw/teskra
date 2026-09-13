@@ -17,6 +17,7 @@ import type {
 import { createConfigService } from '../config/config-service'
 import { migrateDatabase } from '../db/migrations'
 import {
+  createAccountEventRepository,
   createAccountProfileRepository,
   createAgentEventRepository,
   createAgentRunRepository,
@@ -139,6 +140,7 @@ interface Fixture {
   readonly accountProfiles: AccountProfileManager
   readonly processes: CapturedProcesses
   readonly profiles: ReturnType<typeof createAccountProfileRepository>
+  readonly accountEvents: ReturnType<typeof createAccountEventRepository>
 }
 
 function setup(options: { withClassifiers?: boolean } = {}): Fixture {
@@ -159,6 +161,7 @@ function setup(options: { withClassifiers?: boolean } = {}): Fixture {
   const handoffs = createHandoffRepository(connection)
   const worktrees = createWorktreeRepository(connection)
   const profiles = createAccountProfileRepository(connection)
+  const accountEvents = createAccountEventRepository(connection)
   requireOk(
     workspaces.create(
       { id: 'workspace-1', name: 'Demo', runtime: UBUNTU, path: '/repo' },
@@ -231,6 +234,7 @@ function setup(options: { withClassifiers?: boolean } = {}): Fixture {
     adapters: [fakeAdapter],
     runs,
     agentEvents,
+    accountEvents,
     handoffs,
     workspaces,
     tasks,
@@ -257,6 +261,7 @@ function setup(options: { withClassifiers?: boolean } = {}): Fixture {
     profiles,
     runs,
     events,
+    accountEvents,
     now: () => '2026-09-12T00:00:02.000Z',
   })
   profileStatus.start()
@@ -270,6 +275,7 @@ function setup(options: { withClassifiers?: boolean } = {}): Fixture {
     accountProfiles,
     processes,
     profiles,
+    accountEvents,
   }
 }
 
@@ -404,5 +410,75 @@ describe('Agent failure classification (TASK-105, §17 / §56.3)', () => {
     const run = runOf(fixture, runId)
     expect(run.status).toBe('failed')
     expect(run.failureClassification).toBeUndefined()
+  })
+})
+
+describe('Account audit events (TASK-116, §41)', () => {
+  it('agent.profile_selected records the resolved account identity for the run', async () => {
+    const fixture = setup()
+    const { runId, profileId } = await startWithProfile(fixture)
+
+    const selected = requireOk(fixture.accountEvents.listByType('agent.profile_selected'))
+    expect(selected).toHaveLength(1)
+    expect(selected[0]).toMatchObject({
+      profileId,
+      runId,
+      eventType: 'agent.profile_selected',
+      payload: {
+        agentType: FAKE_AGENT.id,
+        accountProfileId: profileId,
+        accountProfileName: 'Fake Work',
+        source: 'explicit',
+      },
+    })
+  })
+
+  it('a legacy start (no profile) writes no agent.profile_selected event', async () => {
+    const fixture = setup()
+    const started = requireOk(
+      await fixture.manager.start({ workspaceId: 'workspace-1', agentType: FAKE_AGENT.id }),
+    )
+    expect(started.status).toBe('running')
+    expect(requireOk(fixture.accountEvents.listByType('agent.profile_selected'))).toEqual([])
+  })
+
+  it('agent.rate_limited and account.status_changed are written on a rate-limited failure', async () => {
+    const fixture = setup()
+    const { runId, profileId } = await startWithProfile(fixture)
+
+    emitScenario(fixture, runId, loadScenario('rate-limit'))
+
+    const rateLimited = requireOk(fixture.accountEvents.listByType('agent.rate_limited'))
+    expect(rateLimited).toHaveLength(1)
+    expect(rateLimited[0]).toMatchObject({
+      profileId,
+      runId,
+      eventType: 'agent.rate_limited',
+      payload: {
+        agentType: FAKE_AGENT.id,
+        accountProfileId: profileId,
+        retryable: true,
+        resetAt: '2026-10-01T00:00:00.000Z',
+      },
+    })
+    // The §18 projection (limited + limitedUntil) is audited too.
+    const statusChanges = requireOk(
+      fixture.accountEvents.listByType('account.status_changed'),
+    ).filter((event) => event.profileId === profileId)
+    expect(statusChanges).toHaveLength(1)
+    expect(statusChanges[0]?.payload).toMatchObject({
+      status: 'limited',
+      previousStatus: 'unknown',
+    })
+  })
+
+  it('a non-rate-limit failure writes no agent.rate_limited event', async () => {
+    const fixture = setup()
+    const { runId } = await startWithProfile(fixture)
+
+    emitScenario(fixture, runId, loadScenario('fail'))
+
+    expect(runOf(fixture, runId).status).toBe('failed')
+    expect(requireOk(fixture.accountEvents.listByType('agent.rate_limited'))).toEqual([])
   })
 })

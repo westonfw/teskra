@@ -33,6 +33,7 @@ import { migrateDatabase } from '../db/migrations'
 import {
   createAgentEventRepository,
   createAgentRunRepository,
+  createAccountEventRepository,
   createAccountProfileRepository,
   createArtifactRepository,
   createCriteriaRepository,
@@ -129,6 +130,7 @@ function createRepositories(connection: TeskraDatabase['connection']) {
     agentRuns: createAgentRunRepository(connection),
     agentEvents: createAgentEventRepository(connection),
     accountProfiles: createAccountProfileRepository(connection),
+    accountEvents: createAccountEventRepository(connection),
     artifacts: createArtifactRepository(connection),
     worktrees: createWorktreeRepository(connection),
     workflowRuns: createWorkflowRunRepository(connection),
@@ -386,6 +388,7 @@ export async function composeTeskraRuntime(
     profiles: repositories.accountProfiles,
     runs: repositories.agentRuns,
     events,
+    accountEvents: repositories.accountEvents,
   })
   const accountProfileManager = createAccountProfileManager({
     profiles: repositories.accountProfiles,
@@ -396,6 +399,7 @@ export async function composeTeskraRuntime(
     events,
     adapters: accountProfileAdapters.data,
     status: accountProfileStatus,
+    accountEvents: repositories.accountEvents,
     createRuntime: runtimeFor,
     commands,
   })
@@ -406,6 +410,7 @@ export async function composeTeskraRuntime(
     adapters: accountProfileAdapters.data,
     processes: processManager,
     events,
+    accountEvents: repositories.accountEvents,
     createRuntime: runtimeFor,
   })
   const doctor = createDoctorService({
@@ -463,6 +468,7 @@ export async function composeTeskraRuntime(
     ],
     runs: repositories.agentRuns,
     agentEvents: repositories.agentEvents,
+    accountEvents: repositories.accountEvents,
     handoffs: repositories.handoffs,
     reviewCollector,
     workspaces: repositories.workspaces,

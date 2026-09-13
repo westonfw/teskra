@@ -5,7 +5,11 @@ import type {
   WorkbenchEvents,
 } from '@teskra/contracts'
 
-import type { AccountProfileRepository, AgentRunRepository } from '../../db/repositories'
+import type {
+  AccountEventRepository,
+  AccountProfileRepository,
+  AgentRunRepository,
+} from '../../db/repositories'
 import type { EventBus } from '../../events/event-bus'
 import { getLogger } from '../../logger'
 
@@ -64,6 +68,11 @@ export interface AccountProfileStatusServiceDeps {
   readonly profiles: AccountProfileRepository
   readonly runs: Pick<AgentRunRepository, 'getById'>
   readonly events: EventBus<WorkbenchEvents>
+  /**
+   * TASK-116 (§41): audit sink for the projection's account.status_changed
+   * events. Append failures are logged, never fatal.
+   */
+  readonly accountEvents?: Pick<AccountEventRepository, 'append'> | undefined
   readonly now?: () => string
 }
 
@@ -90,6 +99,22 @@ export function createAccountProfileStatusService(
         status,
         previousStatus: profile.status,
       })
+      if (deps.accountEvents !== undefined) {
+        const appended = deps.accountEvents.append(
+          {
+            profileId: profile.id,
+            eventType: 'account.status_changed',
+            payload: { agentId: profile.agentId, status, previousStatus: profile.status },
+          },
+          now(),
+        )
+        if (!appended.ok) {
+          logger.error(
+            { profileId: profile.id, error: appended.error },
+            'Failed to persist the account audit event.',
+          )
+        }
+      }
     }
   }
 

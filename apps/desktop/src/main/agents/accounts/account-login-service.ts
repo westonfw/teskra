@@ -8,7 +8,7 @@ import type {
   WorkspaceRuntimeRef,
 } from '@teskra/contracts'
 
-import type { AccountProfileRepository } from '../../db/repositories'
+import type { AccountEventRepository, AccountProfileRepository } from '../../db/repositories'
 import type { EventBus } from '../../events/event-bus'
 import { type InternalAppError, toPublicError } from '../../errors'
 import { getLogger } from '../../logger'
@@ -66,6 +66,12 @@ export interface AccountLoginServiceDeps {
   readonly adapters: Pick<AccountProfileAdapterRegistry, 'get'>
   readonly processes: LoginProcesses
   readonly events: EventBus<WorkbenchEvents>
+  /**
+   * TASK-116 (§41): audit sink for account.login_started /
+   * account.login_verified / account.status_changed. Append failures are
+   * logged, never fatal — the login session stands.
+   */
+  readonly accountEvents?: Pick<AccountEventRepository, 'append'> | undefined
   readonly createRuntime?: ((ref: WorkspaceRuntimeRef) => IpcResult<WorkspaceRuntime>) | undefined
   readonly createId?: (() => string) | undefined
   readonly now?: (() => string) | undefined
@@ -115,6 +121,20 @@ export function createAccountLoginService(deps: AccountLoginServiceDeps): Accoun
     ((ref: WorkspaceRuntimeRef): IpcResult<WorkspaceRuntime> => createWorkspaceRuntime(ref))
   const sessionTimeoutMs = deps.sessionTimeoutMs ?? ACCOUNT_LOGIN_SESSION_TIMEOUT_MS
   const logger = getLogger('account')
+
+  /** TASK-116 (§41): best-effort audit append — failures are logged, never fatal. */
+  const audit = (eventType: string, profileId: string, payload: Record<string, unknown>): void => {
+    if (deps.accountEvents === undefined) {
+      return
+    }
+    const appended = deps.accountEvents.append({ profileId, eventType, payload }, now())
+    if (!appended.ok) {
+      logger.error(
+        { profileId, eventType, error: appended.error },
+        'Failed to persist the account audit event.',
+      )
+    }
+  }
 
   /** Removes the session from every index and disarms its timeout. */
   const forget = (sessionId: string): ActiveLogin | undefined => {
@@ -175,6 +195,11 @@ export function createAccountLoginService(deps: AccountLoginServiceDeps): Accoun
         status: detection.data.status,
         previousStatus: profile.status,
       })
+      audit('account.status_changed', profileId, {
+        agentId: profile.agentId,
+        status: detection.data.status,
+        previousStatus: profile.status,
+      })
     }
     return { ok: true, data: updated.data }
   }
@@ -187,6 +212,15 @@ export function createAccountLoginService(deps: AccountLoginServiceDeps): Accoun
           { profileId, error: result.error },
           'Post-login status detection failed; profile status left unchanged.',
         )
+        return
+      }
+      // §41: a login session that ends with a verified CLI Home is the only
+      // writer of account.login_verified — a manual detect never writes it.
+      if (result.data.status === 'ready') {
+        audit('account.login_verified', profileId, {
+          agentId: result.data.agentId,
+          status: 'ready',
+        })
       }
     })
   }
@@ -319,6 +353,10 @@ export function createAccountLoginService(deps: AccountLoginServiceDeps): Accoun
       return started
     }
 
+    audit('account.login_started', profileId, {
+      agentId: profile.agentId,
+      sessionId: session.sessionId,
+    })
     // §24.2: Main-side timeout — never rely on the Renderer to cancel.
     entry.timer = setTimeout(() => {
       void stopSession(session.sessionId).then((result) => {

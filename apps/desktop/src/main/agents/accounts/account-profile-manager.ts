@@ -17,10 +17,12 @@ import type { ConfigService } from '../../config/config-service'
 import type {
   AccountProfileListFilter,
   AccountProfileRepository,
+  AccountEventRepository,
   AgentRunRepository,
 } from '../../db/repositories'
 import { type InternalAppError, toPublicError } from '../../errors'
 import type { EventBus } from '../../events/event-bus'
+import { getLogger } from '../../logger'
 import type { TeskraPaths } from '../../paths'
 import type { CommandRunner } from '../../process/command-runner'
 import { createWorkspaceRuntime, type WorkspaceRuntime } from '../../workspace/runtime'
@@ -142,6 +144,12 @@ export interface AccountProfileManagerDeps {
     AccountProfileStatusService,
     'sweepExpiredLimited' | 'degradeExpiredLimited'
   >
+  /**
+   * TASK-116 (§41): audit sink for the account lifecycle events
+   * (account.created / account.updated / account.status_changed). Append
+   * failures are logged, never fatal — the lifecycle operation stands.
+   */
+  readonly accountEvents?: Pick<AccountEventRepository, 'append'>
   readonly createRuntime?: (ref: WorkspaceRuntimeRef) => IpcResult<WorkspaceRuntime>
   /** Required for WSL-on-Windows profile fs operations (§48.2 (b)). */
   readonly commands?: CommandRunner
@@ -182,10 +190,29 @@ export function createAccountProfileManager(
     defaults: { getDefault: (agentId) => manager.getDefault(agentId) },
   })
 
+  /** TASK-116 (§41): best-effort audit append — failures are logged, never fatal. */
+  const audit = (eventType: string, profileId: string, payload: Record<string, unknown>): void => {
+    if (deps.accountEvents === undefined) {
+      return
+    }
+    const appended = deps.accountEvents.append({ profileId, eventType, payload }, now())
+    if (!appended.ok) {
+      getLogger('account').error(
+        { profileId, eventType, error: appended.error },
+        'Failed to persist the account audit event.',
+      )
+    }
+  }
+
   const emitStatusChanged = (profile: AgentAccountProfile, status: AccountProfileStatus): void => {
     if (status !== profile.status) {
       deps.events.emit('account.status_changed', {
         profileId: profile.id,
+        agentId: profile.agentId,
+        status,
+        previousStatus: profile.status,
+      })
+      audit('account.status_changed', profile.id, {
         agentId: profile.agentId,
         status,
         previousStatus: profile.status,
@@ -579,6 +606,11 @@ export function createAccountProfileManager(
       profileId: created.data.id,
       agentId: created.data.agentId,
     })
+    audit('account.created', created.data.id, {
+      agentId: created.data.agentId,
+      name: created.data.name,
+      authType: created.data.authType,
+    })
     return Promise.resolve(created)
   }
 
@@ -686,6 +718,11 @@ export function createAccountProfileManager(
       profileId: created.data.id,
       agentId: created.data.agentId,
     })
+    audit('account.created', created.data.id, {
+      agentId: created.data.agentId,
+      name: created.data.name,
+      authType: created.data.authType,
+    })
     return created
   }
 
@@ -784,6 +821,12 @@ export function createAccountProfileManager(
       deps.events.emit('account.updated', {
         profileId: final.data.id,
         agentId: final.data.agentId,
+      })
+      audit('account.updated', final.data.id, {
+        agentId: final.data.agentId,
+        fields: Object.keys(patch).filter(
+          (key) => patch[key as keyof UpdateAccountProfileRequest] !== undefined,
+        ),
       })
     }
     return { ok: true, data: final.data }
@@ -975,6 +1018,11 @@ export function createAccountProfileManager(
         profileId: disabled.data.id,
         agentId: disabled.data.agentId,
       })
+      audit('account.updated', disabled.data.id, {
+        agentId: disabled.data.agentId,
+        enabled: false,
+        ...(options.deleteHome === true ? { homeDeleted: true } : {}),
+      })
       return { ok: true, data: disabled.data }
     },
 
@@ -1034,6 +1082,10 @@ export function createAccountProfileManager(
       deps.events.emit('account.updated', {
         profileId: enabled.data.id,
         agentId: enabled.data.agentId,
+      })
+      audit('account.updated', enabled.data.id, {
+        agentId: enabled.data.agentId,
+        enabled: true,
       })
       const final = deps.profiles.getById(id)
       if (!final.ok) {
