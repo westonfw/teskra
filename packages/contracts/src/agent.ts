@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { agentRunProfileSnapshotSchema } from './agent-account'
+import { agentFailureClassificationSchema } from './agent-failure'
 import {
   IPC_TEXT_MAX,
   ipcContentSchema,
@@ -287,6 +289,20 @@ export const agentRunSchema = z.strictObject({
   workflowRunId: z.string().optional(),
   workflowStepId: z.string().optional(),
   agentType: z.string().min(1),
+  /**
+   * Milestone 24 (ADR-0009): the account / execution profiles this run was
+   * launched with. Weak references by design (migration 013 sets no FK) — the
+   * auditable truth is `profileSnapshot`.
+   */
+  accountProfileId: z.string().min(1).optional(),
+  executionProfileId: z.string().min(1).optional(),
+  /** Milestone 24 §7: profile state captured at start, for post-hoc audit. */
+  profileSnapshot: agentRunProfileSnapshotSchema.optional(),
+  /**
+   * ADR-0010: why a failed run failed (rate limit, auth expiry, ...). Not a
+   * Run status — the status stays 'failed' (migration 013).
+   */
+  failureClassification: agentFailureClassificationSchema.optional(),
   role: agentRoleSchema.optional(),
   model: z.string().optional(),
   /**
@@ -333,6 +349,9 @@ export const startAgentRunRequestSchema = z.strictObject({
    */
   runId: ipcIdSchema.optional(),
   taskId: ipcIdSchema.optional(),
+  /** Milestone 24 (ADR-0009): pin the run to a specific account / execution profile. */
+  accountProfileId: ipcIdSchema.optional(),
+  executionProfileId: ipcIdSchema.optional(),
   role: agentRoleSchema.optional(),
   model: ipcIdSchema.optional(),
   mode: z.enum(['interactive', 'exec']).optional(),
