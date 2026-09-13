@@ -1234,3 +1234,31 @@ body {
   background: var(--workflow-diff-bg);
   border-radius: 6px;
 }
+
+.account-agent-list,
+.account-agent-list > .ant-space-item,
+.account-card-list,
+.account-card-list > .ant-space-item,
+.account-card-body {
+  width: 100%;
+}
+
+.account-modal-form,
+.account-modal-form > .ant-space-item {
+  width: 100%;
+}
+
+.account-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.account-field .ant-select,
+.account-field .ant-input-number {
+  width: 100%;
+}
+
+.account-login-terminal {
+  height: 420px;
+}

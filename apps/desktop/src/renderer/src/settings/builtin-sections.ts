@@ -1,3 +1,4 @@
+import { AccountsSettingsSection } from './sections/accounts-settings'
 import { AdvancedSettingsSection } from './sections/advanced-settings'
 import { AgentsSettingsSection } from './sections/agents-settings'
 import { EnvironmentSettingsSection } from './sections/environment-settings'
@@ -13,6 +14,13 @@ export function registerBuiltInSettings(registry: SettingsSectionRegistry): void
     description: 'settings.section.agents.description',
     order: 30,
     component: AgentsSettingsSection,
+  })
+  registry.register({
+    id: 'accounts',
+    title: 'settings.section.accounts.title',
+    description: 'settings.section.accounts.description',
+    order: 31,
+    component: AccountsSettingsSection,
   })
   registry.register({
     id: 'permissions',
