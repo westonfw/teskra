@@ -64,6 +64,20 @@ import {
 } from './agent'
 import { continueAgentRunRequestSchema, type ContinueAgentRunRequest } from './agent-continuation'
 import {
+  agentExecutionProfileSchema,
+  createExecutionProfileRequestSchema,
+  executionProfileIdRequestSchema,
+  listExecutionProfilesRequestSchema,
+  setDefaultExecutionProfileRequestSchema,
+  updateExecutionProfileRequestSchema,
+  type AgentExecutionProfile,
+  type CreateExecutionProfileRequest,
+  type ExecutionProfileIdRequest,
+  type ListExecutionProfilesRequest,
+  type SetDefaultExecutionProfileRequest,
+  type UpdateExecutionProfileRequest,
+} from './agent-execution-profile'
+import {
   artifactContentSchema,
   artifactIdRequestSchema,
   artifactSchema,
@@ -432,6 +446,12 @@ export const IPC_CHANNELS = {
   accountLoginWrite: 'teskra:account:login:write',
   accountLoginResize: 'teskra:account:login:resize',
   accountLoginCancel: 'teskra:account:login:cancel',
+  executionProfileList: 'teskra:execution-profile:list',
+  executionProfileGet: 'teskra:execution-profile:get',
+  executionProfileCreate: 'teskra:execution-profile:create',
+  executionProfileUpdate: 'teskra:execution-profile:update',
+  executionProfileRemove: 'teskra:execution-profile:remove',
+  executionProfileSetDefault: 'teskra:execution-profile:set-default',
   permissionListRules: 'teskra:permission:rule:list',
   permissionCreateRule: 'teskra:permission:rule:create',
   permissionUpdateRule: 'teskra:permission:rule:update',
@@ -862,6 +882,40 @@ export const accountLoginCancelChannel = channel(
   cancelAccountLoginRequestSchema,
   voidResponseSchema,
 )
+// TASK-110 (Milestone 24 §6.1/§14): execution profile CRUD + per-agent
+// default. Same shape as the account domain; the default itself is stored in
+// the config layer (agents.defaultExecutionProfiles) and can also be read via
+// settings.resolveConfig, so there is no get-default channel (mirrors account).
+export const executionProfileListChannel = channel(
+  IPC_CHANNELS.executionProfileList,
+  listExecutionProfilesRequestSchema,
+  z.array(agentExecutionProfileSchema),
+)
+export const executionProfileGetChannel = channel(
+  IPC_CHANNELS.executionProfileGet,
+  executionProfileIdRequestSchema,
+  agentExecutionProfileSchema.nullable(),
+)
+export const executionProfileCreateChannel = channel(
+  IPC_CHANNELS.executionProfileCreate,
+  createExecutionProfileRequestSchema,
+  agentExecutionProfileSchema,
+)
+export const executionProfileUpdateChannel = channel(
+  IPC_CHANNELS.executionProfileUpdate,
+  updateExecutionProfileRequestSchema,
+  agentExecutionProfileSchema,
+)
+export const executionProfileRemoveChannel = channel(
+  IPC_CHANNELS.executionProfileRemove,
+  executionProfileIdRequestSchema,
+  z.boolean(),
+)
+export const executionProfileSetDefaultChannel = channel(
+  IPC_CHANNELS.executionProfileSetDefault,
+  setDefaultExecutionProfileRequestSchema,
+  voidResponseSchema,
+)
 export const permissionListRulesChannel = channel(
   IPC_CHANNELS.permissionListRules,
   listPermissionRulesRequestSchema,
@@ -1247,6 +1301,12 @@ export const ipcChannelDefinitions = {
   accountLoginWrite: accountLoginWriteChannel,
   accountLoginResize: accountLoginResizeChannel,
   accountLoginCancel: accountLoginCancelChannel,
+  executionProfileList: executionProfileListChannel,
+  executionProfileGet: executionProfileGetChannel,
+  executionProfileCreate: executionProfileCreateChannel,
+  executionProfileUpdate: executionProfileUpdateChannel,
+  executionProfileRemove: executionProfileRemoveChannel,
+  executionProfileSetDefault: executionProfileSetDefaultChannel,
   permissionListRules: permissionListRulesChannel,
   permissionCreateRule: permissionCreateRuleChannel,
   permissionUpdateRule: permissionUpdateRuleChannel,
@@ -1429,6 +1489,20 @@ export interface TeskraBridge {
     writeLogin(request: WriteAccountLoginRequest): Promise<IpcResult<void>>
     resizeLogin(request: ResizeAccountLoginRequest): Promise<IpcResult<void>>
     cancelLogin(request: CancelAccountLoginRequest): Promise<IpcResult<void>>
+  }
+  /**
+   * TASK-110 (Milestone 24 §6.1/§14): execution profile CRUD + per-agent
+   * default. Removal is a hard delete (no soft-disable lifecycle — that is
+   * account-only, §47.1). The default can also be read via
+   * settings.resolveConfig (config.agents.defaultExecutionProfiles).
+   */
+  readonly executionProfile: {
+    list(request?: ListExecutionProfilesRequest): Promise<IpcResult<AgentExecutionProfile[]>>
+    get(request: ExecutionProfileIdRequest): Promise<IpcResult<AgentExecutionProfile | null>>
+    create(request: CreateExecutionProfileRequest): Promise<IpcResult<AgentExecutionProfile>>
+    update(request: UpdateExecutionProfileRequest): Promise<IpcResult<AgentExecutionProfile>>
+    remove(request: ExecutionProfileIdRequest): Promise<IpcResult<boolean>>
+    setDefault(request: SetDefaultExecutionProfileRequest): Promise<IpcResult<void>>
   }
   readonly permission: {
     listRules(request?: ListPermissionRulesRequest): Promise<IpcResult<PermissionRule[]>>

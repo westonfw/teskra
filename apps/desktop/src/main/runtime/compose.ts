@@ -19,6 +19,7 @@ import { createAccountProfileAdapterRegistry } from '../agents/accounts/account-
 import { createAccountProfileManager } from '../agents/accounts/account-profile-manager'
 import { createAccountProfileStatusService } from '../agents/accounts/account-profile-status-service'
 import { createAccountLoginService } from '../agents/accounts/account-login-service'
+import { createExecutionProfileManager } from '../agents/execution-profiles/execution-profile-manager'
 import { createClaudeAccountProfileAdapter } from '../agents/accounts/adapters/claude-account-profile-adapter'
 import { registerCodexAccountProfileAdapter } from '../agents/accounts/adapters/codex-account-profile-adapter'
 import { createClaudeAdapter } from '../agents/adapters/claude-adapter'
@@ -37,6 +38,7 @@ import {
   createAccountProfileRepository,
   createArtifactRepository,
   createCriteriaRepository,
+  createExecutionProfileRepository,
   createHandoffRepository,
   createMemoryRepository,
   createPermissionRepository,
@@ -131,6 +133,7 @@ function createRepositories(connection: TeskraDatabase['connection']) {
     agentEvents: createAgentEventRepository(connection),
     accountProfiles: createAccountProfileRepository(connection),
     accountEvents: createAccountEventRepository(connection),
+    executionProfiles: createExecutionProfileRepository(connection),
     artifacts: createArtifactRepository(connection),
     worktrees: createWorktreeRepository(connection),
     workflowRuns: createWorkflowRunRepository(connection),
@@ -403,6 +406,14 @@ export async function composeTeskraRuntime(
     createRuntime: runtimeFor,
     commands,
   })
+  // TASK-110 (§6.1/§14/§15): execution profiles — CRUD + default + the
+  // Run-start resolve the AgentManager consumes below.
+  const executionProfileManager = createExecutionProfileManager({
+    profiles: repositories.executionProfiles,
+    accountProfiles: repositories.accountProfiles,
+    registry: registeredAgents.data,
+    config,
+  })
   // TASK-102 (§24): the interactive login sessions — spawned through the
   // ProcessManager with adapter-built argv/env, never a shell string.
   const accountLoginService = createAccountLoginService({
@@ -484,6 +495,7 @@ export async function composeTeskraRuntime(
     criteria: repositories.criteria,
     credentials,
     accountProfiles: accountProfileManager,
+    executionProfiles: executionProfileManager,
     // TASK-105 (§17): post-hoc failure classification for Codex / Claude runs.
     failureClassifiers: [createCodexFailureClassifier(), createClaudeFailureClassifier()],
     resolveRuntime: runtimeFor,
@@ -935,6 +947,16 @@ export async function composeTeskraRuntime(
       resizeLogin: ({ sessionId, cols, rows }) =>
         Promise.resolve(accountLoginService.resize(sessionId, cols, rows)),
       cancelLogin: ({ sessionId }) => accountLoginService.cancel(sessionId),
+    },
+    executionProfile: {
+      list: (request = {}) => executionProfileManager.list(request),
+      get: ({ id }) => executionProfileManager.get(id),
+      create: (request) => executionProfileManager.create(request),
+      update: ({ id, patch }) => executionProfileManager.update(id, patch),
+      remove: ({ id }) => executionProfileManager.remove(id),
+      setDefault: ({ agentId, profileId }) =>
+        executionProfileManager.setDefault(agentId, profileId),
+      getDefault: ({ agentId }) => executionProfileManager.getDefault(agentId),
     },
     workspace: {
       create: (request) => workspaceManager.create(request),

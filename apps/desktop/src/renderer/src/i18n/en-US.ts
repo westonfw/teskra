@@ -236,6 +236,10 @@ export const enUS = {
     'Enable the account profile in Settings → Accounts, or choose another profile.',
   'errorSuggestion.ACCOUNT_PROFILE_INCOMPATIBLE':
     'The account profile targets a different runtime. Choose a profile that matches this workspace runtime.',
+  'errorSuggestion.EXECUTION_PROFILE_NOT_FOUND':
+    'The execution profile no longer exists. Choose another profile or create a new one in Settings.',
+  'errorSuggestion.EXECUTION_PROFILE_MISMATCH':
+    'The selected execution profile belongs to a different agent. Choose a profile for this agent.',
   'errorSuggestion.UNKNOWN':
     'Retry the operation. If it persists, open the logs from Settings → Advanced.',
 

@@ -220,6 +220,10 @@ export const zhCN: Record<TranslationKey, string> = {
     '请在 设置 → 账号 中启用该账号 Profile，或选择其他 Profile。',
   'errorSuggestion.ACCOUNT_PROFILE_INCOMPATIBLE':
     '该账号 Profile 属于另一个运行时。请选择与当前工作区运行时匹配的 Profile。',
+  'errorSuggestion.EXECUTION_PROFILE_NOT_FOUND':
+    '该执行 Profile 已不存在。请选择其他 Profile，或在设置中新建。',
+  'errorSuggestion.EXECUTION_PROFILE_MISMATCH':
+    '所选执行 Profile 属于另一个 Agent。请选择属于当前 Agent 的 Profile。',
   'errorSuggestion.UNKNOWN': '重试该操作。如果问题持续存在，请从 设置 → 高级 打开日志。',
 
   // Main 进程 PublicAppError 的本地化文案（与 en-US 的 errorMessage.* 一一对应）。

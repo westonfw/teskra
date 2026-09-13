@@ -327,6 +327,30 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.account.cancelLogin(request)),
   )
   register(
+    ipcChannelDefinitions.executionProfileList,
+    withRuntime((runtime, request) => runtime.executionProfile.list(request)),
+  )
+  register(
+    ipcChannelDefinitions.executionProfileGet,
+    withRuntime((runtime, request) => runtime.executionProfile.get(request)),
+  )
+  register(
+    ipcChannelDefinitions.executionProfileCreate,
+    withRuntime((runtime, request) => runtime.executionProfile.create(request)),
+  )
+  register(
+    ipcChannelDefinitions.executionProfileUpdate,
+    withRuntime((runtime, request) => runtime.executionProfile.update(request)),
+  )
+  register(
+    ipcChannelDefinitions.executionProfileRemove,
+    withRuntime((runtime, request) => runtime.executionProfile.remove(request)),
+  )
+  register(
+    ipcChannelDefinitions.executionProfileSetDefault,
+    withRuntime((runtime, request) => runtime.executionProfile.setDefault(request)),
+  )
+  register(
     ipcChannelDefinitions.permissionListRules,
     withRuntime((runtime, request) => runtime.permission.listRules(request)),
   )

@@ -617,6 +617,32 @@ const SCHEMA: Record<string, TableSpec> = {
     foreignKeys: [],
     indexes: [],
   },
+  agent_execution_profiles: {
+    source: '§139.1 lines 5601–5628 (014_agent_execution_profiles, TASK-110)',
+    columns: [
+      ['id', 'TEXT', 0, null, 1],
+      ['name', 'TEXT', 1, null, 0],
+      ['agent_id', 'TEXT', 1, null, 0],
+      ['account_profile_id', 'TEXT', 0, null, 0],
+      ['model', 'TEXT', 0, null, 0],
+      ['reasoning_effort', 'TEXT', 0, null, 0],
+      ['approval_mode', 'TEXT', 0, null, 0],
+      ['created_at', 'TEXT', 1, null, 0],
+      ['updated_at', 'TEXT', 1, null, 0],
+    ],
+    // 删除策略是 RESTRICT 语义（无显式 ON DELETE → NO ACTION）：被引用的
+    // account profile 不能被硬删除——第一期 remove 是 soft disable 不 DELETE，
+    // 这条 FK 守的是意外路径（设计文档 §8.2）。
+    foreignKeys: [
+      {
+        from: 'account_profile_id',
+        table: 'agent_account_profiles',
+        to: 'id',
+        onDelete: 'NO ACTION',
+      },
+    ],
+    indexes: [],
+  },
 }
 
 const openConnections: Database.Database[] = []

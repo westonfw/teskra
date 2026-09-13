@@ -7,6 +7,7 @@ import {
   type AcceptanceCriterion,
   type AccountLoginSession,
   type AgentAccountProfile,
+  type AgentExecutionProfile,
   type AgentRun,
   type IpcResult,
   type Task,
@@ -122,6 +123,18 @@ const LOGIN_SESSION: AccountLoginSession = {
   sessionId: 'sess-1',
   profileId: 'acct-1',
   startedAt: '2026-09-10T00:00:00.000Z',
+}
+
+const EXECUTION_PROFILE: AgentExecutionProfile = {
+  id: 'exec-1',
+  name: 'Codex Personal High',
+  agentId: 'codex',
+  accountProfileId: 'acct-1',
+  model: 'gpt-5-codex',
+  reasoningEffort: 'high',
+  approvalMode: 'safe-auto',
+  createdAt: '2026-09-10T00:00:00.000Z',
+  updatedAt: '2026-09-10T00:00:00.000Z',
 }
 
 const WORKFLOW_RUN: WorkflowRun = {
@@ -331,6 +344,15 @@ function fakeRuntime(): TeskraRuntime {
       resizeLogin: vi.fn(async () => ok(undefined)),
       cancelLogin: vi.fn(async () => ok(undefined)),
     },
+    executionProfile: {
+      list: vi.fn(async () => ok([])),
+      get: vi.fn(async () => ok(null)),
+      create: vi.fn(async () => ok(EXECUTION_PROFILE)),
+      update: vi.fn(async () => ok(EXECUTION_PROFILE)),
+      remove: vi.fn(async () => ok(true)),
+      setDefault: vi.fn(async () => ok(undefined)),
+      getDefault: vi.fn(async () => ok(undefined)),
+    },
     git: {
       status: vi.fn(async () => ok({ ahead: 0, behind: 0, clean: true, entries: [] })),
       branch: vi.fn(async () => ok({ current: 'main', detached: false, branches: ['main'] })),
@@ -522,7 +544,9 @@ describe('Typed IPC Router (TASK-020)', () => {
         .map((definition) => definition.channel)
         .sort(),
     )
-    expect(Object.keys(IPC_CHANNELS).some((name) => /exec/iu.test(name))).toBe(false)
+    // Word-boundary: "executionProfile*" keys are execution PROFILE channels,
+    // not a generic exec endpoint.
+    expect(Object.keys(IPC_CHANNELS).some((name) => /\bexec\b/iu.test(name))).toBe(false)
     expect(Object.values(IPC_CHANNELS).some((name) => /:exec(?::|$)/u.test(name))).toBe(false)
   })
 
@@ -932,6 +956,63 @@ describe('Typed IPC Router (TASK-020)', () => {
       data: undefined,
     })
     expect(runtime.account.setDefault).toHaveBeenCalledWith(defaultRequest)
+  })
+
+  it('routes execution profile CRUD and set-default through the runtime facade (TASK-110)', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    expect(await ipc.invoke(IPC_CHANNELS.executionProfileList, { agentId: 'codex' })).toEqual({
+      ok: true,
+      data: [],
+    })
+    expect(runtime.executionProfile.list).toHaveBeenCalledWith({ agentId: 'codex' })
+
+    expect(await ipc.invoke(IPC_CHANNELS.executionProfileGet, { id: 'exec-1' })).toEqual({
+      ok: true,
+      data: null,
+    })
+    expect(runtime.executionProfile.get).toHaveBeenCalledWith({ id: 'exec-1' })
+
+    const createRequest = {
+      agentId: 'codex',
+      name: 'Codex Personal High',
+      accountProfileId: 'acct-1',
+      model: 'gpt-5-codex',
+      reasoningEffort: 'high',
+      approvalMode: 'safe-auto',
+    }
+    expect(await ipc.invoke(IPC_CHANNELS.executionProfileCreate, createRequest)).toEqual({
+      ok: true,
+      data: EXECUTION_PROFILE,
+    })
+    expect(runtime.executionProfile.create).toHaveBeenCalledWith(createRequest)
+
+    const updateRequest = { id: 'exec-1', patch: { name: 'Renamed', model: null } }
+    expect(await ipc.invoke(IPC_CHANNELS.executionProfileUpdate, updateRequest)).toEqual({
+      ok: true,
+      data: EXECUTION_PROFILE,
+    })
+    expect(runtime.executionProfile.update).toHaveBeenCalledWith(updateRequest)
+
+    expect(await ipc.invoke(IPC_CHANNELS.executionProfileRemove, { id: 'exec-1' })).toEqual({
+      ok: true,
+      data: true,
+    })
+    expect(runtime.executionProfile.remove).toHaveBeenCalledWith({ id: 'exec-1' })
+
+    const defaultRequest = { agentId: 'codex', profileId: 'exec-1' }
+    expect(await ipc.invoke(IPC_CHANNELS.executionProfileSetDefault, defaultRequest)).toEqual({
+      ok: true,
+      data: undefined,
+    })
+    expect(runtime.executionProfile.setDefault).toHaveBeenCalledWith(defaultRequest)
+
+    // Zod validation guards the channel before the facade is touched.
+    const invalid = await ipc.invoke(IPC_CHANNELS.executionProfileCreate, { name: 'No agent' })
+    expect(invalid).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    expect(runtime.executionProfile.create).toHaveBeenCalledTimes(1)
   })
 
   it('rejects invalid account requests with VALIDATION_FAILED instead of throwing (TASK-102)', async () => {

@@ -9,6 +9,7 @@ import type {
   AgentDefinition,
   AgentDetectionRequest,
   AgentDetectionResult,
+  AgentExecutionProfile,
   AgentRun,
   AgentRunIdRequest,
   AgentRunOutputRequest,
@@ -25,6 +26,7 @@ import type {
   ContinueAgentRunRequest,
   CreateAccountProfileRequest,
   CreateCriteriaSetRequest,
+  CreateExecutionProfileRequest,
   CreateTaskRequest,
   CreateTerminalRequest,
   CreateWorkspaceRequest,
@@ -37,6 +39,7 @@ import type {
   DeleteCredentialRequest,
   DiffResult,
   DoctorReport,
+  ExecutionProfileIdRequest,
   FutureRuntimePortName,
   GitBranch,
   GitCommit,
@@ -52,6 +55,7 @@ import type {
   HandoffRecord,
   IpcResult,
   ListAccountProfilesRequest,
+  ListExecutionProfilesRequest,
   ListRecoveryIssuesRequest,
   ListRecentWorkspacesRequest,
   ListAgentDetectionsRequest,
@@ -109,6 +113,7 @@ import type {
   SetAgentExecutableOverrideRequest,
   SetCredentialRequest,
   SetDefaultAccountProfileRequest,
+  SetDefaultExecutionProfileRequest,
   StartAccountLoginRequest,
   StartFullWorkflowRequest,
   StartReviewPanelRequest,
@@ -128,6 +133,7 @@ import type {
   TerminalWriteRequest,
   UpdateConfigRequest,
   UpdateAccountProfileRequest,
+  UpdateExecutionProfileRequest,
   UpdateCriterionRequest,
   UpdateMemoryRequest,
   UpdatePermissionRuleRequest,
@@ -186,6 +192,22 @@ export interface AccountPort {
   writeLogin(request: WriteAccountLoginRequest): Promise<IpcResult<void>>
   resizeLogin(request: ResizeAccountLoginRequest): Promise<IpcResult<void>>
   cancelLogin(request: CancelAccountLoginRequest): Promise<IpcResult<void>>
+}
+
+/**
+ * Milestone 24 (TASK-110, §6.1/§14/§15): execution profile CRUD + per-agent
+ * default. Same shape as AccountPort minus the login/status machinery —
+ * removal is a hard delete (execution profiles have no soft-disable
+ * lifecycle), and the default lives in the config layer.
+ */
+export interface ExecutionProfilePort {
+  list(request?: ListExecutionProfilesRequest): Promise<IpcResult<readonly AgentExecutionProfile[]>>
+  get(request: ExecutionProfileIdRequest): Promise<IpcResult<AgentExecutionProfile | null>>
+  create(request: CreateExecutionProfileRequest): Promise<IpcResult<AgentExecutionProfile>>
+  update(request: UpdateExecutionProfileRequest): Promise<IpcResult<AgentExecutionProfile>>
+  remove(request: ExecutionProfileIdRequest): Promise<IpcResult<boolean>>
+  setDefault(request: SetDefaultExecutionProfileRequest): Promise<IpcResult<void>>
+  getDefault(request: { agentId: string }): Promise<IpcResult<string | undefined>>
 }
 
 export interface WorkspacePort {
@@ -441,6 +463,7 @@ export interface TeskraRuntime {
   readonly review: ReviewPort
   readonly agent: AgentCatalogPort
   readonly account: AccountPort
+  readonly executionProfile: ExecutionProfilePort
   readonly git: GitPort
   readonly worktree: WorktreePort
   readonly maintenance: MaintenancePort

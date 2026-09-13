@@ -82,7 +82,7 @@ describe('migrations 012/013 (TASK-095)', () => {
     const upgraded = migrateDatabase(db)
     expect(upgraded).toEqual({
       ok: true,
-      data: { fromVersion: 11, toVersion: 13, applied: [12, 13] },
+      data: { fromVersion: 11, toVersion: 14, applied: [12, 13, 14] },
     })
 
     const runs = db.prepare('SELECT id FROM agent_runs ORDER BY id').all() as { id: string }[]
@@ -111,7 +111,7 @@ describe('migrations 012/013 (TASK-095)', () => {
   it('is re-runnable: a second migrateDatabase applies nothing', () => {
     const db = migratedDb()
     const second = migrateDatabase(db)
-    expect(second).toEqual({ ok: true, data: { fromVersion: 13, toVersion: 13, applied: [] } })
+    expect(second).toEqual({ ok: true, data: { fromVersion: 14, toVersion: 14, applied: [] } })
   })
 
   it('passes foreign_key_check after migrating with rows in place', () => {

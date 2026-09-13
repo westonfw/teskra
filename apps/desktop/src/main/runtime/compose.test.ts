@@ -108,6 +108,12 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       ok: true,
       data: undefined,
     })
+    // TASK-110: the execution profile port is mounted too.
+    await expect(runtime.executionProfile.list()).resolves.toEqual({ ok: true, data: [] })
+    await expect(runtime.executionProfile.getDefault({ agentId: 'codex' })).resolves.toEqual({
+      ok: true,
+      data: undefined,
+    })
     if (!created.ok) throw new Error('expected workspace')
     const task = runtime.task.create({ workspaceId: created.data.id, title: 'Compose runtime' })
     expect(task).toMatchObject({

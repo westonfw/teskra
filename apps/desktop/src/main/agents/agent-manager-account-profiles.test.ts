@@ -414,7 +414,7 @@ describe('AgentManager account profile integration (TASK-100)', () => {
     expect(fixture.processes.starts).toHaveLength(0)
   })
 
-  it('rejects executionProfileId with a structured "not supported yet" error (TASK-110 boundary)', async () => {
+  it('rejects executionProfileId when no ExecutionProfileManager is composed (TASK-110)', async () => {
     const fixture = setup()
 
     const started = await fixture.manager.start({

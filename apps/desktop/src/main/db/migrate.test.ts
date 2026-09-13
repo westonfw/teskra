@@ -214,8 +214,10 @@ describe('runMigrations (TASK-006)', () => {
 })
 
 describe('MIGRATIONS registry (TASK-006)', () => {
-  it('is the ordered 001–013 chain', () => {
-    expect(MIGRATIONS.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13])
+  it('is the ordered 001–014 chain', () => {
+    expect(MIGRATIONS.map((m) => m.version)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
+    ])
     expect(MIGRATIONS.map((m) => m.name)).toEqual([
       '001_init',
       '002_runs',
@@ -230,6 +232,7 @@ describe('MIGRATIONS registry (TASK-006)', () => {
       '011_agent_run_pid_identity',
       '012_agent_account_profiles',
       '013_agent_run_account_profile',
+      '014_agent_execution_profiles',
     ])
   })
 
@@ -240,14 +243,14 @@ describe('MIGRATIONS registry (TASK-006)', () => {
       ok: true,
       data: {
         fromVersion: 0,
-        toVersion: 13,
-        applied: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+        toVersion: 14,
+        applied: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
       },
     })
-    expect(appliedVersions(db)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13])
+    expect(appliedVersions(db)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])
 
     const second = migrateDatabase(db)
-    expect(second).toEqual({ ok: true, data: { fromVersion: 13, toVersion: 13, applied: [] } })
+    expect(second).toEqual({ ok: true, data: { fromVersion: 14, toVersion: 14, applied: [] } })
   })
 
   it('007/008 upgrade a populated v6 database without losing workflow runs or steps (TASK-056/062)', () => {
@@ -277,7 +280,7 @@ describe('MIGRATIONS registry (TASK-006)', () => {
     const upgraded = migrateDatabase(db)
     expect(upgraded).toEqual({
       ok: true,
-      data: { fromVersion: 6, toVersion: 13, applied: [7, 8, 9, 10, 11, 12, 13] },
+      data: { fromVersion: 6, toVersion: 14, applied: [7, 8, 9, 10, 11, 12, 13, 14] },
     })
 
     // Rows survived the table rebuild (DROP TABLE would have cascaded with FK on).

@@ -10,6 +10,7 @@ import {
   type AgentFailureClassification,
   type AgentStartRequest,
   type AgentAccountProfile,
+  type AgentExecutionProfile,
   type AgentResumeProfileContext,
   type AgentRun,
   type AgentRunProfileSnapshot,
@@ -66,6 +67,7 @@ import type { AgentFailureClassifier } from './adapters/failure-classifier'
 import type { AccountProfileManager } from './accounts/account-profile-manager'
 import { assertNoReservedEnvKeys } from './accounts/reserved-env-keys'
 import { projectHistoricalProfileIdentity } from './accounts/runtime-identity'
+import type { ExecutionProfileManager } from './execution-profiles/execution-profile-manager'
 import type { WorkspaceRuntime } from '../workspace/runtime'
 
 export interface AgentManager {
@@ -176,6 +178,14 @@ export interface AgentManagerDeps {
     AccountProfileManager,
     'resolve' | 'get' | 'adapterFor' | 'reservedEnvKeys'
   >
+  /**
+   * Milestone 24 (TASK-110, §14): execution-profile resolution for Run
+   * start. The profile supplies account (when the request does not pin one
+   * explicitly), model, reasoningEffort, and approvalMode; its agentId must
+   * equal the request's agentType. Without it, any explicit
+   * executionProfileId is rejected rather than silently ignored.
+   */
+  readonly executionProfiles?: Pick<ExecutionProfileManager, 'resolve'>
   /**
    * TASK-105 (§17 / ADR-0010): per-agent failure classifiers. Runs of an
    * agent without a registered classifier keep a NULL
@@ -864,10 +874,16 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
   }
 
   /**
-   * Milestone 24 §7/§13/§14 (TASK-100): run the §37 selector for a start
-   * request and, when a profile is selected, project its env and capture the
-   * Run snapshot. The legacy path (no profile) returns all-undefined so the
-   * launch stays byte-identical to pre-profile behavior (§50.1/§52).
+   * Milestone 24 §7/§13/§14 (TASK-100/110): run the profile selectors for a
+   * start request and, when profiles are selected, project the account env
+   * and capture the Run snapshot. The legacy path (no profiles) returns
+   * all-undefined so the launch stays byte-identical to pre-profile behavior
+   * (§50.1/§52).
+   *
+   * §14 order: the execution profile resolves FIRST; its account feeds the
+   * §37 account selector unless the request pins accountProfileId explicitly
+   * (Run explicit override > ExecutionProfile.account > Agent default). Every
+   * override is recorded in the snapshot as resolved.
    */
   const resolveStartProfile = async (
     request: StartAgentRunRequest,
@@ -875,12 +891,34 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
   ): Promise<
     IpcResult<{
       accountProfileId?: string | undefined
+      executionProfile?: AgentExecutionProfile | undefined
+      /** §14: request.model wins; otherwise the execution profile's model. */
+      model?: string | undefined
       profileEnvironment?: Record<string, string> | undefined
       profileSnapshot?: AgentRunProfileSnapshot | undefined
       /** §46.3 (TASK-117): the selected profile's own concurrency limit. */
       maxConcurrentRuns?: number | undefined
     }>
   > => {
+    let executionProfile: AgentExecutionProfile | undefined
+    if (request.executionProfileId !== undefined) {
+      if (deps.executionProfiles === undefined) {
+        return fail({
+          code: 'CAPABILITY_NOT_AVAILABLE',
+          message:
+            'Execution profiles are not available in this runtime; the run cannot be started with an explicit execution profile.',
+          retryable: false,
+          detail: `start with executionProfileId=${request.executionProfileId} but no ExecutionProfileManager composed`,
+        })
+      }
+      const resolvedProfile = await deps.executionProfiles.resolve(
+        request.executionProfileId,
+        request.agentType,
+      )
+      if (!resolvedProfile.ok) return resolvedProfile
+      executionProfile = resolvedProfile.data
+    }
+    const model = request.model ?? executionProfile?.model
     if (deps.accountProfiles === undefined) {
       if (request.accountProfileId !== undefined) {
         return fail({
@@ -891,35 +929,86 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           detail: `start with accountProfileId=${request.accountProfileId} but no AccountProfileManager composed`,
         })
       }
-      return { ok: true, data: {} }
+      if (executionProfile?.accountProfileId !== undefined) {
+        return fail({
+          code: 'CAPABILITY_NOT_AVAILABLE',
+          message:
+            'Account profiles are not available in this runtime; the execution profile’s account cannot be resolved.',
+          retryable: false,
+          detail: `execution profile ${executionProfile.id} references account profile ${executionProfile.accountProfileId} but no AccountProfileManager composed`,
+        })
+      }
+      if (executionProfile === undefined) {
+        return { ok: true, data: {} }
+      }
+      return {
+        ok: true,
+        data: {
+          executionProfile,
+          ...(model === undefined ? {} : { model }),
+          profileSnapshot: {
+            executionProfileId: executionProfile.id,
+            executionProfileName: executionProfile.name,
+            ...(executionProfile.reasoningEffort === undefined
+              ? {}
+              : { reasoningEffort: executionProfile.reasoningEffort }),
+            ...(model === undefined ? {} : { model }),
+          },
+        },
+      }
     }
+    // §14: an explicit request accountProfileId overrides the execution
+    // profile's account; the selector's hard rules apply to both (an
+    // execution profile pinning a disabled/incompatible account is a config
+    // error, never a silent downgrade).
     const resolved = await deps.accountProfiles.resolve(
       request.agentType,
       workspaceRuntime,
-      request.accountProfileId,
+      request.accountProfileId ?? executionProfile?.accountProfileId,
     )
     if (!resolved.ok) return resolved
     const profile = resolved.data
-    if (profile === undefined) {
+    if (profile === undefined && executionProfile === undefined) {
       return { ok: true, data: {} }
     }
-    const env = projectProfileForLaunch(request.agentType, profile, workspaceRuntime)
-    if (!env.ok) return env
-    // §7/§14: the snapshot records the profile AS RESOLVED — including when
-    // the selection was an explicit override — so history stays auditable.
+    const profileEnvironment =
+      profile === undefined
+        ? undefined
+        : projectProfileForLaunch(request.agentType, profile, workspaceRuntime)
+    if (profileEnvironment !== undefined && !profileEnvironment.ok) return profileEnvironment
+    // §7/§14: the snapshot records the profiles AS RESOLVED — including when
+    // the account selection was an explicit override — so history stays
+    // auditable.
     return {
       ok: true,
       data: {
-        accountProfileId: profile.id,
-        profileEnvironment: env.data,
+        ...(profile === undefined ? {} : { accountProfileId: profile.id }),
+        ...(executionProfile === undefined ? {} : { executionProfile }),
+        ...(model === undefined ? {} : { model }),
+        ...(profileEnvironment === undefined
+          ? {}
+          : { profileEnvironment: profileEnvironment.data }),
         profileSnapshot: {
-          accountProfileId: profile.id,
-          accountProfileName: profile.name,
-          runtime: profile.runtime,
-          ...(profile.configHome === undefined ? {} : { configHome: profile.configHome }),
-          ...(request.model === undefined ? {} : { model: request.model }),
+          ...(profile === undefined
+            ? {}
+            : {
+                accountProfileId: profile.id,
+                accountProfileName: profile.name,
+                runtime: profile.runtime,
+                ...(profile.configHome === undefined ? {} : { configHome: profile.configHome }),
+              }),
+          ...(executionProfile === undefined
+            ? {}
+            : {
+                executionProfileId: executionProfile.id,
+                executionProfileName: executionProfile.name,
+                ...(executionProfile.reasoningEffort === undefined
+                  ? {}
+                  : { reasoningEffort: executionProfile.reasoningEffort }),
+              }),
+          ...(model === undefined ? {} : { model }),
         },
-        ...(profile.maxConcurrentRuns === undefined
+        ...(profile?.maxConcurrentRuns === undefined
           ? {}
           : { maxConcurrentRuns: profile.maxConcurrentRuns }),
       },
@@ -1068,17 +1157,6 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
 
   const manager: AgentManager = {
     async start(request) {
-      // Milestone 24 (TASK-100 scope boundary): ExecutionProfiles only exist
-      // from TASK-109/110 — refuse loudly instead of silently dropping the
-      // field and launching with an unintended identity.
-      if (request.executionProfileId !== undefined) {
-        return fail({
-          code: 'CAPABILITY_NOT_AVAILABLE',
-          message: 'Execution profiles are not supported yet.',
-          retryable: false,
-          detail: `start with executionProfileId=${request.executionProfileId} before TASK-110`,
-        })
-      }
       const definition = deps.registry.get(request.agentType)
       const adapter = adapters.get(request.agentType)
       if (definition === undefined || adapter === undefined) {
@@ -1187,8 +1265,13 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         })
       }
       const defaultApproval = approvalModeSchema.safeParse(definition.defaults.permissionProfile)
+      // §14 (TASK-110): request approvalMode wins; otherwise the execution
+      // profile's; otherwise the agent default. The result feeds the same
+      // permission-projection channel as before (preparePermission below).
       const approvalMode =
-        request.approvalMode ?? (defaultApproval.success ? defaultApproval.data : 'manual')
+        request.approvalMode ??
+        startProfile.data.executionProfile?.approvalMode ??
+        (defaultApproval.success ? defaultApproval.data : 'manual')
       const policy = resolveConcurrency(workspace.data.id)
       if (!policy.ok) return policy
       const listed = deps.runs.listActive()
@@ -1256,11 +1339,14 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           approvalMode,
           ...(request.taskId === undefined ? {} : { taskId: request.taskId }),
           ...(request.worktreeId === undefined ? {} : { worktreeId: request.worktreeId }),
-          ...(request.model === undefined ? {} : { model: request.model }),
+          ...(startProfile.data.model === undefined ? {} : { model: startProfile.data.model }),
           ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
           ...(startProfile.data.accountProfileId === undefined
             ? {}
             : { accountProfileId: startProfile.data.accountProfileId }),
+          ...(startProfile.data.executionProfile === undefined
+            ? {}
+            : { executionProfileId: startProfile.data.executionProfile.id }),
           ...(startProfile.data.profileSnapshot === undefined
             ? {}
             : { profileSnapshot: startProfile.data.profileSnapshot }),
@@ -1297,7 +1383,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       appendEvent(runId, 'agent.created', { agentType: definition.id, executionMode })
       deps.events.emit('agent.created', { runId })
       // TASK-116 (§41): audit which account identity the Run was launched
-      // with — explicit pin or agent default (§37), recorded as resolved.
+      // with — explicit pin, execution-profile account, or agent default
+      // (§14/§37), recorded as resolved.
       if (
         startProfile.data.accountProfileId !== undefined &&
         startProfile.data.profileSnapshot !== undefined
@@ -1310,7 +1397,18 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
             agentType: definition.id,
             accountProfileId: startProfile.data.accountProfileId,
             accountProfileName: startProfile.data.profileSnapshot.accountProfileName,
-            source: request.accountProfileId !== undefined ? 'explicit' : 'default',
+            source:
+              request.accountProfileId !== undefined
+                ? 'explicit'
+                : startProfile.data.executionProfile?.accountProfileId !== undefined
+                  ? 'execution-profile'
+                  : 'default',
+            ...(startProfile.data.executionProfile === undefined
+              ? {}
+              : {
+                  executionProfileId: startProfile.data.executionProfile.id,
+                  executionProfileName: startProfile.data.executionProfile.name,
+                }),
             ...(request.taskId === undefined ? {} : { taskId: request.taskId }),
           },
         })
@@ -1334,7 +1432,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
                   ? {}
                   : { permissionConfigPath: permission.data.configPath }),
               }),
-          ...(request.model === undefined ? {} : { model: request.model }),
+          ...(startProfile.data.model === undefined ? {} : { model: startProfile.data.model }),
           ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
           ...(worktreePath === undefined ? {} : { worktreePath }),
           handoffPath: runFiles.data.handoff,
@@ -1903,8 +2001,15 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         ...(source.worktreeId === undefined ? {} : { worktreeId: source.worktreeId }),
         executionMode: source.executionMode,
         ...(source.mode === undefined ? {} : { mode: source.mode }),
-        ...(source.approvalMode === undefined ? {} : { approvalMode: source.approvalMode }),
-        ...(source.model === undefined ? {} : { model: source.model }),
+        // TASK-110 (§14): a target execution profile supplies model /
+        // approvalMode itself — forwarding the source run's values would
+        // override the profile the user explicitly switched to.
+        ...(request.targetExecutionProfileId === undefined && source.approvalMode !== undefined
+          ? { approvalMode: source.approvalMode }
+          : {}),
+        ...(request.targetExecutionProfileId === undefined && source.model !== undefined
+          ? { model: source.model }
+          : {}),
         ...(request.targetAccountProfileId === undefined
           ? {}
           : { accountProfileId: request.targetAccountProfileId }),
