@@ -160,7 +160,7 @@ describe('TerminalManager (TASK-017)', () => {
     expect(result.ok && result.data.title).toBe('Ubuntu shell')
     expect(processFake.contexts[0]).toEqual({
       executable: 'wsl.exe',
-      args: ['-d', 'Ubuntu-24.04', '--cd', '/home/dev/repo', 'bash', '-l'],
+      args: ['-d', 'Ubuntu-24.04', '--cd', '/home/dev/repo', '--exec', 'bash', '-l'],
     })
     expect(processFake.starts[0]).toMatchObject({ cols: 140, rows: 45, workspaceId: 'wsl-ws' })
   })

@@ -182,7 +182,7 @@ describe('WindowsRuntime', () => {
 describe('WslRuntime (Windows host)', () => {
   const ref = { kind: 'wsl', distro: 'Ubuntu-24.04' } as const
 
-  it('wraps commands with wsl.exe -d <distro> --cd when WSL supports it', () => {
+  it('wraps commands with wsl.exe -d <distro> --cd --exec when WSL supports it', () => {
     const result = createWorkspaceRuntime(
       ref,
       deps({ wsl: { available: true, version: '2.4.11.0' } }),
@@ -193,7 +193,7 @@ describe('WslRuntime (Windows host)', () => {
     expect(runtime.hostNative).toBe(false)
     expect(runtime.resolveCommand('git', ['status'], '/home/u/demo')).toEqual({
       executable: 'wsl.exe',
-      args: ['-d', 'Ubuntu-24.04', '--cd', '/home/u/demo', 'git', 'status'],
+      args: ['-d', 'Ubuntu-24.04', '--cd', '/home/u/demo', '--exec', 'git', 'status'],
     })
     expect(runtime.resolveHostPath('/home/u/demo/file.ts')).toEqual({
       ok: true,
@@ -201,7 +201,7 @@ describe('WslRuntime (Windows host)', () => {
     })
     expect(resolveExecutableLookup(runtime, 'claude')).toEqual({
       executable: 'wsl.exe',
-      args: ['-d', 'Ubuntu-24.04', 'which', 'claude'],
+      args: ['-d', 'Ubuntu-24.04', '--exec', 'which', 'claude'],
     })
     expect(runtime.validate()).toEqual({
       ok: true,
@@ -277,6 +277,7 @@ describe('WslRuntime (Windows host)', () => {
       'Debian',
       '--cd',
       '/repo',
+      '--exec',
       'git',
       'status',
     ])

@@ -261,6 +261,7 @@ describe('CodexAdapter process integration (TASK-026)', () => {
         'Ubuntu',
         '--cd',
         '/workspaces/demo',
+        '--exec',
         '/home/test/.local/bin/codex',
         '--sandbox',
         'workspace-write',

@@ -316,7 +316,12 @@ function createWslRuntime(
         if (cwd !== undefined) {
           wslArgs.push('--cd', cwd)
         }
-        wslArgs.push(command, ...args)
+        // `--exec` is load-bearing: without it wsl.exe routes the command
+        // through `bash -c` with the argv space-joined UNQUOTED, so any arg
+        // with shell metacharacters (git pathspec `:(exclude)…`, `*`) breaks
+        // and multi-line prompts get torn at every line break — the same
+        // truncation class as the Windows cmd-shim bug.
+        wslArgs.push('--exec', command, ...args)
         return { executable: WSL_EXE, args: wslArgs }
       }
       const script =
