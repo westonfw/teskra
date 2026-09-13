@@ -4,6 +4,7 @@ import { toPublicError } from '../errors'
 import { CLAUDE_AGENT } from './definitions/claude'
 import { CODEX_AGENT } from './definitions/codex'
 import { FAKE_AGENT } from './definitions/fake'
+import { KIMI_AGENT } from './definitions/kimi'
 
 export interface AgentRegistry {
   register(definition: unknown): IpcResult<AgentDefinition>
@@ -56,7 +57,7 @@ export function createAgentRegistry(initial: readonly unknown[] = []): IpcResult
 }
 
 export function createBuiltInAgentRegistry(): IpcResult<AgentRegistry> {
-  return createAgentRegistry([CODEX_AGENT, CLAUDE_AGENT])
+  return createAgentRegistry([CODEX_AGENT, CLAUDE_AGENT, KIMI_AGENT])
 }
 
 export function createDefaultAgentRegistry(
@@ -65,6 +66,7 @@ export function createDefaultAgentRegistry(
   return createAgentRegistry([
     CODEX_AGENT,
     CLAUDE_AGENT,
+    KIMI_AGENT,
     ...(includeDevelopmentAgents ? [FAKE_AGENT] : []),
   ])
 }

@@ -18,6 +18,7 @@ import { createDefaultAgentRegistry } from '../agents/agent-registry'
 import { createClaudeAdapter } from '../agents/adapters/claude-adapter'
 import { createCodexAdapter } from '../agents/adapters/codex-adapter'
 import { createFakeAgentAdapter } from '../agents/adapters/fake-agent-adapter'
+import { createKimiAdapter } from '../agents/adapters/kimi-adapter'
 import { createRunLogStore } from '../agents/run-log-store'
 import { openDatabase, type TeskraDatabase } from '../db'
 import { migrateDatabase } from '../db/migrations'
@@ -378,6 +379,7 @@ export async function composeTeskraRuntime(
     adapters: [
       createCodexAdapter(adapterOptions),
       createClaudeAdapter(adapterOptions),
+      createKimiAdapter(adapterOptions),
       ...(options.includeDevelopmentAgents === true
         ? [
             createFakeAgentAdapter({

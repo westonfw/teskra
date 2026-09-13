@@ -27,11 +27,11 @@ const FAKE: AgentDefinition = {
 }
 
 describe('AgentRegistry', () => {
-  it('ships Codex and Claude as validated definitions', () => {
+  it('ships Codex, Claude and Kimi as validated definitions', () => {
     const created = createBuiltInAgentRegistry()
     expect(created.ok).toBe(true)
     if (!created.ok) return
-    expect(created.data.list().map(({ id }) => id)).toEqual(['codex', 'claude'])
+    expect(created.data.list().map(({ id }) => id)).toEqual(['codex', 'claude', 'kimi'])
   })
 
   it('accepts a third Agent without changing registry logic', () => {
@@ -47,8 +47,8 @@ describe('AgentRegistry', () => {
     const production = createDefaultAgentRegistry(false)
     if (!development.ok || !production.ok) throw new Error('expected registries')
 
-    expect(development.data.list().map(({ id }) => id)).toEqual(['codex', 'claude', 'fake'])
-    expect(production.data.list().map(({ id }) => id)).toEqual(['codex', 'claude'])
+    expect(development.data.list().map(({ id }) => id)).toEqual(['codex', 'claude', 'kimi', 'fake'])
+    expect(production.data.list().map(({ id }) => id)).toEqual(['codex', 'claude', 'kimi'])
   })
 
   it('rejects malformed and duplicate definitions', () => {

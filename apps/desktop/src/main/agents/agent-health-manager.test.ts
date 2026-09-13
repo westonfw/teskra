@@ -90,12 +90,13 @@ describe('AgentHealthManager (TASK-024)', () => {
 
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.data).toHaveLength(3)
+    expect(result.data).toHaveLength(4)
     expect(result.data.find(({ agentId }) => agentId === 'codex')?.available).toBe(true)
     expect(result.data.find(({ agentId }) => agentId === 'claude')).toMatchObject({
       installed: false,
       available: false,
     })
+    expect(result.data.find(({ agentId }) => agentId === 'kimi')?.available).toBe(true)
     expect(result.data.find(({ agentId }) => agentId === 'fake')?.available).toBe(true)
   })
 })

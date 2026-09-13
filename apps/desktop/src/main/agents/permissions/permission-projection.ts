@@ -122,10 +122,31 @@ export const CODEX_PERMISSION_MAPPING: AgentPermissionMapping = {
   },
 }
 
+/**
+ * Kimi Code CLI permission modes are launch flags: `--plan` (read-only
+ * planning), `--yolo` (Ask When Needed), `--auto` (Never Ask); the Always-Ask
+ * default needs no flag. It has no rule-list mechanism we can target, so
+ * allow/deny entries are deliberately NOT translated. The flags conflict with
+ * `--prompt`; the Adapter omits them for headless launches.
+ */
+const KIMI_PERMISSION_ARGS: Record<ApprovalMode, readonly string[]> = {
+  'read-only': ['--plan'],
+  manual: [],
+  'safe-auto': ['--yolo'],
+  'full-auto': ['--auto'],
+}
+
+export const KIMI_PERMISSION_MAPPING: AgentPermissionMapping = {
+  buildArgs(profile) {
+    return [...KIMI_PERMISSION_ARGS[profile.approvalMode]]
+  },
+}
+
 /** Built-in projections, keyed by AgentDefinition.id. Agents without an entry have no projection. */
 export const AGENT_PERMISSION_MAPPINGS: ReadonlyMap<string, AgentPermissionMapping> = new Map([
   ['claude', CLAUDE_PERMISSION_MAPPING],
   ['codex', CODEX_PERMISSION_MAPPING],
+  ['kimi', KIMI_PERMISSION_MAPPING],
 ])
 
 export function permissionProfileForApprovalMode(

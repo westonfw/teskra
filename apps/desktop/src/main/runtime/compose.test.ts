@@ -99,7 +99,7 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     expect(runtime.terminal.list()).toEqual({ ok: true, data: [] })
     expect(runtime.agent.listDefinitions()).toMatchObject({
       ok: true,
-      data: [{ id: 'codex' }, { id: 'claude' }, { id: 'fake' }],
+      data: [{ id: 'codex' }, { id: 'claude' }, { id: 'kimi' }, { id: 'fake' }],
     })
     expect(runtime.agent.list({ activeOnly: true })).toEqual({ ok: true, data: [] })
     if (!created.ok) throw new Error('expected workspace')
