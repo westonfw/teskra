@@ -68,7 +68,7 @@ const PROFILE_FS_TIMEOUT_MS = 10_000
 export interface CreateAccountProfileRequest {
   readonly agentId: string
   readonly name: string
-  readonly description?: string
+  readonly description?: string | undefined
   readonly authType: AccountAuthType
   readonly runtime: WorkspaceRuntimeRef
   /**
@@ -76,28 +76,28 @@ export interface CreateAccountProfileRequest {
    * segment. Lowercased before it is stored; conflicts are reported, never
    * auto-suffixed (§48.1).
    */
-  readonly slug?: string
+  readonly slug?: string | undefined
   /**
    * External profiles (§49) only: an existing CLI home, as an expanded
    * absolute path in the profile's runtime. Managed profiles never accept
    * this field — their configHome is generated (§48.1).
    */
-  readonly configHome?: string
+  readonly configHome?: string | undefined
   /** §46: undefined = profile default (managed: 1); >= 1 integer otherwise. */
-  readonly maxConcurrentRuns?: number
+  readonly maxConcurrentRuns?: number | undefined
 }
 
 export interface UpdateAccountProfileRequest {
-  readonly name?: string
-  readonly description?: string | null
-  readonly maxConcurrentRuns?: number | null
-  readonly status?: AccountProfileStatus
-  readonly limitedUntil?: string | null
+  readonly name?: string | undefined
+  readonly description?: string | null | undefined
+  readonly maxConcurrentRuns?: number | null | undefined
+  readonly status?: AccountProfileStatus | undefined
+  readonly limitedUntil?: string | null | undefined
 }
 
 export interface RemoveAccountProfileOptions {
   /** §47.1: delete the local CLI profile data too. Managed profiles only. */
-  readonly deleteHome?: boolean
+  readonly deleteHome?: boolean | undefined
 }
 
 export interface AccountProfileManager {

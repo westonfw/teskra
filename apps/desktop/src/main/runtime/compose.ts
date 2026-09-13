@@ -17,6 +17,7 @@ import { createAgentManager } from '../agents/agent-manager'
 import { createDefaultAgentRegistry } from '../agents/agent-registry'
 import { createAccountProfileAdapterRegistry } from '../agents/accounts/account-profile-adapter'
 import { createAccountProfileManager } from '../agents/accounts/account-profile-manager'
+import { createAccountLoginService } from '../agents/accounts/account-login-service'
 import { createClaudeAccountProfileAdapter } from '../agents/accounts/adapters/claude-account-profile-adapter'
 import { registerCodexAccountProfileAdapter } from '../agents/accounts/adapters/codex-account-profile-adapter'
 import { createClaudeAdapter } from '../agents/adapters/claude-adapter'
@@ -384,6 +385,15 @@ export async function composeTeskraRuntime(
     adapters: accountProfileAdapters.data,
     createRuntime: runtimeFor,
     commands,
+  })
+  // TASK-102 (§24): the interactive login sessions — spawned through the
+  // ProcessManager with adapter-built argv/env, never a shell string.
+  const accountLoginService = createAccountLoginService({
+    profiles: repositories.accountProfiles,
+    adapters: accountProfileAdapters.data,
+    processes: processManager,
+    events,
+    createRuntime: runtimeFor,
   })
   const doctor = createDoctorService({
     paths,
@@ -877,9 +887,17 @@ export async function composeTeskraRuntime(
       update: ({ id, patch }) => accountProfileManager.update(id, patch),
       remove: ({ id, deleteHome }) =>
         accountProfileManager.remove(id, deleteHome === undefined ? {} : { deleteHome }),
+      disable: ({ id }) => accountProfileManager.remove(id),
       enable: ({ id }) => accountProfileManager.enable(id),
+      detect: ({ id }) => accountLoginService.detectProfileStatus(id),
       setDefault: ({ agentId, profileId }) => accountProfileManager.setDefault(agentId, profileId),
       getDefault: ({ agentId }) => accountProfileManager.getDefault(agentId),
+      startLogin: (request) => accountLoginService.start(request),
+      writeLogin: ({ sessionId, data }) =>
+        Promise.resolve(accountLoginService.write(sessionId, data)),
+      resizeLogin: ({ sessionId, cols, rows }) =>
+        Promise.resolve(accountLoginService.resize(sessionId, cols, rows)),
+      cancelLogin: ({ sessionId }) => accountLoginService.cancel(sessionId),
     },
     workspace: {
       create: (request) => workspaceManager.create(request),
@@ -1052,6 +1070,8 @@ export async function composeTeskraRuntime(
       reviewerService.dispose()
       reviewPanelService.dispose()
       await terminalManager.dispose()
+      // TASK-102: stop interactive login sessions too (P0-2) — no orphans.
+      await accountLoginService.dispose()
       autoCommit.dispose()
       const processes = await processManager.disposeAll()
       if (processes.ok && processes.data.failed.length > 0) {

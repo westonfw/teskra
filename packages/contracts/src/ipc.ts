@@ -1,6 +1,32 @@
 import { z } from 'zod'
 
 import {
+  accountLoginSessionSchema,
+  accountProfileIdRequestSchema,
+  agentAccountProfileSchema,
+  cancelAccountLoginRequestSchema,
+  createAccountProfileRequestSchema,
+  listAccountProfilesRequestSchema,
+  removeAccountProfileRequestSchema,
+  resizeAccountLoginRequestSchema,
+  setDefaultAccountProfileRequestSchema,
+  startAccountLoginRequestSchema,
+  updateAccountProfileRequestSchema,
+  writeAccountLoginRequestSchema,
+  type AccountLoginSession,
+  type AccountProfileIdRequest,
+  type AgentAccountProfile,
+  type CancelAccountLoginRequest,
+  type CreateAccountProfileRequest,
+  type ListAccountProfilesRequest,
+  type RemoveAccountProfileRequest,
+  type ResizeAccountLoginRequest,
+  type SetDefaultAccountProfileRequest,
+  type StartAccountLoginRequest,
+  type UpdateAccountProfileRequest,
+  type WriteAccountLoginRequest,
+} from './agent-account'
+import {
   agentDefinitionSchema,
   agentDetectionRequestSchema,
   agentDetectionResultSchema,
@@ -391,6 +417,19 @@ export const IPC_CHANNELS = {
   agentRunList: 'teskra:agent-run:list',
   agentRunOutput: 'teskra:agent-run:output',
   agentRunResume: 'teskra:agent-run:resume',
+  accountList: 'teskra:account:list',
+  accountGet: 'teskra:account:get',
+  accountCreate: 'teskra:account:create',
+  accountUpdate: 'teskra:account:update',
+  accountRemove: 'teskra:account:remove',
+  accountDetect: 'teskra:account:detect',
+  accountDisable: 'teskra:account:disable',
+  accountEnable: 'teskra:account:enable',
+  accountSetDefault: 'teskra:account:set-default',
+  accountLoginStart: 'teskra:account:login:start',
+  accountLoginWrite: 'teskra:account:login:write',
+  accountLoginResize: 'teskra:account:login:resize',
+  accountLoginCancel: 'teskra:account:login:cancel',
   permissionListRules: 'teskra:permission:rule:list',
   permissionCreateRule: 'teskra:permission:rule:create',
   permissionUpdateRule: 'teskra:permission:rule:update',
@@ -744,6 +783,75 @@ export const agentRunResumeChannel = channel(
   IPC_CHANNELS.agentRunResume,
   resumeAgentRunRequestSchema,
   agentRunSchema,
+)
+// TASK-102 (Milestone 24 §28): account profile CRUD + default + status detect.
+// Alias channels are deliberately absent — they ship with TASK-111.
+export const accountListChannel = channel(
+  IPC_CHANNELS.accountList,
+  listAccountProfilesRequestSchema,
+  z.array(agentAccountProfileSchema),
+)
+export const accountGetChannel = channel(
+  IPC_CHANNELS.accountGet,
+  accountProfileIdRequestSchema,
+  agentAccountProfileSchema.nullable(),
+)
+export const accountCreateChannel = channel(
+  IPC_CHANNELS.accountCreate,
+  createAccountProfileRequestSchema,
+  agentAccountProfileSchema,
+)
+export const accountUpdateChannel = channel(
+  IPC_CHANNELS.accountUpdate,
+  updateAccountProfileRequestSchema,
+  agentAccountProfileSchema,
+)
+export const accountRemoveChannel = channel(
+  IPC_CHANNELS.accountRemove,
+  removeAccountProfileRequestSchema,
+  agentAccountProfileSchema,
+)
+export const accountDetectChannel = channel(
+  IPC_CHANNELS.accountDetect,
+  accountProfileIdRequestSchema,
+  agentAccountProfileSchema,
+)
+export const accountDisableChannel = channel(
+  IPC_CHANNELS.accountDisable,
+  accountProfileIdRequestSchema,
+  agentAccountProfileSchema,
+)
+export const accountEnableChannel = channel(
+  IPC_CHANNELS.accountEnable,
+  accountProfileIdRequestSchema,
+  agentAccountProfileSchema,
+)
+export const accountSetDefaultChannel = channel(
+  IPC_CHANNELS.accountSetDefault,
+  setDefaultAccountProfileRequestSchema,
+  voidResponseSchema,
+)
+// §24.2: login is an interactive session (four channels + two events), never
+// a single blocking invoke — start returns the session handle immediately.
+export const accountLoginStartChannel = channel(
+  IPC_CHANNELS.accountLoginStart,
+  startAccountLoginRequestSchema,
+  accountLoginSessionSchema,
+)
+export const accountLoginWriteChannel = channel(
+  IPC_CHANNELS.accountLoginWrite,
+  writeAccountLoginRequestSchema,
+  voidResponseSchema,
+)
+export const accountLoginResizeChannel = channel(
+  IPC_CHANNELS.accountLoginResize,
+  resizeAccountLoginRequestSchema,
+  voidResponseSchema,
+)
+export const accountLoginCancelChannel = channel(
+  IPC_CHANNELS.accountLoginCancel,
+  cancelAccountLoginRequestSchema,
+  voidResponseSchema,
 )
 export const permissionListRulesChannel = channel(
   IPC_CHANNELS.permissionListRules,
@@ -1116,6 +1224,19 @@ export const ipcChannelDefinitions = {
   agentRunList: agentRunListChannel,
   agentRunOutput: agentRunOutputChannel,
   agentRunResume: agentRunResumeChannel,
+  accountList: accountListChannel,
+  accountGet: accountGetChannel,
+  accountCreate: accountCreateChannel,
+  accountUpdate: accountUpdateChannel,
+  accountRemove: accountRemoveChannel,
+  accountDetect: accountDetectChannel,
+  accountDisable: accountDisableChannel,
+  accountEnable: accountEnableChannel,
+  accountSetDefault: accountSetDefaultChannel,
+  accountLoginStart: accountLoginStartChannel,
+  accountLoginWrite: accountLoginWriteChannel,
+  accountLoginResize: accountLoginResizeChannel,
+  accountLoginCancel: accountLoginCancelChannel,
   permissionListRules: permissionListRulesChannel,
   permissionCreateRule: permissionCreateRuleChannel,
   permissionUpdateRule: permissionUpdateRuleChannel,
@@ -1271,6 +1392,32 @@ export interface TeskraBridge {
     list(request?: ListAgentRunsRequest): Promise<IpcResult<AgentRun[]>>
     getOutput(request: AgentRunOutputRequest): Promise<IpcResult<string>>
     resume(request: ResumeAgentRunRequest): Promise<IpcResult<AgentRun>>
+  }
+  /**
+   * TASK-102 (Milestone 24 §28/§24.2): account profile CRUD + default + detect,
+   * and the interactive login session. Login progress streams through the
+   * account.login.output / account.login.exited events (subscribe via
+   * window.teskra.events). The per-agent default can also be read via
+   * settings.resolveConfig (config.agents.defaultAccountProfiles).
+   */
+  readonly account: {
+    list(request?: ListAccountProfilesRequest): Promise<IpcResult<AgentAccountProfile[]>>
+    get(request: AccountProfileIdRequest): Promise<IpcResult<AgentAccountProfile | null>>
+    create(request: CreateAccountProfileRequest): Promise<IpcResult<AgentAccountProfile>>
+    update(request: UpdateAccountProfileRequest): Promise<IpcResult<AgentAccountProfile>>
+    /** Soft disable (§47.1); deleteHome additionally removes the managed CLI home. */
+    remove(request: RemoveAccountProfileRequest): Promise<IpcResult<AgentAccountProfile>>
+    /** Soft disable without touching the CLI home (same lifecycle as remove). */
+    disable(request: AccountProfileIdRequest): Promise<IpcResult<AgentAccountProfile>>
+    enable(request: AccountProfileIdRequest): Promise<IpcResult<AgentAccountProfile>>
+    /** Runs the adapter's status probe and persists the result. */
+    detect(request: AccountProfileIdRequest): Promise<IpcResult<AgentAccountProfile>>
+    setDefault(request: SetDefaultAccountProfileRequest): Promise<IpcResult<void>>
+    /** §24.2: resolves immediately with the session handle — never waits on OAuth. */
+    startLogin(request: StartAccountLoginRequest): Promise<IpcResult<AccountLoginSession>>
+    writeLogin(request: WriteAccountLoginRequest): Promise<IpcResult<void>>
+    resizeLogin(request: ResizeAccountLoginRequest): Promise<IpcResult<void>>
+    cancelLogin(request: CancelAccountLoginRequest): Promise<IpcResult<void>>
   }
   readonly permission: {
     listRules(request?: ListPermissionRulesRequest): Promise<IpcResult<PermissionRule[]>>

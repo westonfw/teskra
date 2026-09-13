@@ -181,7 +181,7 @@ function unisolatedWriteConflict(
  */
 function hasCapacity(
   runs: readonly AgentRun[],
-  candidate: { workspaceId: string; agentType: string; accountProfileId?: string },
+  candidate: { workspaceId: string; agentType: string; accountProfileId?: string | undefined },
   policy: ConcurrencyConfig,
   profileMaxConcurrentRuns?: number,
 ): boolean {
@@ -656,11 +656,11 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     workspaceRuntime: WorkspaceRuntimeRef,
   ): Promise<
     IpcResult<{
-      accountProfileId?: string
-      profileEnvironment?: Record<string, string>
-      profileSnapshot?: AgentRunProfileSnapshot
+      accountProfileId?: string | undefined
+      profileEnvironment?: Record<string, string> | undefined
+      profileSnapshot?: AgentRunProfileSnapshot | undefined
       /** §46.3 (TASK-117): the selected profile's own concurrency limit. */
-      maxConcurrentRuns?: number
+      maxConcurrentRuns?: number | undefined
     }>
   > => {
     if (deps.accountProfiles === undefined) {

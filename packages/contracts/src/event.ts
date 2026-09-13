@@ -179,6 +179,15 @@ export interface WorkbenchEvents {
     agentId: string
     limitedUntil?: string
   }
+  /** TASK-102 §24.2: interactive login-session PTY stream and termination. */
+  'account.login.output': {
+    sessionId: string
+    data: string
+  }
+  'account.login.exited': {
+    sessionId: string
+    exitCode: number
+  }
 }
 
 export type WorkbenchEventName = keyof WorkbenchEvents
@@ -219,6 +228,8 @@ export const WORKBENCH_EVENT_NAMES = [
   'account.status_changed',
   'account.login_required',
   'account.limited',
+  'account.login.output',
+  'account.login.exited',
 ] as const satisfies readonly WorkbenchEventName[]
 
 export const RENDERER_EVENT_CHANNEL = 'teskra:event' as const

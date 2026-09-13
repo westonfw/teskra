@@ -55,9 +55,9 @@ interface AccountProfileRow {
 }
 
 export interface AccountProfileListFilter {
-  readonly agentId?: string
-  readonly status?: AccountProfileStatus
-  readonly enabled?: boolean
+  readonly agentId?: string | undefined
+  readonly status?: AccountProfileStatus | undefined
+  readonly enabled?: boolean | undefined
 }
 
 export interface CreateAccountProfileInput {

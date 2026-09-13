@@ -271,6 +271,58 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.agent.resume(request)),
   )
   register(
+    ipcChannelDefinitions.accountList,
+    withRuntime((runtime, request) => runtime.account.list(request)),
+  )
+  register(
+    ipcChannelDefinitions.accountGet,
+    withRuntime((runtime, request) => runtime.account.get(request)),
+  )
+  register(
+    ipcChannelDefinitions.accountCreate,
+    withRuntime((runtime, request) => runtime.account.create(request)),
+  )
+  register(
+    ipcChannelDefinitions.accountUpdate,
+    withRuntime((runtime, request) => runtime.account.update(request)),
+  )
+  register(
+    ipcChannelDefinitions.accountRemove,
+    withRuntime((runtime, request) => runtime.account.remove(request)),
+  )
+  register(
+    ipcChannelDefinitions.accountDetect,
+    withRuntime((runtime, request) => runtime.account.detect(request)),
+  )
+  register(
+    ipcChannelDefinitions.accountDisable,
+    withRuntime((runtime, request) => runtime.account.disable(request)),
+  )
+  register(
+    ipcChannelDefinitions.accountEnable,
+    withRuntime((runtime, request) => runtime.account.enable(request)),
+  )
+  register(
+    ipcChannelDefinitions.accountSetDefault,
+    withRuntime((runtime, request) => runtime.account.setDefault(request)),
+  )
+  register(
+    ipcChannelDefinitions.accountLoginStart,
+    withRuntime((runtime, request) => runtime.account.startLogin(request)),
+  )
+  register(
+    ipcChannelDefinitions.accountLoginWrite,
+    withRuntime((runtime, request) => runtime.account.writeLogin(request)),
+  )
+  register(
+    ipcChannelDefinitions.accountLoginResize,
+    withRuntime((runtime, request) => runtime.account.resizeLogin(request)),
+  )
+  register(
+    ipcChannelDefinitions.accountLoginCancel,
+    withRuntime((runtime, request) => runtime.account.cancelLogin(request)),
+  )
+  register(
     ipcChannelDefinitions.permissionListRules,
     withRuntime((runtime, request) => runtime.permission.listRules(request)),
   )

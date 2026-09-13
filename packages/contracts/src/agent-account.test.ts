@@ -3,10 +3,20 @@ import { describe, expect, it } from 'vitest'
 import {
   ACCOUNT_AUTH_TYPES,
   ACCOUNT_PROFILE_STATUSES,
+  accountLoginSessionSchema,
+  cancelAccountLoginRequestSchema,
+  createAccountProfileRequestSchema,
   agentAccountProfileSchema,
   agentRunProfileSnapshotSchema,
   agentRuntimeIdentitySchema,
   configHomeSchema,
+  listAccountProfilesRequestSchema,
+  removeAccountProfileRequestSchema,
+  resizeAccountLoginRequestSchema,
+  setDefaultAccountProfileRequestSchema,
+  startAccountLoginRequestSchema,
+  updateAccountProfileRequestSchema,
+  writeAccountLoginRequestSchema,
 } from './agent-account'
 import {
   AGENT_FAILURE_EVIDENCE_MAX,
@@ -283,5 +293,153 @@ describe('agentRunSchema / startAgentRunRequestSchema profile fields (§7 / §14
       }).success,
     ).toBe(true)
     expect(startAgentRunRequestSchema.safeParse({ ...base, agentId: 'codex' }).success).toBe(false)
+  })
+})
+
+describe('account IPC request schemas (TASK-102 §28)', () => {
+  const managedCreate = {
+    agentId: 'codex',
+    name: 'Codex Personal',
+    authType: 'subscription',
+    runtime: { kind: 'wsl', distro: 'Ubuntu-22.04' },
+    slug: 'personal',
+  }
+
+  it('accepts a managed create request (slug, never configHome)', () => {
+    const result = createAccountProfileRequestSchema.safeParse({
+      ...managedCreate,
+      description: 'Personal subscription',
+      maxConcurrentRuns: 2,
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects configHome on a managed create and requires it on an external one (§48.1/§49)', () => {
+    expect(
+      createAccountProfileRequestSchema.safeParse({
+        ...managedCreate,
+        configHome: '/home/weston/.codex',
+      }).success,
+    ).toBe(false)
+    expect(
+      createAccountProfileRequestSchema.safeParse({
+        agentId: 'codex',
+        name: 'Imported',
+        authType: 'external',
+        runtime: { kind: 'windows' },
+        configHome: 'C:/Users/weston/.codex',
+      }).success,
+    ).toBe(true)
+    expect(
+      createAccountProfileRequestSchema.safeParse({
+        agentId: 'codex',
+        name: 'Imported',
+        authType: 'external',
+        runtime: { kind: 'windows' },
+      }).success,
+    ).toBe(false)
+  })
+
+  it('rejects bad slugs, non-windows/wsl runtimes, and distro-less wsl', () => {
+    expect(
+      createAccountProfileRequestSchema.safeParse({ ...managedCreate, slug: 'Bad Slug!' }).success,
+    ).toBe(false)
+    expect(
+      createAccountProfileRequestSchema.safeParse({ ...managedCreate, slug: '-leading' }).success,
+    ).toBe(false)
+    // Slug input is case-insensitive; the Manager lowercases before storing.
+    expect(
+      createAccountProfileRequestSchema.safeParse({ ...managedCreate, slug: 'Work-2' }).success,
+    ).toBe(true)
+    expect(
+      createAccountProfileRequestSchema.safeParse({
+        ...managedCreate,
+        runtime: { kind: 'ssh' },
+      }).success,
+    ).toBe(false)
+    expect(
+      createAccountProfileRequestSchema.safeParse({
+        ...managedCreate,
+        runtime: { kind: 'wsl' },
+      }).success,
+    ).toBe(false)
+  })
+
+  it('accepts the list filter shape', () => {
+    expect(listAccountProfilesRequestSchema.safeParse({}).success).toBe(true)
+    expect(
+      listAccountProfilesRequestSchema.safeParse({
+        agentId: 'codex',
+        status: 'ready',
+        enabled: true,
+      }).success,
+    ).toBe(true)
+    expect(listAccountProfilesRequestSchema.safeParse({ status: 'disabled' }).success).toBe(false)
+  })
+
+  it('update accepts name/description/maxConcurrentRuns and never configHome (§48.1)', () => {
+    expect(
+      updateAccountProfileRequestSchema.safeParse({
+        id: 'acct_1',
+        patch: { name: 'Renamed', description: null, maxConcurrentRuns: null },
+      }).success,
+    ).toBe(true)
+    expect(
+      updateAccountProfileRequestSchema.safeParse({
+        id: 'acct_1',
+        patch: { configHome: '/home/weston/.codex' },
+      }).success,
+    ).toBe(false)
+    expect(
+      updateAccountProfileRequestSchema.safeParse({ id: 'acct_1', patch: { maxConcurrentRuns: 0 } })
+        .success,
+    ).toBe(false)
+  })
+
+  it('remove carries an optional deleteHome flag; set-default accepts a nullable profileId', () => {
+    expect(removeAccountProfileRequestSchema.safeParse({ id: 'acct_1' }).success).toBe(true)
+    expect(
+      removeAccountProfileRequestSchema.safeParse({ id: 'acct_1', deleteHome: true }).success,
+    ).toBe(true)
+    expect(
+      setDefaultAccountProfileRequestSchema.safeParse({ agentId: 'codex', profileId: null })
+        .success,
+    ).toBe(true)
+    expect(
+      setDefaultAccountProfileRequestSchema.safeParse({ agentId: 'codex', profileId: 'acct_1' })
+        .success,
+    ).toBe(true)
+  })
+
+  it('login requests submit only profileId/sessionId — never argv or env (§24.1)', () => {
+    expect(startAccountLoginRequestSchema.safeParse({ profileId: 'acct_1' }).success).toBe(true)
+    expect(
+      startAccountLoginRequestSchema.safeParse({ profileId: 'acct_1', command: 'codex login' })
+        .success,
+    ).toBe(false)
+    expect(
+      writeAccountLoginRequestSchema.safeParse({ sessionId: 'sess_1', data: '\r' }).success,
+    ).toBe(true)
+    expect(
+      resizeAccountLoginRequestSchema.safeParse({ sessionId: 'sess_1', cols: 120, rows: 30 })
+        .success,
+    ).toBe(true)
+    expect(
+      resizeAccountLoginRequestSchema.safeParse({ sessionId: 'sess_1', cols: 0, rows: 30 }).success,
+    ).toBe(false)
+    expect(cancelAccountLoginRequestSchema.safeParse({ sessionId: 'sess_1' }).success).toBe(true)
+  })
+
+  it('validates the AccountLoginSession handle', () => {
+    expect(
+      accountLoginSessionSchema.safeParse({
+        sessionId: 'sess_1',
+        profileId: 'acct_1',
+        startedAt: NOW,
+      }).success,
+    ).toBe(true)
+    expect(
+      accountLoginSessionSchema.safeParse({ sessionId: 'sess_1', profileId: 'acct_1' }).success,
+    ).toBe(false)
   })
 })

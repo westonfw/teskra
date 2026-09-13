@@ -2,6 +2,8 @@ import type {
   AcceptanceCriteriaSet,
   AcceptanceCriteriaSetDetail,
   AcceptanceCriterion,
+  AccountLoginSession,
+  AccountProfileIdRequest,
   AddCriterionRequest,
   AgentAccountProfile,
   AgentDefinition,
@@ -19,6 +21,8 @@ import type {
   BindRunCriteriaRequest,
   BuildContextRequest,
   BuiltContext,
+  CancelAccountLoginRequest,
+  CreateAccountProfileRequest,
   CreateCriteriaSetRequest,
   CreateTaskRequest,
   CreateTerminalRequest,
@@ -46,6 +50,7 @@ import type {
   GitWorkspaceRequest,
   HandoffRecord,
   IpcResult,
+  ListAccountProfilesRequest,
   ListRecoveryIssuesRequest,
   ListRecentWorkspacesRequest,
   ListAgentDetectionsRequest,
@@ -76,8 +81,10 @@ import type {
   PromptTemplateInfo,
   RecordArtifactRequest,
   RecoveryReport,
+  RemoveAccountProfileRequest,
   RenderedPrompt,
   RenderPromptTemplateRequest,
+  ResizeAccountLoginRequest,
   ResolveConfigRequest,
   ResolvePermissionDecisionRequest,
   ResolvePermissionProfileRequest,
@@ -100,6 +107,8 @@ import type {
   SendAgentRunInputRequest,
   SetAgentExecutableOverrideRequest,
   SetCredentialRequest,
+  SetDefaultAccountProfileRequest,
+  StartAccountLoginRequest,
   StartFullWorkflowRequest,
   StartReviewPanelRequest,
   FullWorkflowRunSummary,
@@ -117,6 +126,7 @@ import type {
   TerminalSession,
   TerminalWriteRequest,
   UpdateConfigRequest,
+  UpdateAccountProfileRequest,
   UpdateCriterionRequest,
   UpdateMemoryRequest,
   UpdatePermissionRuleRequest,
@@ -136,6 +146,7 @@ import type {
   WorkflowRunStartRequest,
   WorkflowStep,
   WorkflowStepResolveRequest,
+  WriteAccountLoginRequest,
   Worktree,
   WorktreeCleanupRequest,
   WorktreeCleanupResult,
@@ -151,29 +162,29 @@ import type {
   WorkbenchEvents,
 } from '@teskra/contracts'
 
-import type {
-  CreateAccountProfileRequest,
-  UpdateAccountProfileRequest,
-} from '../agents/accounts/account-profile-manager'
-import type { AccountProfileListFilter } from '../db/repositories'
-
 /**
- * Milestone 24 (TASK-100): account profile CRUD + per-agent default. The IPC
- * layer (TASK-102) mounts Zod-validated channels onto this port; the login
- * terminal channels join it there too.
+ * Milestone 24 (TASK-100): account profile CRUD + per-agent default.
+ * TASK-102 adds the status-detect probe and the §24.2 interactive login
+ * session; the IPC layer mounts Zod-validated channels onto this port.
  */
 export interface AccountPort {
-  list(filter?: AccountProfileListFilter): Promise<IpcResult<readonly AgentAccountProfile[]>>
-  get(request: { id: string }): Promise<IpcResult<AgentAccountProfile | null>>
+  list(request?: ListAccountProfilesRequest): Promise<IpcResult<readonly AgentAccountProfile[]>>
+  get(request: AccountProfileIdRequest): Promise<IpcResult<AgentAccountProfile | null>>
   create(request: CreateAccountProfileRequest): Promise<IpcResult<AgentAccountProfile>>
-  update(request: {
-    id: string
-    patch: UpdateAccountProfileRequest
-  }): Promise<IpcResult<AgentAccountProfile>>
-  remove(request: { id: string; deleteHome?: boolean }): Promise<IpcResult<AgentAccountProfile>>
-  enable(request: { id: string }): Promise<IpcResult<AgentAccountProfile>>
-  setDefault(request: { agentId: string; profileId: string | null }): Promise<IpcResult<void>>
+  update(request: UpdateAccountProfileRequest): Promise<IpcResult<AgentAccountProfile>>
+  remove(request: RemoveAccountProfileRequest): Promise<IpcResult<AgentAccountProfile>>
+  /** Soft disable without touching the CLI home (same lifecycle as remove). */
+  disable(request: AccountProfileIdRequest): Promise<IpcResult<AgentAccountProfile>>
+  enable(request: AccountProfileIdRequest): Promise<IpcResult<AgentAccountProfile>>
+  /** §24: probe through the account adapter and persist the resulting status. */
+  detect(request: AccountProfileIdRequest): Promise<IpcResult<AgentAccountProfile>>
+  setDefault(request: SetDefaultAccountProfileRequest): Promise<IpcResult<void>>
   getDefault(request: { agentId: string }): Promise<IpcResult<string | undefined>>
+  /** §24.2: returns the session handle immediately — never waits on OAuth. */
+  startLogin(request: StartAccountLoginRequest): Promise<IpcResult<AccountLoginSession>>
+  writeLogin(request: WriteAccountLoginRequest): Promise<IpcResult<void>>
+  resizeLogin(request: ResizeAccountLoginRequest): Promise<IpcResult<void>>
+  cancelLogin(request: CancelAccountLoginRequest): Promise<IpcResult<void>>
 }
 
 export interface WorkspacePort {

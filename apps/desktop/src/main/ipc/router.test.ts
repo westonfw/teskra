@@ -5,6 +5,8 @@ import {
   ipcChannelDefinitions,
   type AcceptanceCriteriaSet,
   type AcceptanceCriterion,
+  type AccountLoginSession,
+  type AgentAccountProfile,
   type AgentRun,
   type IpcResult,
   type Task,
@@ -100,6 +102,26 @@ const AGENT_RUN: AgentRun = {
   runDir: '/data/runs/run-2',
   createdAt: '2026-09-10T00:00:00.000Z',
   updatedAt: '2026-09-10T00:00:00.000Z',
+}
+
+const ACCOUNT_PROFILE: AgentAccountProfile = {
+  id: 'acct-1',
+  agentId: 'codex',
+  name: 'Codex Personal',
+  authType: 'subscription',
+  runtime: { kind: 'wsl', distro: 'Ubuntu' },
+  configHome: '/home/dev/.teskra/agent-profiles/codex/personal',
+  maxConcurrentRuns: 1,
+  status: 'login-required',
+  enabled: true,
+  createdAt: '2026-09-10T00:00:00.000Z',
+  updatedAt: '2026-09-10T00:00:00.000Z',
+}
+
+const LOGIN_SESSION: AccountLoginSession = {
+  sessionId: 'sess-1',
+  profileId: 'acct-1',
+  startedAt: '2026-09-10T00:00:00.000Z',
 }
 
 const WORKFLOW_RUN: WorkflowRun = {
@@ -293,20 +315,18 @@ function fakeRuntime(): TeskraRuntime {
     account: {
       list: vi.fn(async () => ok([])),
       get: vi.fn(async () => ok(null)),
-      create: vi.fn(async () => {
-        throw new Error('not used')
-      }),
-      update: vi.fn(async () => {
-        throw new Error('not used')
-      }),
-      remove: vi.fn(async () => {
-        throw new Error('not used')
-      }),
-      enable: vi.fn(async () => {
-        throw new Error('not used')
-      }),
+      create: vi.fn(async () => ok(ACCOUNT_PROFILE)),
+      update: vi.fn(async () => ok(ACCOUNT_PROFILE)),
+      remove: vi.fn(async () => ok({ ...ACCOUNT_PROFILE, enabled: false })),
+      disable: vi.fn(async () => ok({ ...ACCOUNT_PROFILE, enabled: false })),
+      enable: vi.fn(async () => ok(ACCOUNT_PROFILE)),
+      detect: vi.fn(async () => ok({ ...ACCOUNT_PROFILE, status: 'ready' as const })),
       setDefault: vi.fn(async () => ok(undefined)),
       getDefault: vi.fn(async () => ok(undefined)),
+      startLogin: vi.fn(async () => ok(LOGIN_SESSION)),
+      writeLogin: vi.fn(async () => ok(undefined)),
+      resizeLogin: vi.fn(async () => ok(undefined)),
+      cancelLogin: vi.fn(async () => ok(undefined)),
     },
     git: {
       status: vi.fn(async () => ok({ ahead: 0, behind: 0, clean: true, entries: [] })),
@@ -831,6 +851,180 @@ describe('Typed IPC Router (TASK-020)', () => {
     const invalidStart = await ipc.invoke(IPC_CHANNELS.workflowStartFull, { workspaceId: 'ws1' })
     expect(invalidStart).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
     expect(runtime.workflow.startFullWorkflow).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes account profile CRUD and detect through the runtime facade (TASK-102)', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    expect(await ipc.invoke(IPC_CHANNELS.accountList, { agentId: 'codex' })).toEqual({
+      ok: true,
+      data: [],
+    })
+    expect(runtime.account.list).toHaveBeenCalledWith({ agentId: 'codex' })
+
+    expect(await ipc.invoke(IPC_CHANNELS.accountGet, { id: 'acct-1' })).toEqual({
+      ok: true,
+      data: null,
+    })
+    expect(runtime.account.get).toHaveBeenCalledWith({ id: 'acct-1' })
+
+    const createRequest = {
+      agentId: 'codex',
+      name: 'Codex Personal',
+      authType: 'subscription',
+      runtime: { kind: 'wsl', distro: 'Ubuntu' },
+      slug: 'personal',
+    }
+    expect(await ipc.invoke(IPC_CHANNELS.accountCreate, createRequest)).toEqual({
+      ok: true,
+      data: ACCOUNT_PROFILE,
+    })
+    expect(runtime.account.create).toHaveBeenCalledWith(createRequest)
+
+    const updateRequest = { id: 'acct-1', patch: { name: 'Renamed', maxConcurrentRuns: 2 } }
+    expect(await ipc.invoke(IPC_CHANNELS.accountUpdate, updateRequest)).toEqual({
+      ok: true,
+      data: ACCOUNT_PROFILE,
+    })
+    expect(runtime.account.update).toHaveBeenCalledWith(updateRequest)
+
+    const removeRequest = { id: 'acct-1', deleteHome: true }
+    expect(await ipc.invoke(IPC_CHANNELS.accountRemove, removeRequest)).toEqual({
+      ok: true,
+      data: { ...ACCOUNT_PROFILE, enabled: false },
+    })
+    expect(runtime.account.remove).toHaveBeenCalledWith(removeRequest)
+
+    expect(await ipc.invoke(IPC_CHANNELS.accountDisable, { id: 'acct-1' })).toEqual({
+      ok: true,
+      data: { ...ACCOUNT_PROFILE, enabled: false },
+    })
+    expect(runtime.account.disable).toHaveBeenCalledWith({ id: 'acct-1' })
+
+    expect(await ipc.invoke(IPC_CHANNELS.accountEnable, { id: 'acct-1' })).toEqual({
+      ok: true,
+      data: ACCOUNT_PROFILE,
+    })
+    expect(runtime.account.enable).toHaveBeenCalledWith({ id: 'acct-1' })
+
+    expect(await ipc.invoke(IPC_CHANNELS.accountDetect, { id: 'acct-1' })).toEqual({
+      ok: true,
+      data: { ...ACCOUNT_PROFILE, status: 'ready' },
+    })
+    expect(runtime.account.detect).toHaveBeenCalledWith({ id: 'acct-1' })
+
+    const defaultRequest = { agentId: 'codex', profileId: 'acct-1' }
+    expect(await ipc.invoke(IPC_CHANNELS.accountSetDefault, defaultRequest)).toEqual({
+      ok: true,
+      data: undefined,
+    })
+    expect(runtime.account.setDefault).toHaveBeenCalledWith(defaultRequest)
+  })
+
+  it('rejects invalid account requests with VALIDATION_FAILED instead of throwing (TASK-102)', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    // A managed profile must never carry configHome (§48.1).
+    const managedWithHome = await ipc.invoke(IPC_CHANNELS.accountCreate, {
+      agentId: 'codex',
+      name: 'Bad',
+      authType: 'subscription',
+      runtime: { kind: 'wsl', distro: 'Ubuntu' },
+      slug: 'bad',
+      configHome: '/home/dev/.codex',
+    })
+    expect(managedWithHome).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+
+    // configHome is immutable — it is rejected even inside the update patch.
+    const updateWithHome = await ipc.invoke(IPC_CHANNELS.accountUpdate, {
+      id: 'acct-1',
+      patch: { configHome: '/home/dev/.codex' },
+    })
+    expect(updateWithHome).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+
+    const badConcurrency = await ipc.invoke(IPC_CHANNELS.accountUpdate, {
+      id: 'acct-1',
+      patch: { maxConcurrentRuns: 0 },
+    })
+    expect(badConcurrency).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+
+    const badSlug = await ipc.invoke(IPC_CHANNELS.accountCreate, {
+      agentId: 'codex',
+      name: 'Bad',
+      authType: 'subscription',
+      runtime: { kind: 'windows' },
+      slug: 'not a slug!',
+    })
+    expect(badSlug).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+
+    // A wsl profile must pin its distro (§7).
+    const distroLess = await ipc.invoke(IPC_CHANNELS.accountCreate, {
+      agentId: 'codex',
+      name: 'Bad',
+      authType: 'subscription',
+      runtime: { kind: 'wsl' },
+      slug: 'bad',
+    })
+    expect(distroLess).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+
+    expect(runtime.account.create).not.toHaveBeenCalled()
+    expect(runtime.account.update).not.toHaveBeenCalled()
+  })
+
+  it('routes the login session channels through the runtime facade (TASK-102 §24.2)', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    // start resolves immediately with the session handle.
+    expect(await ipc.invoke(IPC_CHANNELS.accountLoginStart, { profileId: 'acct-1' })).toEqual({
+      ok: true,
+      data: LOGIN_SESSION,
+    })
+    expect(runtime.account.startLogin).toHaveBeenCalledWith({ profileId: 'acct-1' })
+
+    expect(
+      await ipc.invoke(IPC_CHANNELS.accountLoginWrite, { sessionId: 'sess-1', data: '\r' }),
+    ).toEqual({ ok: true, data: undefined })
+    expect(runtime.account.writeLogin).toHaveBeenCalledWith({ sessionId: 'sess-1', data: '\r' })
+
+    expect(
+      await ipc.invoke(IPC_CHANNELS.accountLoginResize, {
+        sessionId: 'sess-1',
+        cols: 120,
+        rows: 30,
+      }),
+    ).toEqual({ ok: true, data: undefined })
+    expect(runtime.account.resizeLogin).toHaveBeenCalledWith({
+      sessionId: 'sess-1',
+      cols: 120,
+      rows: 30,
+    })
+
+    expect(await ipc.invoke(IPC_CHANNELS.accountLoginCancel, { sessionId: 'sess-1' })).toEqual({
+      ok: true,
+      data: undefined,
+    })
+    expect(runtime.account.cancelLogin).toHaveBeenCalledWith({ sessionId: 'sess-1' })
+
+    // §24.1: the Renderer submits only ids — command/env fields are rejected.
+    const withCommand = await ipc.invoke(IPC_CHANNELS.accountLoginStart, {
+      profileId: 'acct-1',
+      command: 'codex login',
+    })
+    expect(withCommand).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    const badResize = await ipc.invoke(IPC_CHANNELS.accountLoginResize, {
+      sessionId: 'sess-1',
+      cols: 0,
+      rows: 30,
+    })
+    expect(badResize).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    expect(runtime.account.startLogin).toHaveBeenCalledTimes(1)
+    expect(runtime.account.resizeLogin).toHaveBeenCalledTimes(1)
   })
 
   it('returns a clone-safe capability signal instead of the live runtime port', async () => {

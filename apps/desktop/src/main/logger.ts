@@ -25,6 +25,7 @@ export const LOG_SCOPES = [
   'git',
   'security',
   'memory',
+  'account',
 ] as const
 export type LogScope = (typeof LOG_SCOPES)[number]
 
