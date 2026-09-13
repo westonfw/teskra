@@ -173,12 +173,25 @@ function unisolatedWriteConflict(
   )
 }
 
+/**
+ * TASK-117 (§46.3): `profileMaxConcurrentRuns` is the candidate profile's own
+ * limit. `undefined` means "no per-profile limit" — either the candidate is a
+ * legacy run without a profile (§46.1: only `maxRunsPerAgent` applies) or the
+ * profile row is gone / sets no limit.
+ */
 function hasCapacity(
   runs: readonly AgentRun[],
-  candidate: { workspaceId: string; agentType: string },
+  candidate: { workspaceId: string; agentType: string; accountProfileId?: string },
   policy: ConcurrencyConfig,
+  profileMaxConcurrentRuns?: number,
 ): boolean {
+  const perProfileOk =
+    candidate.accountProfileId === undefined ||
+    profileMaxConcurrentRuns === undefined ||
+    runs.filter((run) => run.accountProfileId === candidate.accountProfileId).length <
+      profileMaxConcurrentRuns
   return (
+    perProfileOk &&
     runs.length < policy.maxGlobalRuns &&
     runs.filter((run) => run.workspaceId === candidate.workspaceId).length <
       policy.maxRunsPerWorkspace &&
@@ -237,6 +250,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     deps.handoffCollector ??
     createHandoffCollector({ handoffs: deps.handoffs, paths: deps.paths, now })
   let advancingQueue = false
+  let advanceAgain = false
 
   /**
    * TASK-088: returns the workspace with env secret refs replaced by their
@@ -478,47 +492,64 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
   }
 
   const advanceQueue = async (): Promise<void> => {
-    if (advancingQueue) return
+    if (advancingQueue) {
+      // The in-flight pass may be reading rows that went stale across one of
+      // its awaits (e.g. the per-profile limit lookup); a wake-up landing
+      // mid-pass must not be dropped — re-scan once the pass ends.
+      advanceAgain = true
+      return
+    }
     advancingQueue = true
     try {
-      while (true) {
-        const listed = deps.runs.listActive()
-        if (!listed.ok) {
-          logger.error({ error: listed.error }, 'Failed to read queued Agent runs.')
-          return
-        }
-        const active = runningForLimits(listed.data)
-        let selected: { run: AgentRun; pending: PendingRun } | undefined
-        for (const run of listed.data.filter((candidate) => candidate.status === 'queued')) {
-          const pending = pendingRuns.get(run.id)
-          if (pending === undefined) continue
-          const policy = resolveConcurrency(run.workspaceId)
-          if (!policy.ok) {
+      do {
+        advanceAgain = false
+        while (true) {
+          const listed = deps.runs.listActive()
+          if (!listed.ok) {
+            logger.error({ error: listed.error }, 'Failed to read queued Agent runs.')
+            return
+          }
+          const active = runningForLimits(listed.data)
+          let selected: { run: AgentRun; pending: PendingRun } | undefined
+          for (const run of listed.data.filter((candidate) => candidate.status === 'queued')) {
+            const pending = pendingRuns.get(run.id)
+            if (pending === undefined) continue
+            const policy = resolveConcurrency(run.workspaceId)
+            if (!policy.ok) {
+              logger.error(
+                { runId: run.id, error: policy.error },
+                'Failed to resolve Agent concurrency policy.',
+              )
+              continue
+            }
+            const profileLimit = await profileRunLimit(run.accountProfileId)
+            if (!profileLimit.ok) {
+              logger.error(
+                { runId: run.id, error: profileLimit.error },
+                'Failed to read the account profile concurrency limit.',
+              )
+              continue
+            }
+            if (
+              unisolatedWriteConflict(active, run.workspaceId, run.worktreeId, run.approvalMode) ===
+                undefined &&
+              hasCapacity(active, run, policy.data, profileLimit.data)
+            ) {
+              selected = { run, pending }
+              break
+            }
+          }
+          if (selected === undefined) break
+          pendingRuns.delete(selected.run.id)
+          const launched = await launch(selected.pending)
+          if (!launched.ok) {
             logger.error(
-              { runId: run.id, error: policy.error },
-              'Failed to resolve Agent concurrency policy.',
+              { runId: selected.run.id, error: launched.error },
+              'Queued Agent run failed to launch.',
             )
-            continue
-          }
-          if (
-            unisolatedWriteConflict(active, run.workspaceId, run.worktreeId, run.approvalMode) ===
-              undefined &&
-            hasCapacity(active, run, policy.data)
-          ) {
-            selected = { run, pending }
-            break
           }
         }
-        if (selected === undefined) return
-        pendingRuns.delete(selected.run.id)
-        const launched = await launch(selected.pending)
-        if (!launched.ok) {
-          logger.error(
-            { runId: selected.run.id, error: launched.error },
-            'Queued Agent run failed to launch.',
-          )
-        }
-      }
+      } while (advanceAgain)
     } finally {
       advancingQueue = false
     }
@@ -628,6 +659,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       accountProfileId?: string
       profileEnvironment?: Record<string, string>
       profileSnapshot?: AgentRunProfileSnapshot
+      /** §46.3 (TASK-117): the selected profile's own concurrency limit. */
+      maxConcurrentRuns?: number
     }>
   > => {
     if (deps.accountProfiles === undefined) {
@@ -668,8 +701,28 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           ...(profile.configHome === undefined ? {} : { configHome: profile.configHome }),
           ...(request.model === undefined ? {} : { model: request.model }),
         },
+        ...(profile.maxConcurrentRuns === undefined
+          ? {}
+          : { maxConcurrentRuns: profile.maxConcurrentRuns }),
       },
     }
+  }
+
+  /**
+   * §46.3 (TASK-117): the per-profile concurrency limit for an existing run
+   * row (queue advancement / resume). A missing profile row or a profile
+   * without a limit reads as "unlimited"; a lookup failure is reported so the
+   * caller can skip the candidate instead of guessing.
+   */
+  const profileRunLimit = async (
+    accountProfileId: string | undefined,
+  ): Promise<IpcResult<number | undefined>> => {
+    if (accountProfileId === undefined || deps.accountProfiles === undefined) {
+      return { ok: true, data: undefined }
+    }
+    const profile = await deps.accountProfiles.get(accountProfileId)
+    if (!profile.ok) return profile
+    return { ok: true, data: profile.data?.maxConcurrentRuns }
   }
 
   const stopExited = deps.events.subscribe('process.exited', ({ agentRunId, exitCode, signal }) => {
@@ -914,8 +967,15 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         listed.data.some((run) => run.status === 'queued') ||
         !hasCapacity(
           active,
-          { workspaceId: workspace.data.id, agentType: definition.id },
+          {
+            workspaceId: workspace.data.id,
+            agentType: definition.id,
+            ...(startProfile.data.accountProfileId === undefined
+              ? {}
+              : { accountProfileId: startProfile.data.accountProfileId }),
+          },
           policy.data,
+          startProfile.data.maxConcurrentRuns,
         )
       // TASK-052: services that pre-bind resources to the Run (ReviewerService
       // snapshot worktree) supply runId; direct IPC callers leave it to us.
@@ -1092,6 +1152,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       // resumes legacy, projecting nothing.
       let profileEnvironment: Record<string, string> | undefined
       let resumeProfileContext: AgentResumeProfileContext | undefined
+      let resumeProfileMaxConcurrentRuns: number | undefined
       if (run.accountProfileId !== undefined) {
         if (deps.accountProfiles === undefined || deps.resolveRuntime === undefined) {
           return fail({
@@ -1104,6 +1165,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         }
         const profileRow = await deps.accountProfiles.get(run.accountProfileId)
         if (!profileRow.ok) return profileRow
+        resumeProfileMaxConcurrentRuns = profileRow.data?.maxConcurrentRuns
         const profileAdapter = deps.accountProfiles.adapterFor(run.agentType)
         if (profileAdapter === undefined) {
           return fail({
@@ -1160,7 +1222,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       }
       const shouldQueue =
         listed.data.some((candidate) => candidate.status === 'queued') ||
-        !hasCapacity(active, run, policy.data)
+        !hasCapacity(active, run, policy.data, resumeProfileMaxConcurrentRuns)
 
       const parsedSession = providerSessionRefSchema.safeParse(run.providerSession)
       const resumeSession =

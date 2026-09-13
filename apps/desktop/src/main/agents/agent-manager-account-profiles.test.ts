@@ -517,6 +517,123 @@ describe('AgentManager account profile integration (TASK-100)', () => {
   })
 })
 
+describe('AgentManager per-profile concurrency (TASK-117, §46/§65 scenario H)', () => {
+  // The fixture uses DEFAULT_CONFIG.concurrency (maxRunsPerAgent = 2), so two
+  // codex runs never trip the global per-agent limit — any queueing observed
+  // here comes from the per-profile limit alone.
+  const exited = (fixture: Fixture, runId: string): void => {
+    fixture.events.emit('process.exited', {
+      processId: `codex:${runId}`,
+      agentRunId: runId,
+      exitCode: 0,
+    })
+  }
+
+  it('queues the second run of the same profile at maxConcurrentRuns = 1 and advances it on release', async () => {
+    const fixture = setup()
+    const work = await createExternalProfile(fixture, { maxConcurrentRuns: 1 })
+
+    const first = await fixture.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      accountProfileId: work.id,
+      approvalMode: 'read-only',
+    })
+    const second = await fixture.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      accountProfileId: work.id,
+      approvalMode: 'read-only',
+    })
+
+    expect(first).toMatchObject({ ok: true, data: { status: 'running' } })
+    expect(second).toMatchObject({ ok: true, data: { status: 'queued' } })
+    expect(fixture.processes.starts).toHaveLength(1)
+
+    // The existing queue path re-evaluates capacity when the slot frees up.
+    exited(fixture, 'run-1')
+    await vi.waitFor(() => {
+      expect(fixture.manager.get('run-2')).toMatchObject({
+        ok: true,
+        data: { status: 'running' },
+      })
+    })
+    expect(fixture.processes.starts).toHaveLength(2)
+    expect(envOf(fixture, 1).CODEX_HOME).toBe(WORK_HOME)
+  })
+
+  it('runs two DIFFERENT profiles of the same agent in parallel (§45)', async () => {
+    const fixture = setup()
+    const work = await createExternalProfile(fixture, { maxConcurrentRuns: 1 })
+    const personal = await createExternalProfile(fixture, {
+      name: 'Codex Personal',
+      configHome: PERSONAL_HOME,
+      maxConcurrentRuns: 1,
+    })
+
+    const first = await fixture.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      accountProfileId: work.id,
+      approvalMode: 'read-only',
+    })
+    const second = await fixture.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      accountProfileId: personal.id,
+      approvalMode: 'read-only',
+    })
+
+    expect(first).toMatchObject({ ok: true, data: { status: 'running' } })
+    expect(second).toMatchObject({ ok: true, data: { status: 'running' } })
+    expect(envOf(fixture, 0).CODEX_HOME).toBe(WORK_HOME)
+    expect(envOf(fixture, 1).CODEX_HOME).toBe(PERSONAL_HOME)
+  })
+
+  it('leaves legacy runs (no accountProfileId) under maxRunsPerAgent only — no per-profile limit', async () => {
+    const fixture = setup()
+    // A maxed-out profile must not leak its limit onto profile-less runs.
+    await createExternalProfile(fixture, { maxConcurrentRuns: 1 })
+
+    const first = await fixture.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      approvalMode: 'read-only',
+    })
+    const second = await fixture.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      approvalMode: 'read-only',
+    })
+
+    expect(first).toMatchObject({ ok: true, data: { status: 'running' } })
+    expect(second).toMatchObject({ ok: true, data: { status: 'running' } })
+    expect(fixture.processes.starts).toHaveLength(2)
+  })
+
+  it('allows two parallel runs on the same profile once maxConcurrentRuns is raised to 2', async () => {
+    const fixture = setup()
+    const work = await createExternalProfile(fixture, { maxConcurrentRuns: 2 })
+
+    const first = await fixture.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      accountProfileId: work.id,
+      approvalMode: 'read-only',
+    })
+    const second = await fixture.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      accountProfileId: work.id,
+      approvalMode: 'read-only',
+    })
+
+    expect(first).toMatchObject({ ok: true, data: { status: 'running' } })
+    expect(second).toMatchObject({ ok: true, data: { status: 'running' } })
+    expect(fixture.processes.starts).toHaveLength(2)
+  })
+})
+
 describe('AgentManager resume with profile identity (TASK-100, §10.5/§38)', () => {
   const interrupt = (fixture: Fixture, runId: string) => {
     const updated = fixture.runs.update(
