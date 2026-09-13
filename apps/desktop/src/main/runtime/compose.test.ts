@@ -139,6 +139,51 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     expect(await runtime.dispose()).toEqual({ ok: true, data: undefined })
   })
 
+  it('round-trips the per-agent default account profile through the account port (TASK-101)', async () => {
+    const home = makeHome()
+    const composed = await composeTeskraRuntime({
+      paths: createTeskraPaths({ TESKRA_HOME: home }),
+      commands: wslCommands(),
+      hostPlatform: 'linux',
+      initializeLogs: false,
+    })
+    if (!composed.ok) throw new Error('expected runtime')
+    runtimes.push(composed.data)
+    const runtime = composed.data
+
+    const profile = await runtime.account.create({
+      agentId: 'codex',
+      name: 'Codex Work',
+      authType: 'external',
+      runtime: nativeRuntimeRef('Ubuntu-24.04'),
+      configHome: join(home, 'codex-work'),
+    })
+    if (!profile.ok) throw new Error('expected external profile')
+
+    await expect(
+      runtime.account.setDefault({ agentId: 'codex', profileId: profile.data.id }),
+    ).resolves.toEqual({ ok: true, data: undefined })
+    await expect(runtime.account.getDefault({ agentId: 'codex' })).resolves.toEqual({
+      ok: true,
+      data: profile.data.id,
+    })
+    // The default is per agent at the facade too — claude has none.
+    await expect(runtime.account.getDefault({ agentId: 'claude' })).resolves.toEqual({
+      ok: true,
+      data: undefined,
+    })
+
+    // §47.2 (1): disabling the default profile clears the default.
+    await expect(runtime.account.remove({ id: profile.data.id })).resolves.toMatchObject({
+      ok: true,
+    })
+    await expect(runtime.account.getDefault({ agentId: 'codex' })).resolves.toEqual({
+      ok: true,
+      data: undefined,
+    })
+    await runtime.dispose()
+  })
+
   it('mounts WSL list/read/write operations on the system port', async () => {
     const home = makeHome()
     const composed = await composeTeskraRuntime({

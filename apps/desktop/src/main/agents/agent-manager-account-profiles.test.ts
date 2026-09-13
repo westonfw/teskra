@@ -515,6 +515,48 @@ describe('AgentManager account profile integration (TASK-100)', () => {
     expect(legacy).toMatchObject({ ok: true, data: { status: 'running' } })
     expect(envOf(fixture)).not.toHaveProperty('CODEX_HOME')
   })
+
+  it('switching the default profile only affects NEW starts — the historical run keeps its snapshot (TASK-101, §65 scenario E)', async () => {
+    const fixture = setup()
+    const work = await createExternalProfile(fixture)
+    const personal = await createExternalProfile(fixture, {
+      name: 'Codex Personal',
+      configHome: PERSONAL_HOME,
+    })
+    requireOk(await fixture.accountProfiles.setDefault('codex', work.id))
+
+    const first = await fixture.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      approvalMode: 'read-only',
+    })
+    expect(first).toMatchObject({ ok: true, data: { status: 'running' } })
+    expect(envOf(fixture, 0).CODEX_HOME).toBe(WORK_HOME)
+    expect(requireOk(fixture.runs.getById('run-1'))?.profileSnapshot).toMatchObject({
+      accountProfileId: work.id,
+      accountProfileName: 'Codex Work',
+      configHome: WORK_HOME,
+    })
+
+    requireOk(await fixture.accountProfiles.setDefault('codex', personal.id))
+    const second = await fixture.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      approvalMode: 'read-only',
+    })
+
+    expect(second).toMatchObject({ ok: true, data: { status: 'running' } })
+    expect(envOf(fixture, 1).CODEX_HOME).toBe(PERSONAL_HOME)
+    expect(requireOk(fixture.runs.getById('run-2'))?.profileSnapshot?.accountProfileId).toBe(
+      personal.id,
+    )
+    // The default change did not rewrite history.
+    expect(requireOk(fixture.runs.getById('run-1'))?.profileSnapshot).toMatchObject({
+      accountProfileId: work.id,
+      accountProfileName: 'Codex Work',
+      configHome: WORK_HOME,
+    })
+  })
 })
 
 describe('AgentManager per-profile concurrency (TASK-117, §46/§65 scenario H)', () => {

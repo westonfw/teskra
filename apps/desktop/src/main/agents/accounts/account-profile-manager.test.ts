@@ -477,6 +477,29 @@ describe('AccountProfileManager defaults (TASK-097, §15)', () => {
     if (disabled.ok) return
     expect(disabled.error.code).toBe('VALIDATION_FAILED')
   })
+
+  it('keeps defaults per agent — codex and claude resolve independently (TASK-101)', async () => {
+    const fixture = setup()
+    const codexWork = requireOk(await createManaged(fixture))
+    const claudeWork = requireOk(
+      await createManaged(fixture, { agentId: 'claude', name: 'Claude Work', slug: 'claude-work' }),
+    )
+
+    requireOk(await fixture.manager.setDefault('codex', codexWork.id))
+    // Setting one agent's default must not leak onto the other.
+    expect(requireOk(await fixture.manager.getDefault('claude'))).toBeUndefined()
+
+    requireOk(await fixture.manager.setDefault('claude', claudeWork.id))
+    expect(requireOk(await fixture.manager.getDefault('codex'))).toBe(codexWork.id)
+    expect(requireOk(await fixture.manager.getDefault('claude'))).toBe(claudeWork.id)
+    expect(requireOk(await fixture.manager.resolve('codex', UBUNTU))?.id).toBe(codexWork.id)
+    expect(requireOk(await fixture.manager.resolve('claude', UBUNTU))?.id).toBe(claudeWork.id)
+
+    // Clearing one default leaves the other untouched.
+    requireOk(await fixture.manager.setDefault('codex', null))
+    expect(requireOk(await fixture.manager.getDefault('codex'))).toBeUndefined()
+    expect(requireOk(await fixture.manager.getDefault('claude'))).toBe(claudeWork.id)
+  })
 })
 
 describe('AccountProfileManager resolve (TASK-097, §37 selector)', () => {
