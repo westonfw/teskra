@@ -211,6 +211,7 @@ export const zhCN: Record<TranslationKey, string> = {
   'errorSuggestion.TERMINAL_NOT_FOUND': '该终端已关闭。请打开一个新终端。',
   'errorSuggestion.MERGE_BLOCKED': '先解决上述检查项再重试；如确认要覆盖，可使用强制合并。',
   'errorSuggestion.VALIDATION_FAILED': '检查输入的值后重试。',
+  'errorSuggestion.CONFLICT': '该操作与现有状态冲突。请刷新并检查冲突项后重试。',
   'errorSuggestion.UNKNOWN': '重试该操作。如果问题持续存在，请从 设置 → 高级 打开日志。',
 
   // Main 进程 PublicAppError 的本地化文案（与 en-US 的 errorMessage.* 一一对应）。

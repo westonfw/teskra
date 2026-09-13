@@ -20,6 +20,8 @@ export const ERROR_CODES = [
   'TERMINAL_NOT_FOUND',
   'MERGE_BLOCKED',
   'VALIDATION_FAILED',
+  /** A uniqueness / state precondition conflicted (e.g. duplicate configHome). */
+  'CONFLICT',
   'UNKNOWN',
 ] as const
 

@@ -226,6 +226,8 @@ export const enUS = {
   'errorSuggestion.MERGE_BLOCKED':
     'Resolve the reported checks, then retry — or rerun with force if the override is intentional.',
   'errorSuggestion.VALIDATION_FAILED': 'Review the entered values and try again.',
+  'errorSuggestion.CONFLICT':
+    'The operation conflicts with existing state. Refresh, review the conflicting item, and try again.',
   'errorSuggestion.UNKNOWN':
     'Retry the operation. If it persists, open the logs from Settings → Advanced.',
 
