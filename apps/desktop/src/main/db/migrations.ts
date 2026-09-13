@@ -14,6 +14,8 @@ import workflowRunCriteriaIterationSql from './migrations/008_workflow_run_crite
 import agentRunModeSql from './migrations/009_agent_run_mode.sql?raw'
 import criteriaSetTaskNullableSql from './migrations/010_criteria_set_task_nullable.sql?raw'
 import agentRunPidIdentitySql from './migrations/011_agent_run_pid_identity.sql?raw'
+import agentAccountProfilesSql from './migrations/012_agent_account_profiles.sql?raw'
+import agentRunAccountProfileSql from './migrations/013_agent_run_account_profile.sql?raw'
 
 /**
  * The canonical migration chain (TASK-006). The .sql files under
@@ -50,6 +52,8 @@ export const MIGRATIONS: readonly Migration[] = [
     foreignKeysOff: true,
   },
   { version: 11, name: '011_agent_run_pid_identity', sql: agentRunPidIdentitySql },
+  { version: 12, name: '012_agent_account_profiles', sql: agentAccountProfilesSql },
+  { version: 13, name: '013_agent_run_account_profile', sql: agentRunAccountProfileSql },
 ]
 
 /** Brings the database schema up to the latest known version. */

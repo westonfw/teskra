@@ -182,6 +182,76 @@ describe('AgentRunRepository', () => {
     expect(result.error.code).toBe('VALIDATION_FAILED')
   })
 
+  it('reads back the 013 profile identity columns (TASK-095)', () => {
+    setup()
+    repo.create({
+      id: 'run-1',
+      workspaceId: 'ws-1',
+      agentType: 'codex',
+      executionMode: 'attended',
+      runDir: 'runs/run-1',
+    })
+    connection
+      .prepare(
+        `UPDATE agent_runs
+         SET account_profile_id = ?, execution_profile_id = ?, profile_snapshot_json = ?, failure_classification_json = ?
+         WHERE id = ?`,
+      )
+      .run(
+        'acct-1',
+        'exec-1',
+        JSON.stringify({ accountProfileId: 'acct-1', accountProfileName: 'Codex Personal' }),
+        JSON.stringify({ kind: 'rate-limited', retryable: true }),
+        'run-1',
+      )
+
+    const result = repo.getById('run-1')
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data?.accountProfileId).toBe('acct-1')
+    expect(result.data?.executionProfileId).toBe('exec-1')
+    expect(result.data?.profileSnapshot).toEqual({
+      accountProfileId: 'acct-1',
+      accountProfileName: 'Codex Personal',
+    })
+    expect(result.data?.failureClassification).toEqual({ kind: 'rate-limited', retryable: true })
+
+    // Legacy rows (NULL columns) read back with the fields absent.
+    repo.create({
+      id: 'run-legacy',
+      workspaceId: 'ws-1',
+      agentType: 'codex',
+      executionMode: 'attended',
+      runDir: 'runs/run-legacy',
+    })
+    const legacy = repo.getById('run-legacy')
+    expect(legacy.ok).toBe(true)
+    if (!legacy.ok) return
+    expect(legacy.data?.accountProfileId).toBeUndefined()
+    expect(legacy.data?.profileSnapshot).toBeUndefined()
+    expect(legacy.data?.failureClassification).toBeUndefined()
+  })
+
+  it('returns VALIDATION_FAILED for corrupted profile_snapshot_json', () => {
+    setup()
+    repo.create({
+      id: 'run-1',
+      workspaceId: 'ws-1',
+      agentType: 'codex',
+      executionMode: 'attended',
+      runDir: 'runs/run-1',
+    })
+    connection
+      .prepare('UPDATE agent_runs SET profile_snapshot_json = ? WHERE id = ?')
+      .run('[broken', 'run-1')
+
+    const result = repo.getById('run-1')
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('VALIDATION_FAILED')
+    expect(result.error).not.toHaveProperty('detail')
+  })
+
   it('deletes a run', () => {
     setup()
     repo.create({

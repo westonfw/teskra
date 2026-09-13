@@ -8,7 +8,11 @@ import type {
   ExecutionMode,
   IpcResult,
 } from '@teskra/contracts'
-import { agentRunSchema } from '@teskra/contracts'
+import {
+  agentFailureClassificationSchema,
+  agentRunProfileSnapshotSchema,
+  agentRunSchema,
+} from '@teskra/contracts'
 
 import {
   decodeJson,
@@ -66,6 +70,11 @@ interface AgentRunRow {
   error_json: string | null
   created_at: string
   updated_at: string
+  // 013_agent_run_account_profile (TASK-095): appended by ALTER TABLE.
+  account_profile_id: string | null
+  execution_profile_id: string | null
+  profile_snapshot_json: string | null
+  failure_classification_json: string | null
 }
 
 export interface CreateAgentRunInput {
@@ -142,6 +151,24 @@ function toDomain(row: AgentRunRow): IpcResult<AgentRun> {
   if (!error.ok) {
     return error
   }
+  const profileSnapshot = decodeJson(
+    agentRunProfileSnapshotSchema,
+    ENTITY,
+    'profile_snapshot_json',
+    row.profile_snapshot_json,
+  )
+  if (!profileSnapshot.ok) {
+    return profileSnapshot
+  }
+  const failureClassification = decodeJson(
+    agentFailureClassificationSchema,
+    ENTITY,
+    'failure_classification_json',
+    row.failure_classification_json,
+  )
+  if (!failureClassification.ok) {
+    return failureClassification
+  }
   return validateRow(agentRunRecordSchema, ENTITY, {
     id: row.id,
     taskId: row.task_id ?? undefined,
@@ -149,6 +176,10 @@ function toDomain(row: AgentRunRow): IpcResult<AgentRun> {
     workflowRunId: row.workflow_run_id ?? undefined,
     workflowStepId: row.workflow_step_id ?? undefined,
     agentType: row.agent_type,
+    accountProfileId: row.account_profile_id ?? undefined,
+    executionProfileId: row.execution_profile_id ?? undefined,
+    profileSnapshot: profileSnapshot.data,
+    failureClassification: failureClassification.data,
     role: row.role ?? undefined,
     model: row.model ?? undefined,
     mode: row.mode === 'interactive' || row.mode === 'exec' ? row.mode : undefined,

@@ -12,7 +12,9 @@ import { migrateDatabase } from './migrations'
  */
 
 // [name, type, notnull, dflt_value, pk] mirroring PRAGMA table_info rows.
-type ColumnSpec = readonly [string, string, 0 | 1, string | null, 0 | 1]
+// pk is the 1-based position inside a composite PRIMARY KEY (profile_aliases
+// reaches 3), not a boolean.
+type ColumnSpec = readonly [string, string, 0 | 1, string | null, number]
 
 interface ForeignKeySpec {
   readonly from: string
@@ -221,6 +223,11 @@ const SCHEMA: Record<string, TableSpec> = {
       ['mode', 'TEXT', 0, null, 0],
       // 011_agent_run_pid_identity: ALTER TABLE appends at the end.
       ['pid_identity', 'TEXT', 0, null, 0],
+      // 013_agent_run_account_profile (TASK-095): ALTER TABLE appends at the end.
+      ['account_profile_id', 'TEXT', 0, null, 0],
+      ['execution_profile_id', 'TEXT', 0, null, 0],
+      ['profile_snapshot_json', 'TEXT', 0, null, 0],
+      ['failure_classification_json', 'TEXT', 0, null, 0],
     ],
     foreignKeys: [
       { from: 'task_id', table: 'tasks', to: 'id', onDelete: 'SET NULL' },
@@ -524,6 +531,92 @@ const SCHEMA: Record<string, TableSpec> = {
       },
     ],
   },
+  agent_account_profiles: {
+    source: '§139.1 lines 5479–5529 (2026-09-13 追加, 012_agent_account_profiles, TASK-095)',
+    columns: [
+      ['id', 'TEXT', 0, null, 1],
+      ['agent_id', 'TEXT', 1, null, 0],
+      ['name', 'TEXT', 1, null, 0],
+      ['description', 'TEXT', 0, null, 0],
+      ['auth_type', 'TEXT', 1, null, 0],
+      ['runtime_kind', 'TEXT', 1, null, 0],
+      ['wsl_distro', 'TEXT', 0, null, 0],
+      ['config_home', 'TEXT', 0, null, 0],
+      ['status', 'TEXT', 1, "'unknown'", 0],
+      ['limited_until', 'TEXT', 0, null, 0],
+      ['max_concurrent_runs', 'INTEGER', 0, null, 0],
+      ['last_used_at', 'TEXT', 0, null, 0],
+      ['last_successful_at', 'TEXT', 0, null, 0],
+      ['last_failure_at', 'TEXT', 0, null, 0],
+      ['enabled', 'INTEGER', 1, '1', 0],
+      ['created_at', 'TEXT', 1, null, 0],
+      ['updated_at', 'TEXT', 1, null, 0],
+    ],
+    // config_home / profile 审计都刻意不设 FK（§8.1 / §8.1.1 / §8.3）。
+    foreignKeys: [],
+    indexes: [
+      {
+        name: 'idx_agent_account_profiles_agent',
+        unique: false,
+        partial: false,
+        columns: ['agent_id'],
+      },
+      {
+        name: 'idx_agent_account_profiles_home',
+        unique: true,
+        partial: true,
+        // null marks the IFNULL(wsl_distro, '') expression column.
+        columns: ['runtime_kind', null, 'config_home'],
+      },
+      {
+        name: 'idx_agent_account_profiles_status',
+        unique: false,
+        partial: false,
+        columns: ['status'],
+      },
+    ],
+  },
+  account_events: {
+    source: '§139.1 lines 5534–5551 (012_agent_account_profiles, TASK-095)',
+    columns: [
+      ['id', 'INTEGER', 0, null, 1],
+      ['profile_id', 'TEXT', 0, null, 0],
+      ['run_id', 'TEXT', 0, null, 0],
+      ['event_type', 'TEXT', 1, null, 0],
+      ['payload_json', 'TEXT', 1, null, 0],
+      ['created_at', 'TEXT', 1, null, 0],
+    ],
+    // profile_id 刻意不设 FK：Profile 被硬删除后审计记录必须留下。
+    foreignKeys: [],
+    indexes: [
+      {
+        name: 'idx_account_events_profile',
+        unique: false,
+        partial: false,
+        columns: ['profile_id', 'created_at'],
+      },
+      {
+        name: 'idx_account_events_type',
+        unique: false,
+        partial: false,
+        columns: ['event_type', 'created_at'],
+      },
+    ],
+  },
+  profile_aliases: {
+    source: '§139.1 lines 5557–5572 (012_agent_account_profiles, TASK-095, ADR-0011)',
+    columns: [
+      ['agent_id', 'TEXT', 1, null, 1],
+      ['alias', 'TEXT', 1, null, 3],
+      ['kind', 'TEXT', 1, null, 2],
+      ['profile_id', 'TEXT', 1, null, 0],
+      ['created_at', 'TEXT', 1, null, 0],
+      ['updated_at', 'TEXT', 1, null, 0],
+    ],
+    // 不设 FK 到两张 Profile 表：Profile 被删后 alias 应变成「未绑定」。
+    foreignKeys: [],
+    indexes: [],
+  },
 }
 
 const openConnections: Database.Database[] = []
@@ -567,7 +660,7 @@ describe('schema matches plan §139.1 (TASK-090)', () => {
         type: string
         notnull: 0 | 1
         dflt_value: string | null
-        pk: 0 | 1
+        pk: number
       }[]
       const actual: ColumnSpec[] = rows.map((row) => [
         row.name,
