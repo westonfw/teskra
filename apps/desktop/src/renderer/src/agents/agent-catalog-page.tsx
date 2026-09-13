@@ -24,6 +24,8 @@ import { inspectRunWatchdog, type WatchdogInspection } from '@teskra/shared'
 import { useEffect, useMemo, useState } from 'react'
 
 import { AppErrorAlert } from '../components/app-error-alert'
+import { AccountSelect } from '../accounts/account-select'
+import { useAccountProfileStore } from '../accounts/account-profile-store'
 import { useTranslation, type TranslationKey, type TranslationParams } from '../i18n'
 import { useSettingsStore } from '../settings/settings-store'
 import { agentRuntimeKey, useAgentStore } from '../stores/agent-store'
@@ -79,6 +81,8 @@ export function AgentCatalogPage() {
   const cancelRun = useAgentStore((state) => state.cancelRun)
   const loadRunOutput = useAgentStore((state) => state.loadRunOutput)
   const clearError = useAgentStore((state) => state.clearError)
+  const refreshAccounts = useAccountProfileStore((state) => state.refresh)
+  const startAccountSynchronization = useAccountProfileStore((state) => state.startSynchronization)
   const settingsWorkspaceId = useSettingsStore((state) => state.workspaceId)
   const resolvedConfig = useSettingsStore((state) => state.resolved)
   const setSettingsWorkspace = useSettingsStore((state) => state.setWorkspace)
@@ -87,6 +91,7 @@ export function AgentCatalogPage() {
   const [selectedRunId, setSelectedRunId] = useState<string>()
   const [prompt, setPrompt] = useState('')
   const [model, setModel] = useState('')
+  const [accountId, setAccountId] = useState<string>()
   const [approvalMode, setApprovalMode] = useState<ApprovalMode>('manual')
   const workspace = useWorkspaceStore((state) => state.current)
   const now = useNow(runs.some(({ status }) => ACTIVE_STATUSES.has(status)))
@@ -100,6 +105,18 @@ export function AgentCatalogPage() {
   useEffect(() => {
     void loadDefinitions()
   }, [loadDefinitions])
+
+  // §25: the launch form's Account dropdown reads the shared account store.
+  useEffect(() => {
+    void refreshAccounts()
+    return startAccountSynchronization()
+  }, [refreshAccounts, startAccountSynchronization])
+
+  // Changing the Agent resets the account choice to "auto" (per-agent
+  // default → legacy CLI home, §52).
+  useEffect(() => {
+    setAccountId(undefined)
+  }, [selectedId])
 
   useEffect(() => {
     if (workspace === undefined) return
@@ -158,6 +175,7 @@ export function AgentCatalogPage() {
       agentType: selectedId,
       prompt: prompt.trim() || undefined,
       model: model.trim() || undefined,
+      ...(accountId === undefined ? {} : { accountProfileId: accountId }),
       approvalMode,
       executionMode: 'attended',
       mode: 'interactive',
@@ -237,6 +255,7 @@ export function AgentCatalogPage() {
             onChange={(event) => setModel(event.target.value)}
             placeholder={t('runs.launch.modelPlaceholder')}
           />
+          <AccountSelect agentId={selectedId} value={accountId} onChange={setAccountId} />
           <Select<ApprovalMode>
             value={approvalMode}
             onChange={setApprovalMode}

@@ -9,6 +9,7 @@ import {
   accountStatusTag,
   defaultAccountProfileId,
   isValidAccountSlug,
+  isValidConfigHomePath,
   profilesByAgent,
   slugifyAccountName,
 } from './account-view-model'
@@ -183,5 +184,19 @@ describe('accountLoginTransport', () => {
     stopOutput()
     emit('account.login.output', { sessionId: 'session-1', data: 'late' })
     expect(output).toEqual(['hello'])
+  })
+})
+
+describe('isValidConfigHomePath (§5.3)', () => {
+  it('accepts absolute paths and rejects ~ / env vars / relatives', () => {
+    expect(isValidConfigHomePath(String.raw`C:\Users\weston\.codex`)).toBe(true)
+    expect(isValidConfigHomePath('C:/Users/weston/.codex')).toBe(true)
+    expect(isValidConfigHomePath('/home/weston/.codex')).toBe(true)
+    expect(isValidConfigHomePath(String.raw`\\server\share\.codex`)).toBe(true)
+    expect(isValidConfigHomePath('~/.codex')).toBe(false)
+    expect(isValidConfigHomePath('$HOME/.codex')).toBe(false)
+    expect(isValidConfigHomePath(String.raw`%USERPROFILE%\.codex`)).toBe(false)
+    expect(isValidConfigHomePath('.codex')).toBe(false)
+    expect(isValidConfigHomePath('')).toBe(false)
   })
 })

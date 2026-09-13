@@ -27,6 +27,8 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { AgentPicker } from '../agents/agent-picker'
 import { AgentRunTerminal } from '../agents/agent-run-terminal'
+import { AccountSelect } from '../accounts/account-select'
+import { useAccountProfileStore } from '../accounts/account-profile-store'
 import { AppErrorAlert } from '../components/app-error-alert'
 import { useTranslation } from '../i18n'
 import { RunCommandsPanel } from '../permissions/run-commands-panel'
@@ -90,12 +92,15 @@ export function TaskPage() {
   const resumeRun = useAgentStore((state) => state.resumeRun)
   const loadRunOutput = useAgentStore((state) => state.loadRunOutput)
   const clearAgentError = useAgentStore((state) => state.clearError)
+  const refreshAccounts = useAccountProfileStore((state) => state.refresh)
+  const startAccountSynchronization = useAccountProfileStore((state) => state.startSynchronization)
   const [createOpen, setCreateOpen] = useState(false)
   const [newTitle, setNewTitle] = useState('')
   const [newDescription, setNewDescription] = useState('')
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [agentId, setAgentId] = useState<string>()
+  const [accountId, setAccountId] = useState<string>()
   const [prompt, setPrompt] = useState('')
   const [openRunId, setOpenRunId] = useState<string>()
   const { t } = useTranslation()
@@ -114,6 +119,17 @@ export function TaskPage() {
       stopRuns()
     }
   }, [loadDefinitions, loadHealth, startRunSynchronization, startTaskSynchronization, workspace])
+
+  // §25: the run launcher's Account dropdown reads the shared account store.
+  useEffect(() => {
+    void refreshAccounts()
+    return startAccountSynchronization()
+  }, [refreshAccounts, startAccountSynchronization])
+
+  // Changing the Agent resets the account choice to "auto" (§52 resolution).
+  useEffect(() => {
+    setAccountId(undefined)
+  }, [agentId])
 
   // Re-initialize the draft fields only when the Task they were derived from
   // actually changes — a refresh that only touches status/updatedAt must not
@@ -326,6 +342,7 @@ export function TaskPage() {
                   onChange={(event) => setPrompt(event.target.value)}
                   placeholder={t('tasks.runLauncher.promptPlaceholder')}
                 />
+                <AccountSelect agentId={agentId} value={accountId} onChange={setAccountId} />
                 <Button
                   type="primary"
                   loading={starting}
@@ -337,6 +354,7 @@ export function TaskPage() {
                       taskId: selected.id,
                       agentType: agentId,
                       prompt: prompt.trim() || undefined,
+                      ...(accountId === undefined ? {} : { accountProfileId: accountId }),
                       executionMode: 'attended',
                       approvalMode: 'manual',
                     })

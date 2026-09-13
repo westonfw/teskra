@@ -682,14 +682,18 @@ export const zhCN: Record<TranslationKey, string> = {
     'Teskra 将为该 Profile 创建隔离的 CLI 配置根（CODEX_HOME / CLAUDE_CONFIG_DIR）。路径由 Teskra 生成，只读。',
   'accounts.wizard.env.configHome': 'Config Home（只读，由 Teskra 生成）',
   'accounts.wizard.env.create': '创建环境',
+  'accounts.wizard.create.renameHint': '请改名（返回上一步修改名称或 slug）后重试。',
   'accounts.wizard.signin.body':
     '通过 CLI 官方登录流程登录。整个过程完全可见，不会在后台隐藏执行。',
   'accounts.wizard.signin.open': '打开登录终端',
   'accounts.wizard.signin.skip': '跳过登录，稍后完成',
+  'accounts.wizard.signin.exitNonZero':
+    '登录进程以退出码 {code} 结束。可在账号页面重试，或继续验证。',
   'accounts.wizard.signin.skipped': '已跳过登录——Profile 保持「需要登录」，可在账号页面稍后登录。',
   'accounts.wizard.verify.body': '检测将确认该 Profile 的 CLI 已安装且认证可用。',
   'accounts.wizard.verify.cliDetected': 'CLI 已检测到',
   'accounts.wizard.verify.authAvailable': '认证可用',
+  'accounts.wizard.verify.run': '运行检测',
   'accounts.wizard.verify.failed': '验证尚未通过（状态：{status}）。',
   'accounts.wizard.verify.retry': '重试',
   'accounts.wizard.next': '下一步',

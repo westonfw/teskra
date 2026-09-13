@@ -88,6 +88,16 @@ export function isValidAccountSlug(value: string): boolean {
   return SLUG_PATTERN.test(value)
 }
 
+/**
+ * §5.3 — UX-level mirror of the contracts configHome rule for the external
+ * profile form; Main re-validates authoritatively on create.
+ */
+export function isValidConfigHomePath(value: string): boolean {
+  if (value.length === 0) return false
+  if (value.startsWith('~') || value.includes('$') || value.includes('%')) return false
+  return value.startsWith('/') || value.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(value)
+}
+
 /** Derives a slug suggestion from a display name; always lowercase per §48.1. */
 export function slugifyAccountName(name: string): string {
   return name

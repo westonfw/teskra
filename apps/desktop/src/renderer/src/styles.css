@@ -787,9 +787,15 @@ body {
 
 .run-launch-form {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) minmax(170px, 0.45fr) 150px auto;
+  grid-template-columns: minmax(240px, 1fr) minmax(170px, 0.45fr) minmax(160px, 0.4fr) 150px auto;
   gap: 12px;
   align-items: start;
+}
+
+.account-select {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .run-section {
@@ -1261,4 +1267,20 @@ body {
 
 .account-login-terminal {
   height: 420px;
+}
+
+.account-wizard-steps {
+  margin-bottom: 18px;
+}
+
+.account-wizard-body {
+  min-height: 260px;
+}
+
+.account-verify-ok {
+  color: var(--ant-color-success, #52c41a);
+}
+
+.account-verify-fail {
+  color: var(--ant-color-error, #ff4d4f);
 }

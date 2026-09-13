@@ -10,8 +10,6 @@ import {
   Input,
   InputNumber,
   Modal,
-  Radio,
-  Select,
   Space,
   Spin,
   Tag,
@@ -19,18 +17,18 @@ import {
 } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 
-import type { AgentAccountProfile, WslDistribution } from '@teskra/contracts'
+import type { AgentAccountProfile } from '@teskra/contracts'
 
+import { AddAccountWizard } from '../../accounts/add-account-wizard'
 import { useAccountProfileStore } from '../../accounts/account-profile-store'
 import {
   accountLastUsedLabel,
   accountRuntimeLabel,
   accountStatusTag,
   defaultAccountProfileId,
-  isValidAccountSlug,
   profilesByAgent,
-  slugifyAccountName,
 } from '../../accounts/account-view-model'
+import { ExternalAccountModal } from '../../accounts/external-account-modal'
 import { LoginTerminalView } from '../../accounts/login-terminal-view'
 import { AppErrorAlert } from '../../components/app-error-alert'
 import { useTranslation } from '../../i18n'
@@ -55,7 +53,8 @@ export function AccountsSettingsSection() {
   const resolved = useSettingsStore((state) => state.resolved)
   const loadSettings = useSettingsStore((state) => state.load)
 
-  const [adding, setAdding] = useState(false)
+  const [addingFor, setAddingFor] = useState<string>()
+  const [addingExternal, setAddingExternal] = useState(false)
   const [editing, setEditing] = useState<AgentAccountProfile>()
   const [removing, setRemoving] = useState<AgentAccountProfile>()
   const [loggingIn, setLoggingIn] = useState<AgentAccountProfile>()
@@ -92,6 +91,10 @@ export function AccountsSettingsSection() {
       {profiles.length === 0 && !loading && (
         <Alert type="info" showIcon message={t('accounts.empty.guidance')} />
       )}
+      <div>
+        {/* §49/§50.2: importing an existing CLI home is an explicit action. */}
+        <Button onClick={() => setAddingExternal(true)}>{t('accounts.addExternal')}</Button>
+      </div>
       <Spin spinning={loading}>
         {definitions.length === 0 && profiles.length === 0 && !loading ? (
           <Empty description={t('settings.agents.empty')} />
@@ -119,7 +122,11 @@ export function AccountsSettingsSection() {
                         onLogin={() => setLoggingIn(profile)}
                       />
                     ))}
-                    <Button type="dashed" icon={<PlusOutlined />} onClick={() => setAdding(true)}>
+                    <Button
+                      type="dashed"
+                      icon={<PlusOutlined />}
+                      onClick={() => setAddingFor(agentId)}
+                    >
                       {t('accounts.add')}
                     </Button>
                   </Space>
@@ -130,7 +137,12 @@ export function AccountsSettingsSection() {
         )}
       </Spin>
 
-      <AddAccountModal open={adding} onClose={() => setAdding(false)} />
+      <AddAccountWizard
+        open={addingFor !== undefined}
+        initialAgentId={addingFor}
+        onClose={() => setAddingFor(undefined)}
+      />
+      <ExternalAccountModal open={addingExternal} onClose={() => setAddingExternal(false)} />
       {editing !== undefined && (
         <EditProfileModal profile={editing} onClose={() => setEditing(undefined)} />
       )}
@@ -357,137 +369,6 @@ function RemoveProfileModal({ profile, isDefault, onClose }: RemoveProfileModalP
           <Checkbox checked={deleteHome} onChange={(event) => setDeleteHome(event.target.checked)}>
             {t('accounts.remove.deleteHome')}
           </Checkbox>
-        )}
-      </Space>
-    </Modal>
-  )
-}
-
-interface AddAccountModalProps {
-  readonly open: boolean
-  readonly onClose: () => void
-}
-
-/**
- * Minimal creation entry (agent / name / slug / runtime). TASK-104 replaces
- * this with the six-step wizard (§23) including the login terminal.
- */
-function AddAccountModal({ open, onClose }: AddAccountModalProps) {
-  const { t } = useTranslation()
-  const definitions = useAgentStore((state) => state.definitions)
-  const createProfile = useAccountProfileStore((state) => state.createProfile)
-  const error = useAccountProfileStore((state) => state.error)
-  const [agentId, setAgentId] = useState<string>()
-  const [name, setName] = useState('')
-  const [slug, setSlug] = useState('')
-  const [slugTouched, setSlugTouched] = useState(false)
-  const [runtimeKind, setRuntimeKind] = useState<'windows' | 'wsl'>('windows')
-  const [distro, setDistro] = useState<string>()
-  const [distributions, setDistributions] = useState<readonly WslDistribution[]>([])
-  const [creating, setCreating] = useState(false)
-
-  useEffect(() => {
-    if (!open || runtimeKind !== 'wsl') return
-    void window.teskra.runtime.listWslDistributions().then((result) => {
-      if (result.ok) setDistributions(result.data)
-    })
-  }, [open, runtimeKind])
-
-  useEffect(() => {
-    if (open) {
-      setAgentId((current) => current ?? definitions[0]?.id)
-    }
-  }, [open, definitions])
-
-  const effectiveSlug = slugTouched ? slug : slugifyAccountName(name)
-  const slugValid = isValidAccountSlug(effectiveSlug)
-  const runtimeValid = runtimeKind === 'windows' || (distro ?? '').length > 0
-  const valid = agentId !== undefined && name.trim().length > 0 && slugValid && runtimeValid
-
-  const create = async (): Promise<void> => {
-    if (agentId === undefined) return
-    setCreating(true)
-    const created = await createProfile({
-      agentId,
-      name: name.trim(),
-      authType: 'subscription',
-      runtime: runtimeKind === 'wsl' ? { kind: 'wsl', distro: distro ?? '' } : { kind: 'windows' },
-      slug: effectiveSlug,
-    })
-    setCreating(false)
-    if (created !== undefined) onClose()
-  }
-
-  return (
-    <Modal
-      title={t('accounts.wizard.title')}
-      open={open}
-      onCancel={onClose}
-      onOk={() => void create()}
-      confirmLoading={creating}
-      okButtonProps={{ disabled: !valid }}
-      destroyOnHidden
-    >
-      <Space direction="vertical" size={12} className="account-modal-form">
-        {error !== undefined && <Alert type="error" showIcon message={error.message} />}
-        <label className="account-field">
-          <Typography.Text>{t('accounts.wizard.step.agent')}</Typography.Text>
-          <Select
-            value={agentId}
-            onChange={setAgentId}
-            options={definitions.map((definition) => ({
-              value: definition.id,
-              label: definition.name,
-            }))}
-          />
-        </label>
-        <label className="account-field">
-          <Typography.Text>{t('accounts.wizard.name.label')}</Typography.Text>
-          <Input value={name} onChange={(event) => setName(event.target.value)} />
-        </label>
-        <label className="account-field">
-          <Typography.Text>{t('accounts.wizard.slug.label')}</Typography.Text>
-          <Input
-            value={effectiveSlug}
-            {...(slugValid ? {} : { status: 'error' as const })}
-            onChange={(event) => {
-              setSlugTouched(true)
-              setSlug(event.target.value)
-            }}
-          />
-          {!slugValid && (
-            <Typography.Text type="danger">{t('accounts.wizard.slug.invalid')}</Typography.Text>
-          )}
-        </label>
-        <label className="account-field">
-          <Typography.Text>{t('accounts.wizard.step.runtime')}</Typography.Text>
-          <Radio.Group
-            value={runtimeKind}
-            onChange={(event) => setRuntimeKind(event.target.value as 'windows' | 'wsl')}
-            options={[
-              { value: 'windows', label: t('accounts.wizard.runtime.windows') },
-              { value: 'wsl', label: t('accounts.wizard.runtime.wsl') },
-            ]}
-          />
-        </label>
-        {runtimeKind === 'wsl' && (
-          <label className="account-field">
-            <Typography.Text>{t('accounts.wizard.runtime.distro')}</Typography.Text>
-            <Select
-              value={distro}
-              onChange={setDistro}
-              {...(runtimeValid ? {} : { status: 'error' as const })}
-              options={distributions.map((distribution) => ({
-                value: distribution.name,
-                label: distribution.name,
-              }))}
-            />
-            {!runtimeValid && (
-              <Typography.Text type="danger">
-                {t('accounts.wizard.runtime.distroRequired')}
-              </Typography.Text>
-            )}
-          </label>
         )}
       </Space>
     </Modal>
