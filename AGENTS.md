@@ -38,7 +38,10 @@ docs/
    ├─ 0005-config-layers-and-runtime-facade.md
    ├─ 0006-workflow-run-task-optional.md
    ├─ 0007-persist-agent-run-mode.md
-   └─ 0008-criteria-set-task-nullable.md
+   ├─ 0008-criteria-set-task-nullable.md
+   ├─ 0009-account-profile-is-a-full-cli-home.md
+   ├─ 0010-rate-limit-is-a-failure-reason-not-a-run-status.md
+   └─ 0011-workflow-references-profile-aliases.md
 ```
 
 ## 文档权威性（实现任何功能前必读）
@@ -75,6 +78,13 @@ docs/decisions/             = 已裁决的架构问题
 7. **ADR-0007 与 ADR-0008 曾撞号**（均一度写作 0007），已按时间先后重排：
    0007 = AgentRun 持久化启动模式（migration 009），
    0008 = Criteria Set 可脱离 Task（migration 010）。引用时注意别沿用旧编号。
+8. **AccountProfile = 完整 CLI Home**（ADR-0009，Milestone 24 / TASK-094~118）。
+   多订阅账号通过独立的 CLI 配置根隔离（Codex 用 `CODEX_HOME`，Claude 用
+   `CLAUDE_CONFIG_DIR`），「账号即环境」；`AgentExecutionProfile` 不引用
+   tool / skill / permission / env 四类 Profile ID（这些实体不存在）。
+   另：限额是失败原因而非 Run 状态（ADR-0010，分类结果存
+   `agent_runs.failure_classification_json`）；Workflow 里引用的是机器间可移植的
+   Profile alias 而非本地 Profile id（ADR-0011）。
 
 ## 技术栈与工具链基线（计划，强制固定）
 

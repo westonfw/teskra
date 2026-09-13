@@ -5468,6 +5468,166 @@ CREATE TABLE permission_audit (
 CREATE INDEX idx_permission_audit_run ON permission_audit(run_id, risk_level);
 ```
 
+## 012_agent_account_profiles.sql — 账号 Profile（TASK-095）
+
+> 2026-09-13 追加：多订阅账号与 Agent Profile 管理（Milestone 24，
+> `docs/teskra-multi-account-subscription-implementation.md` §8，ADR-0009）。
+> 012 / 013 都是纯 `CREATE TABLE` / `ADD COLUMN`，不需要表重建，不设
+> `foreignKeysOff`。顺序强制：012 必须早于 013。
+
+```sql
+CREATE TABLE agent_account_profiles (
+    id TEXT PRIMARY KEY,
+
+    agent_id TEXT NOT NULL,
+
+    name TEXT NOT NULL,
+    description TEXT,
+
+    auth_type TEXT NOT NULL,
+
+    -- WorkspaceRuntimeRef 拍平成两列（§5.1）
+    runtime_kind TEXT NOT NULL
+        CHECK (runtime_kind IN ('windows', 'wsl')),
+    -- runtime_kind='wsl' 时必填（§7 的跨对象约束）；
+    -- 统一小写存储，用于唯一键（distro 名大小写不敏感）
+    wsl_distro TEXT
+        CHECK ((runtime_kind = 'wsl') = (wsl_distro IS NOT NULL)),
+
+    config_home TEXT,
+
+    status TEXT NOT NULL DEFAULT 'unknown',
+
+    limited_until TEXT,
+
+    -- §46：NULL = 不限；managed profile 创建时写 1
+    max_concurrent_runs INTEGER
+        CHECK (max_concurrent_runs IS NULL OR max_concurrent_runs >= 1),
+
+    last_used_at TEXT,
+    last_successful_at TEXT,
+    last_failure_at TEXT,
+
+    enabled INTEGER NOT NULL DEFAULT 1,
+
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_agent_account_profiles_agent
+ON agent_account_profiles(agent_id);
+
+CREATE INDEX idx_agent_account_profiles_status
+ON agent_account_profiles(status);
+
+-- §48.1：configHome 必须唯一，但唯一性是 **per-runtime** 的。
+-- 两个不同 distro 里各有一个 /home/u/.teskra/agent-profiles/codex/work
+-- 是两个不同文件系统里的不同目录，不能判为冲突。
+-- 因此唯一键包含规范化后的 runtime identity。
+CREATE UNIQUE INDEX idx_agent_account_profiles_home
+ON agent_account_profiles(runtime_kind, IFNULL(wsl_distro, ''), config_home)
+WHERE config_home IS NOT NULL;
+
+-- 审计事件（§41）：account.created / account.login_started 等不属于任何
+-- Run，而 permission_audit / agent_events 的 run_id 都是 NOT NULL，
+-- 因此新增一张表。profile_id 刻意不设 FK：Profile 被硬删除后审计记录必须留下。
+CREATE TABLE account_events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    -- 事件本身不依附于 Run；run_id 仅在与 Run 相关时填写，且不设 FK 级联删除
+    profile_id   TEXT,
+    run_id       TEXT,
+
+    event_type   TEXT NOT NULL,   -- account.created / agent.account_switched / ...
+    payload_json TEXT NOT NULL,
+
+    created_at   TEXT NOT NULL
+);
+
+CREATE INDEX idx_account_events_profile
+ON account_events(profile_id, created_at);
+
+CREATE INDEX idx_account_events_type
+ON account_events(event_type, created_at);
+
+-- workflow alias 绑定（§53.1，ADR-0011）：alias 是写进仓库的稳定名字，
+-- profileId 是机器本地的，这张表是两者之间唯一的映射。
+-- 不设 FK 到两张 Profile 表：Profile 被删后 alias 应变成「未绑定」并在
+-- 解析时报错，而不是被级联删掉。
+CREATE TABLE profile_aliases (
+    agent_id   TEXT NOT NULL,
+
+    -- workflow 里写的名字，如 "work"
+    alias      TEXT NOT NULL,
+
+    -- 二选一：account / execution，对应 §53.1 的两种引用
+    kind       TEXT NOT NULL
+        CHECK (kind IN ('account', 'execution')),
+    profile_id TEXT NOT NULL,
+
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+
+    PRIMARY KEY (agent_id, kind, alias)
+);
+```
+
+注：上文 `§5.1` / `§7` / `§41` / `§46` / `§48.1` / `§53.1` 均指
+`docs/teskra-multi-account-subscription-implementation.md` 的章节号。
+`config_home IS NULL` 的行不参与唯一约束；第一阶段没有任何路径会产生
+NULL 行，这条豁免是给将来留的余量。`wsl_distro` 入库前统一小写。
+
+## 013_agent_run_account_profile.sql — agent_runs 四列（TASK-095）
+
+`agent_runs` 的四个新列合并进同一个 migration——现有风格是「一个语义变更
+一个文件」，不是「一列一个文件」。
+
+```sql
+ALTER TABLE agent_runs ADD COLUMN account_profile_id TEXT;
+ALTER TABLE agent_runs ADD COLUMN execution_profile_id TEXT;
+ALTER TABLE agent_runs ADD COLUMN profile_snapshot_json TEXT;
+
+-- §17.2（ADR-0010）：限额/认证失败的分类结果。不新增 Run status，
+-- 失败的 Run 仍然是 status = 'failed'，原因存在这一列里。
+ALTER TABLE agent_runs ADD COLUMN failure_classification_json TEXT;
+```
+
+**前三列刻意不设外键。** 理由与 `worktrees.run_id` 相同（见 `002_runs.sql`
+的注释）：这里要的是审计留痕，而 `ON DELETE SET NULL` 会在删 Profile 时
+抹掉历史 Run 的身份，`ON DELETE RESTRICT` 又会让「软禁用优先」（设计文档
+§47）变成「永远删不掉」。真相由 `profile_snapshot_json` 承载，
+`account_profile_id` 只是弱引用。
+
+## 014_agent_execution_profiles.sql — 执行 Profile（TASK-110）
+
+Phase E 才需要，由 TASK-110 注册（TASK-095 只含 012 / 013）。
+
+```sql
+CREATE TABLE agent_execution_profiles (
+    id TEXT PRIMARY KEY,
+
+    name TEXT NOT NULL,
+
+    agent_id TEXT NOT NULL,
+
+    account_profile_id TEXT,
+
+    model TEXT,
+    reasoning_effort TEXT,
+    approval_mode TEXT,
+
+    -- 不设 permission_profile_id / tool_profile_id / skill_profile_id /
+    -- env_profile_id：这四类实体在仓库里不存在（设计文档 §6.1）。
+    -- 要加回来先看设计文档 §6.2 的前置工作。
+
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+
+    FOREIGN KEY(account_profile_id)
+      REFERENCES agent_account_profiles(id)
+);
+```
+
 ## 外键与删除策略（全表汇总）
 
 原文有 4 处关联缺少显式 FK 与删除策略，此处补齐：

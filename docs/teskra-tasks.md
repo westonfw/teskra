@@ -3700,6 +3700,718 @@ View Diff
 
 ---
 
+# Milestone 24 — Multi-Account & Agent Profiles
+
+多订阅账号与 Agent Profile 管理。设计说明与「为什么这么定」见
+`docs/teskra-multi-account-subscription-implementation.md`（下称「设计文档」），
+本 Milestone 是 TASK-094～118 编号、优先级、依赖与验收标准的**唯一权威**
+（设计文档 §59 只是带设计理由的副本）。相关裁决：ADR-0009 / ADR-0010 / ADR-0011。
+
+**数据库 Schema 权威在 plan §139.1**（`docs/teskra-implementation-plan-v2.md`）。
+本 Milestone 涉及的 `012_agent_account_profiles.sql`（`agent_account_profiles` /
+`account_events` / `profile_aliases`）、`013_agent_run_account_profile.sql`
+（`agent_runs` 四列）、`014_agent_execution_profiles.sql` 三个 migration 的
+表结构以设计文档 §8 为准，已同步进 plan §139.1。
+
+一致性校验：改 Task 集合 / 优先级 / 依赖时先改本文档，再跑
+`npm run check:task-docs`（`scripts/check-task-docs.mjs`）核对设计文档 §59 是否同步。
+
+推荐实施顺序（Phase A～F）见设计文档 §60；要点：**TASK-112 必须与 TASK-100 同批做**
+（否则 crash recovery 会用当前默认 Profile 恢复历史 Run），
+**TASK-118 必须排在 TASK-111 之前**（先装锁再开门）。
+
+---
+
+## TASK-094 — Account Profile Contracts
+
+**优先级：P0**
+
+**依赖：TASK-003**
+
+### 实施内容
+
+```text
+AgentAccountProfile
+AccountProfileStatus
+AccountAuthType
+AgentRuntimeIdentity
+Zod schemas
+```
+
+### 验收标准
+
+- [ ] Main / Renderer 共用 contracts。
+- [ ] 无重复类型。
+- [ ] typecheck 通过。
+- [ ] `configHome` 的 Zod 校验拒绝 `~` 开头、含环境变量引用、非绝对的路径（设计文档 §5.3）。
+- [ ] `runtime.kind` 第一阶段只接受 `windows` / `wsl`。
+- [ ] `runtime.kind === "wsl"` 时 `distro` 必填——不允许留空去跟随以后可能变化的默认 distro。
+
+---
+
+## TASK-095 — Account Profile Database Migration
+
+**优先级：P0**
+
+**依赖：TASK-006, TASK-094**
+
+### 实施内容
+
+新增 migration `012` 与 `013`（设计文档 §8）：
+
+```text
+012  agent_account_profiles（含 max_concurrent_runs）
+012  account_events
+012  profile_aliases
+013  agent_runs.account_profile_id
+013  agent_runs.execution_profile_id
+013  agent_runs.profile_snapshot_json
+013  agent_runs.failure_classification_json
+```
+
+`014_agent_execution_profiles.sql` **不属于本 Task**，由 TASK-110 负责。
+
+### 验收标准
+
+- [ ] 老数据库自动升级。
+- [ ] 历史 Run 不丢失。
+- [ ] migration 可重复验证。
+- [ ] `migrations.ts` 已注册，且 012 排在 013 之前。
+- [ ] `foreign_key_check` 通过。
+- [ ] `config_home` 部分唯一索引生效（NULL 可重复，非 NULL 不可重复）。
+- [ ] `max_concurrent_runs` 的 `CHECK` 生效。
+- [ ] `profile_aliases` 的 `(agent_id, kind, alias)` 主键生效。
+
+---
+
+## TASK-096 — AccountProfileRepository
+
+**优先级：P0**
+
+**依赖：TASK-007, TASK-095**
+
+### 实施内容
+
+```text
+list
+get
+create
+update
+disable
+setStatus
+```
+
+### 验收标准
+
+- [ ] 单元测试。
+- [ ] 不在 Manager 写 SQL。
+
+---
+
+## TASK-097 — AccountProfileManager
+
+**优先级：P0**
+
+**依赖：TASK-022, TASK-078, TASK-096**
+
+### 实施内容
+
+```text
+CRUD
+default resolve
+status
+runtime projection
+login descriptor
+```
+
+### 验收标准
+
+- [ ] Manager 不依赖 Renderer。
+- [ ] Typed EventBus。
+- [ ] Adapter 可插拔。
+- [ ] create 拒绝 `authType: "api-key"`（第一阶段不做，设计文档 §35）——在 IPC/Manager 层拒绝，不能只靠 UI 隐藏入口。
+- [ ] create 拒绝未注册的 `agentId`。
+- [ ] managed Profile 的 `configHome` 由 Manager 生成，update 不接受该字段（设计文档 §48.1）。
+- [ ] slug 重复时报错并要求改名，不自动加后缀；slug 入库前 `toLowerCase()`（Windows 路径大小写不敏感）。
+- [ ] 并发创建同 slug 时只有一个成功——先插库再建目录，靠 `config_home` 唯一索引挡住，不留孤儿目录。
+- [ ] `maxConcurrentRuns` 只接受 `undefined` 或 `>= 1` 的整数。
+- [ ] `remove` 是 soft disable，不执行 DELETE（设计文档 §47.1）。
+- [ ] 禁用默认 Profile 时同时清除 `defaultAccountProfileId`（设计文档 §47.2）。
+- [ ] 有非终态 Run 时拒绝禁用。
+- [ ] `enable` 时 Home 不存在 → 重建并置 `login-required`。
+- [ ] Resolver 遇到 disabled 的默认 Profile 报错，不回退 legacy。
+
+---
+
+## TASK-098 — Codex Account Profile Adapter
+
+**优先级：P0**
+
+**依赖：TASK-023, TASK-097**
+
+### 实施内容
+
+```text
+CODEX_HOME
+login command
+detect
+runtime env
+```
+
+### 验收标准
+
+- [ ] 两个 Profile 可独立启动。
+- [ ] 不复制认证文件。
+- [ ] Windows / WSL 测试覆盖。
+
+---
+
+## TASK-099 — Claude Account Profile Adapter
+
+**优先级：P0**
+
+**依赖：TASK-023, TASK-097**
+
+### 实施内容
+
+```text
+CLAUDE_CONFIG_DIR
+login command
+detect
+runtime env
+```
+
+### 验收标准
+
+- [ ] 两个 Profile 可独立启动。
+- [ ] Windows / WSL 测试覆盖。
+
+---
+
+## TASK-100 — AgentManager Profile Integration
+
+**优先级：P0**
+
+**依赖：TASK-098, TASK-099**
+
+### 实施内容
+
+```text
+StartAgentRunRequest.accountProfileId
+Runtime resolve
+Run snapshot
+```
+
+> **范围边界**：只接入 `accountProfileId`。`executionProfileId` 的接收与校验归
+> TASK-110——ExecutionProfile 的 contracts / 表 / Manager 要到 TASK-109/110 才存在，
+> Phase B 无法校验它。字段与列由 TASK-094/095 先行准备，本 Task 不读。
+
+### 验收标准
+
+- [ ] legacy start 仍工作。
+- [ ] 显式 Profile 正确。
+- [ ] Profile env 进入 ProcessManager。
+- [ ] 跨对象约束（每条都要有失败用例，否则错的 Profile id 会一路走到错的 Adapter）：
+  - [ ] `accountProfile.agentId === request.agentType`，否则报错。
+  - [ ] 传入 `executionProfileId` 时返回「尚未支持」的结构化错误，不静默忽略（TASK-110 之前的临时行为）。
+  - [ ] 显式指定的 Profile 不存在 / `enabled === false` / runtime 不兼容时一律报错，不静默降级到默认或 legacy（设计文档 §37.1）。
+  - [ ] 以上每种失败都返回可区分的错误码，不是笼统的 VALIDATION_FAILED。
+
+---
+
+## TASK-101 — Default Account Profile
+
+**优先级：P1**
+
+**依赖：TASK-080, TASK-097**
+
+### 实施内容
+
+```text
+per-agent default account
+```
+
+### 验收标准
+
+- [ ] Codex / Claude 分别有默认 Profile。
+- [ ] 默认变更不影响历史 Run。
+
+---
+
+## TASK-102 — Account Profile IPC
+
+**优先级：P0**
+
+**依赖：TASK-097, TASK-098, TASK-099**
+
+登录 IPC 是通用账号登录，TASK-104 要求 Codex 与 Claude 都能走完，
+因此两个 Adapter 的 `buildLoginCommand()` 都必须就位。
+
+### 实施内容
+
+```text
+teskra:account:list
+teskra:account:get
+teskra:account:create
+teskra:account:update
+teskra:account:remove
+teskra:account:detect
+teskra:account:disable
+teskra:account:enable
+teskra:account:set-default
+
+teskra:account:login:start / write / resize / cancel
+
+events: account.login.output / account.login.exited
+```
+
+alias 相关的 channel **不在本 Task**——它们和 `ProfileAliasRepository` 一起属于
+TASK-111，否则会出现「Phase C 暴露了 IPC，Phase E 才有仓储」的空实现。
+
+### 验收标准
+
+- [ ] 所有请求 Zod 校验。
+- [ ] IPC 返回 `IpcResult<T>`。
+- [ ] `login:start` 立即返回 `AccountLoginSession`，不等 OAuth 完成。
+- [ ] Renderer 只提交 `profileId` / `sessionId`，argv 与 env 全部在 Main 侧生成。
+- [ ] 同一 profileId 重复 `login:start` 返回既有 sessionId，不起第二个进程。
+- [ ] `login:cancel` 停止进程，且 Profile 状态保持登录前的值。
+- [ ] 会话超时后自动清理（Main 侧自管，不依赖 Renderer 发 cancel）。
+- [ ] 应用退出时登录会话随 `disposeAll()` 一起停止，不留孤儿进程。
+
+---
+
+## TASK-103 — Account Management UI
+
+**优先级：P1**
+
+**依赖：TASK-093, TASK-102**
+
+### 实施内容
+
+页面：
+
+```text
+Settings → Agents → Accounts
+```
+
+### 验收标准
+
+- [ ] List。
+- [ ] Status。
+- [ ] Add。
+- [ ] Login。
+- [ ] Default。
+- [ ] Disable。
+
+---
+
+## TASK-104 — Add Account Wizard
+
+**优先级：P1**
+
+**依赖：TASK-103**
+
+### 实施内容
+
+```text
+Agent
+Name
+Runtime
+Config Home（只读展示，由 Teskra 生成）
+Login
+Verify
+```
+
+### 验收标准
+
+- [ ] Codex。
+- [ ] Claude。
+- [ ] WSL（必须选定具体 distro）。
+- [ ] Windows。
+- [ ] Config Home 为只读：managed Profile 不允许用户填写或编辑（设计文档 §48.1）。
+- [ ] 只提交 slug，路径由 Main 侧生成。
+
+---
+
+## TASK-105 — Agent Failure Classification
+
+**优先级：P1**
+
+**依赖：TASK-100**
+
+### 实施内容
+
+```text
+AgentFailureClassifier
+Codex classifier
+Claude classifier
+```
+
+### 验收标准
+
+- [ ] rate-limit / auth / network / unknown 四类分类正确。
+- [ ] Fake Agent tests。
+- [ ] 分类结果写入 `agent_runs.failure_classification_json`，Run 状态仍为 `failed`（不新增状态，ADR-0010 / 设计文档 §17.2）。
+- [ ] `evidence` 已脱敏且截断到 512 字符（设计文档 §17.3）。
+- [ ] 重启后能从库里读回 `kind` 与 `resetAt`。
+
+---
+
+## TASK-106 — Account Status Projection
+
+**优先级：P1**
+
+**依赖：TASK-097, TASK-105**
+
+### 实施内容
+
+当 Run 失败：
+
+```text
+rate limit → Profile limited
+auth → login-required / expired
+successful Run → ready
+```
+
+### 验收标准
+
+- [ ] 状态事件。
+- [ ] persisted。
+- [ ] restart 后保留。
+- [ ] `limitedUntil <= now` 的恢复有明确触发者（设计文档 §18.0）：读取状态时惰性降级为 `unknown` 并清空 `limitedUntil`；应用启动与 Settings → Accounts 打开时各批量清扫一次。
+- [ ] 降级目标是 `unknown` 而非 `ready`。
+- [ ] 不引入常驻定时器。
+
+---
+
+## TASK-107 — Cross-profile Continuation
+
+**优先级：P1**
+
+**依赖：TASK-100, TASK-106**
+
+### 实施内容
+
+```text
+ContinueAgentRunRequest
+ContinuationBuilder
+```
+
+### 验收标准
+
+- [ ] 新 Run。
+- [ ] 同 Task。
+- [ ] 同 Worktree。
+- [ ] 新 Profile。
+- [ ] Handoff/Context 继承。
+- [ ] 原子性（设计文档 §19.3）：source process 已确认退出、source Run 已落终态，之后才创建 target Run。
+- [ ] 新增不变式：同一 worktree 上不允许存在两个非终态 Run（现有 `unisolatedWriteConflict()` 对带 worktree 的 Run 直接放行，拦不住这种情况）。
+- [ ] source process 超时未退出时，Continuation 整体失败并报错。
+
+---
+
+## TASK-108 — Rate Limit Switch UI
+
+**优先级：P1**
+
+**依赖：TASK-103, TASK-107**
+
+### 实施内容
+
+```text
+Continue with another account
+```
+
+### 验收标准
+
+- [ ] 只列 runtime 兼容且当前可用（ready / unknown）的 Profile。
+- [ ] `limitedUntil` 已过期的 Profile 必须重新出现在列表里（经 TASK-106 的惰性降级），不能因为状态还写着 limited 就被永久排除。
+- [ ] 显示同 Agent Profile。
+- [ ] 可选跨 Agent continuation。
+
+---
+
+## TASK-109 — Execution Profile Contracts
+
+**优先级：P1**
+
+**依赖：TASK-094**
+
+### 实施内容
+
+```text
+AgentExecutionProfile
+```
+
+字段（与设计文档 §6.1 / §8.2 完全一致，三处必须同形）：
+
+```text
+id
+name
+agentId
+accountProfileId
+model
+reasoningEffort
+approvalMode
+createdAt
+updatedAt
+```
+
+### 验收标准
+
+- [ ] 字段与设计文档 §6.1 / §8.2 同形。
+- [ ] 不包含 permission / tools / skills / env 的 Profile ID——这四类实体在仓库里不存在（设计文档 §6.1），要加回来见设计文档 §6.2。
+
+---
+
+## TASK-110 — ExecutionProfile Repository / Manager
+
+**优先级：P1**
+
+**依赖：TASK-095, TASK-100, TASK-109**
+
+### 实施内容
+
+包含 migration `014_agent_execution_profiles.sql`（TASK-095 不含），
+以及 AgentManager 对 `executionProfileId` 的接入（TASK-100 不含）。
+
+### 验收标准
+
+- [ ] migration 014 已注册并可重复验证。
+- [ ] CRUD。
+- [ ] Default。
+- [ ] Resolve（只解析设计文档 §6.1 收窄后的字段；不引用 tool / skill / env / permission Profile ID——它们没有对应实体）。
+- [ ] Snapshot。
+- [ ] `executionProfile.agentId === request.agentType`，否则报错。
+- [ ] `executionProfile.accountProfileId` 指向的 Profile 其 `agentId` 相同。
+- [ ] 同时传 `accountProfileId` 与 `executionProfileId` 时，account 维度以显式的 `accountProfileId` 为准（设计文档 §14），其余字段仍整体取自 ExecutionProfile。
+
+---
+
+## TASK-111 — Workflow Profile Support
+
+**优先级：P1**
+
+**依赖：TASK-100, TASK-110, TASK-118**
+
+TASK-118 完成之前本 Task 不可开工——设计文档 §55 的 repo-local workflow
+安全语义完全依赖它。
+
+支持 alias 引用（ADR-0011 / 设计文档 §53.1；仓库里出现的都是 alias，不是 id）：
+
+```yaml
+agent: codex
+accountProfile: work
+```
+
+以及：
+
+```yaml
+profile: high-work
+```
+
+### 实施内容
+
+alias 的全部内容都在本 Task（含 IPC；TASK-102 只做账号本身的 channel）：
+
+```text
+ProfileAliasRepository（list / bind / unbind / resolve）
+teskra:account:alias:list / bind / unbind
+Settings → Agents → Aliases 绑定 UI
+DefinitionLoader 只取 alias 字符串，解析在 Runtime Service
+```
+
+### 验收标准
+
+- [ ] 未绑定的 alias → 报错并提示绑定，不回退到默认账号。
+- [ ] 绑定指向的 Profile 已删除 / disabled → 同样报错。
+- [ ] `accountProfile` 与 `profile` 两种 alias 各自解析正确（`kind` 区分）。
+- [ ] repo 里写 Profile id 被拒绝（设计文档 §55）。
+- [ ] 同名 alias 在不同 agentId 下互不干扰。
+- [ ] 同名 alias 在不同 `kind` 下互不干扰（`work` 可同时是两种）。
+- [ ] bind 校验 profileId 存在于 kind 对应的表，且 `profile.agentId` 相符。
+
+---
+
+## TASK-112 — Profile-aware Recovery
+
+**优先级：P0**
+
+**依赖：TASK-042, TASK-100**
+
+> 必须与 TASK-100 同批做：100 一旦让 Run 带上 Profile 身份，Recovery 就必须
+> 同步改为读历史 `profileSnapshot`，否则每一次 crash recovery 都会串号
+> （设计文档 §60 Phase B）。
+
+### 验收标准
+
+- [ ] Recovery 使用历史 Runtime Identity。
+- [ ] 不使用当前默认账号。
+
+---
+
+## TASK-113 — External / Legacy Profile Migration
+
+**优先级：P1**
+
+**依赖：TASK-098, TASK-099, TASK-101**
+
+不创建任何 virtual default Profile（设计文档 §50）。
+
+### 验收标准
+
+- [ ] 升级后行为与升级前逐字节一致（不投射任何 config dir 环境变量）。
+- [ ] Settings → Accounts 首次展示引导文案。
+- [ ] External Profile 的导入路径（用户显式动作，按具体 runtime 逐个创建）。
+- [ ] 无需重新登录。
+
+---
+
+## TASK-114 — Account Profile Security Tests
+
+**优先级：P0**
+
+**依赖：TASK-098, TASK-099, TASK-100, TASK-118**
+
+其中「untrusted workspace 自动执行受限」一条在 TASK-118 完成前无法验收；
+其余安全测试不受影响，可以先做。
+
+### 必须覆盖
+
+```text
+path ownership
+secret isolation
+external path delete guard
+renderer isolation
+WSL env isolation
+```
+
+### 验收标准
+
+- [ ] 上述五类场景各有自动化测试。
+- [ ] untrusted workspace 自动执行受限（依赖 TASK-118）。
+
+---
+
+## TASK-115 — Account Profile E2E
+
+**优先级：P1**
+
+**依赖：TASK-107, TASK-108**
+
+### 验收标准
+
+- [ ] Fake Agent 场景可跑通：A Ready → A Limited → B Ready → A → B Continue。
+- [ ] 每个测试用例使用独立的 `TESKRA_HOME` 临时目录，结束后清理。
+
+---
+
+## TASK-116 — Account Event Repository
+
+**优先级：P1**
+
+**依赖：TASK-095**
+
+设计文档 §41 的审计事件写进 `account_events`，需要对应的仓储与查询。
+
+### 实施内容
+
+```text
+AccountEventRepository（append / listByProfile / listByType）
+AccountProfileManager 与 AgentManager 的事件写入点
+```
+
+### 验收标准
+
+- [ ] 不在 Manager 里写 SQL。
+- [ ] 账号生命周期事件（created / login\_\* / status_changed）不依赖 Run 存在。
+- [ ] `agent.account_switched` 能关联 source / target Run。
+- [ ] 单元测试。
+
+---
+
+## TASK-117 — Per-profile 并发限制
+
+**优先级：P1**
+
+**依赖：TASK-084, TASK-100**
+
+设计文档 §46.3 的三步落地。没有它，设计文档 §65 场景 H 无法验收——
+字段存在但没有任何代码读它。
+
+### 实施内容
+
+```text
+hasCapacity() 的 candidate 增加 accountProfileId
+按 profile.maxConcurrentRuns 计数并限流
+超限进入既有 queued 路径
+```
+
+### 验收标准
+
+- [ ] managed profile 默认 `maxConcurrentRuns = 1` 时，第二个 Run 排队。
+- [ ] legacy fallback（没有 `accountProfileId`、也没有 Profile 记录）不受 per-profile 限制，仅受 `maxRunsPerAgent` 约束。
+- [ ] 不新造等待机制，复用既有排队调度。
+- [ ] `0` 与负数在 Zod 与 SQL `CHECK` 两层都被拒绝（写进去会让该 Profile 的 Run 永久排队）。
+
+---
+
+## TASK-118 — Workspace Trust
+
+**优先级：P0**
+
+**依赖：TASK-009, TASK-110**
+
+本 Task 由设计文档 §43 拉起，但它本身是独立的安全能力，关闭的是
+code-review 的 P0-3「仓库内容可导致本机任意代码执行」
+（P0-3(1) workspace 层 `agents` 组剥离已完成，见 `docs/code-review-2026-09-12.md`；
+本 Task 覆盖剩余的 (2) Workspace Trust 闸门与 (3) shell 步骤执行前确认）。
+
+它不阻塞 Phase A～D，但必须排在 TASK-111 之前——111 让 repo 里的 workflow
+能指定账号，118 是「repo 内容能不能被信任」的闸门，反过来排等于先开门再装锁。
+
+依赖 TASK-110 的原因是 migration 版本连续性，不是功能耦合：本 Task 注册 015，
+而 014 属于 TASK-110。`migrate.ts` 以 `MAX(version)` 判断当前版本并跳过所有
+更小的版本，先应用 015 的开发库会永久跳过 012～014。
+
+### 实施内容
+
+闸门要覆盖三条路径，只挡 shell workflow 是不够的：
+
+```text
+workspace 层配置的 agents 组一律剥离并告警（与信任级别无关；已完成，需回归覆盖）
+Restricted 下不加载 repo-local workflows / prompts / config
+repo 定义的 shell 步骤执行前展示完整命令行确认
+```
+
+信任级别最少支持：
+
+```text
+Trusted
+Restricted
+```
+
+Restricted 下：
+
+```text
+repo-local shell workflow 禁止
+repo-local executable override 禁止
+自动 delegation 禁止
+敏感 env 投射受限
+```
+
+### 验收标准
+
+- [ ] workspace 层配置的 `agents` 组一律剥离并告警（与信任级别无关）。
+- [ ] Restricted 下不加载 repo-local workflows / prompts / config（含 `<repo>/.teskra/config.json` 的 `agents.executableOverrides` 与 `<repo>/.teskra/prompts/` 两条路径）。
+- [ ] repo 定义的 shell 步骤执行前展示完整命令行确认。
+- [ ] Trusted / Restricted 两级可用，信任级别可持久化。
+- [ ] untrusted workspace 不能通过 repo-local workflow 自动执行 shell、自动配置 Agent runtime、自动启动 Delegation。
+- [ ] migration 015 已注册，且在 014（TASK-110）之后应用。
+
+---
+
 # 24. 建议的实际执行顺序
 
 如果准备真正开始开发，不需要严格按 Task 编号全部线性执行。
