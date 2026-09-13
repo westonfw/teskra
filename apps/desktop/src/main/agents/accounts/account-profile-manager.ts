@@ -26,6 +26,7 @@ import type { CommandRunner } from '../../process/command-runner'
 import { createWorkspaceRuntime, type WorkspaceRuntime } from '../../workspace/runtime'
 import type { AgentRegistry } from '../agent-registry'
 import type { AccountProfileAdapterRegistry } from './account-profile-adapter'
+import type { AccountProfileStatusService } from './account-profile-status-service'
 import {
   createAccountProfileRuntimeResolver,
   type AccountProfileRuntimeResolver,
@@ -131,6 +132,16 @@ export interface AccountProfileManagerDeps {
   readonly config: Pick<ConfigService, 'resolve' | 'updateGlobal'>
   readonly events: EventBus<WorkbenchEvents>
   readonly adapters?: AccountProfileAdapterRegistry
+  /**
+   * TASK-106 (§18.0 lazy path): when composed, list() first sweeps expired
+   * `limited` rows (so status filtering stays truthful) and get()
+   * write-through degrades the single row it read. Without it, reads return
+   * rows exactly as stored (TASK-097 behavior).
+   */
+  readonly status?: Pick<
+    AccountProfileStatusService,
+    'sweepExpiredLimited' | 'degradeExpiredLimited'
+  >
   readonly createRuntime?: (ref: WorkspaceRuntimeRef) => IpcResult<WorkspaceRuntime>
   /** Required for WSL-on-Windows profile fs operations (§48.2 (b)). */
   readonly commands?: CommandRunner
@@ -825,12 +836,24 @@ export function createAccountProfileManager(
   }
 
   const manager: AccountProfileManager = {
-    list(filter) {
-      return Promise.resolve(deps.profiles.list(filter))
+    async list(filter) {
+      // §18.0: sweeping BEFORE the read keeps status filtering truthful — an
+      // expired `limited` row must never survive a list() as `limited`.
+      if (deps.status !== undefined) {
+        const swept = await deps.status.sweepExpiredLimited()
+        if (!swept.ok) {
+          return swept
+        }
+      }
+      return deps.profiles.list(filter)
     },
 
     get(id) {
-      return Promise.resolve(deps.profiles.getById(id))
+      const found = deps.profiles.getById(id)
+      if (!found.ok || found.data === null || deps.status === undefined) {
+        return Promise.resolve(found)
+      }
+      return Promise.resolve(deps.status.degradeExpiredLimited(found.data))
     },
 
     async create(request) {

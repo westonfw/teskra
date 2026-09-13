@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { WorkbenchEvents } from '@teskra/contracts'
 
 import { migrateDatabase } from '../../db/migrations'
-import { createAccountProfileRepository } from '../../db/repositories'
+import { createAccountProfileRepository, createAgentRunRepository } from '../../db/repositories'
 import { createEventBus } from '../../events/event-bus'
 import {
   createAccountProfileStatusService,
@@ -24,13 +24,15 @@ function setup(now: string) {
   const migrated = migrateDatabase(connection)
   if (!migrated.ok) throw new Error(migrated.error.message)
   const profiles = createAccountProfileRepository(connection)
+  const runs = createAgentRunRepository(connection)
   const events = createEventBus<WorkbenchEvents>()
   const service = createAccountProfileStatusService({
     profiles,
+    runs,
     events,
     now: () => now,
   })
-  return { profiles, events, service }
+  return { profiles, runs, events, service }
 }
 
 function insertLimited(

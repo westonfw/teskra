@@ -91,6 +91,7 @@ export interface AccountProfileStatusPatch {
   readonly status: AccountProfileStatus
   /** `null` clears the column; `undefined` leaves it untouched. */
   readonly limitedUntil?: string | null
+  readonly lastUsedAt?: string
   readonly lastSuccessfulAt?: string
   readonly lastFailureAt?: string
 }
@@ -333,6 +334,10 @@ export function createAccountProfileRepository(
       if (patch.limitedUntil !== undefined) {
         sets.push('limited_until = ?')
         values.push(patch.limitedUntil)
+      }
+      if (patch.lastUsedAt !== undefined) {
+        sets.push('last_used_at = ?')
+        values.push(patch.lastUsedAt)
       }
       if (patch.lastSuccessfulAt !== undefined) {
         sets.push('last_successful_at = ?')

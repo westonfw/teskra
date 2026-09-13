@@ -17,6 +17,7 @@ import { createAgentManager } from '../agents/agent-manager'
 import { createDefaultAgentRegistry } from '../agents/agent-registry'
 import { createAccountProfileAdapterRegistry } from '../agents/accounts/account-profile-adapter'
 import { createAccountProfileManager } from '../agents/accounts/account-profile-manager'
+import { createAccountProfileStatusService } from '../agents/accounts/account-profile-status-service'
 import { createAccountLoginService } from '../agents/accounts/account-login-service'
 import { createClaudeAccountProfileAdapter } from '../agents/accounts/adapters/claude-account-profile-adapter'
 import { registerCodexAccountProfileAdapter } from '../agents/accounts/adapters/codex-account-profile-adapter'
@@ -377,6 +378,15 @@ export async function composeTeskraRuntime(
     database.close()
     return claudeAccountAdapter
   }
+  // TASK-106 (§18/§18.0): profile health — Run-outcome projection plus the
+  // lazy-degrade/sweep recovery of expired `limited` rows. Created before
+  // the Manager so its reads (list/get) get the lazy degrade; the projection
+  // subscriptions start below, and one startup sweep runs with app boot.
+  const accountProfileStatus = createAccountProfileStatusService({
+    profiles: repositories.accountProfiles,
+    runs: repositories.agentRuns,
+    events,
+  })
   const accountProfileManager = createAccountProfileManager({
     profiles: repositories.accountProfiles,
     runs: repositories.agentRuns,
@@ -385,6 +395,7 @@ export async function composeTeskraRuntime(
     config,
     events,
     adapters: accountProfileAdapters.data,
+    status: accountProfileStatus,
     createRuntime: runtimeFor,
     commands,
   })
@@ -471,6 +482,18 @@ export async function composeTeskraRuntime(
       const resolved = config.resolve({ workspaceId })
       return resolved.ok ? { ok: true, data: resolved.data.config.concurrency } : resolved
     },
+  })
+  // TASK-106 (§18): project terminal Run outcomes onto account profiles.
+  // §18.0 auxiliary sweep at startup; the only other sweep trigger is the
+  // account list read path (Settings → Accounts opening). No timers.
+  accountProfileStatus.start()
+  void accountProfileStatus.sweepExpiredLimited().then((swept) => {
+    if (!swept.ok) {
+      getLogger('runtime').warn(
+        { error: swept.error },
+        'Startup sweep of expired limited account profiles failed.',
+      )
+    }
   })
   const autoCommit = createAutoCommitService({
     commands,
@@ -1084,6 +1107,9 @@ export async function composeTeskraRuntime(
           'Some processes did not stop cleanly during shutdown.',
         )
       }
+      // TASK-106: detach the profile-status projection before the bus clears
+      // so no late agent.* event writes to a closing database.
+      accountProfileStatus.dispose()
       events.clear()
       return database.close()
     },

@@ -40,6 +40,10 @@ import {
   createAccountProfileManager,
   type AccountProfileManager,
 } from './accounts/account-profile-manager'
+import {
+  createAccountProfileStatusService,
+  type AccountProfileStatusService,
+} from './accounts/account-profile-status-service'
 
 /**
  * TASK-105 (§17 / §56.3) — Agent Run failure classification end to end:
@@ -73,8 +77,10 @@ function loadScenario(name: string): ScenarioFile {
 const databases: Database.Database[] = []
 const directories: string[] = []
 const managers: AgentManager[] = []
+const statusServices: AccountProfileStatusService[] = []
 
 afterEach(async () => {
+  for (const service of statusServices.splice(0)) service.dispose()
   for (const manager of managers.splice(0)) await manager.dispose()
   for (const database of databases.splice(0)) database.close()
   for (const directory of directories.splice(0))
@@ -245,6 +251,16 @@ function setup(options: { withClassifiers?: boolean } = {}): Fixture {
         }),
   })
   managers.push(manager)
+  // TASK-106 (§18): the same projection the production compose wires —
+  // terminal Run outcomes land on the account profile via the EventBus.
+  const profileStatus = createAccountProfileStatusService({
+    profiles,
+    runs,
+    events,
+    now: () => '2026-09-12T00:00:02.000Z',
+  })
+  profileStatus.start()
+  statusServices.push(profileStatus)
   return {
     directory,
     databaseFile,
@@ -316,9 +332,9 @@ async function startWithProfile(fixture: Fixture): Promise<{ runId: string; prof
 }
 
 describe('Agent failure classification (TASK-105, §17 / §56.3)', () => {
-  it('fake-codex-rate-limit: Run failed + classification persisted; restart reads kind and resetAt back', async () => {
+  it('fake-codex-rate-limit: Run failed + classification + Profile limited, all persisted across restart', async () => {
     const fixture = setup()
-    const { runId } = await startWithProfile(fixture)
+    const { runId, profileId } = await startWithProfile(fixture)
 
     emitScenario(fixture, runId, loadScenario('rate-limit'))
 
@@ -331,9 +347,13 @@ describe('Agent failure classification (TASK-105, §17 / §56.3)', () => {
       resetAt: '2026-10-01T00:00:00.000Z',
       evidence: 'Error: rate limit reached for this account',
     })
+    // §56.3: the same failure projected the profile to limited + limitedUntil.
+    const profile = requireOk(fixture.profiles.getById(profileId))
+    expect(profile?.status).toBe('limited')
+    expect(profile?.limitedUntil).toBe('2026-10-01T00:00:00.000Z')
 
     // §17.2 / §56.3: after a full restart (fresh connection over the same
-    // database file) the classification must still read back.
+    // database file) BOTH the classification and the profile state read back.
     fixture.connection.close()
     const reopened = new Database(fixture.databaseFile, { readonly: true })
     try {
@@ -341,24 +361,29 @@ describe('Agent failure classification (TASK-105, §17 / §56.3)', () => {
       const restored = requireOk(runs.getById(runId))
       expect(restored?.status).toBe('failed')
       expect(restored?.failureClassification).toEqual(run.failureClassification)
+      const restoredProfile = requireOk(createAccountProfileRepository(reopened).getById(profileId))
+      expect(restoredProfile?.status).toBe('limited')
+      expect(restoredProfile?.limitedUntil).toBe('2026-10-01T00:00:00.000Z')
     } finally {
       reopened.close()
     }
   })
 
-  it('negative (§17.0): quota text while RUNNING kills nothing; a clean exit completes without classification and leaves the profile untouched', async () => {
+  it('negative (§17.0): quota text while RUNNING kills nothing and changes no profile state', async () => {
     const fixture = setup()
     const { runId, profileId } = await startWithProfile(fixture)
     const scenario = loadScenario('quota-mention')
 
-    // The process is still running when the matching text appears.
+    // The process is still running when the matching text appears: no kill,
+    // no classification, no profile status change — at most a weak signal.
     emitScenario(fixture, runId, scenario, { exit: false })
     let run = runOf(fixture, runId)
     expect(run.status).toBe('running')
     expect(run.failureClassification).toBeUndefined()
     expect(requireOk(fixture.profiles.getById(profileId))?.status).toBe('unknown')
 
-    // …and a clean exit afterwards is just a completed Run.
+    // …and a clean exit afterwards is just a completed Run (whose §18
+    // projection to `ready` is the legitimate writer of that status).
     fixture.events.emit('process.exited', {
       processId: fixture.processes.starts.find((start) => start.agentRunId === runId)?.id ?? '',
       agentRunId: runId,
@@ -367,7 +392,7 @@ describe('Agent failure classification (TASK-105, §17 / §56.3)', () => {
     run = runOf(fixture, runId)
     expect(run.status).toBe('completed')
     expect(run.failureClassification).toBeUndefined()
-    expect(requireOk(fixture.profiles.getById(profileId))?.status).toBe('unknown')
+    expect(requireOk(fixture.profiles.getById(profileId))?.status).toBe('ready')
   })
 
   it('without a registered classifier the Run still fails, with a NULL classification (best-effort metadata)', async () => {
