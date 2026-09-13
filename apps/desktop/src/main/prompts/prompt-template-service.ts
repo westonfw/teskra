@@ -106,9 +106,15 @@ function buildVariables(context: PromptTemplateContext): Record<string, string |
     'task.title': context.task.title,
     'task.description': context.task.description,
     criteria:
-      context.criteria === undefined || context.criteria.length === 0
-        ? '_No acceptance criteria provided._'
-        : context.criteria.map((criterion) => `- ${criterion}`).join('\n'),
+      context.criteriaDetails !== undefined
+        ? context.criteriaDetails.length === 0
+          ? '_No acceptance criteria provided._'
+          : context.criteriaDetails
+              .map((criterion) => `- [${criterion.id}] ${criterion.description}`)
+              .join('\n')
+        : context.criteria === undefined || context.criteria.length === 0
+          ? '_No acceptance criteria provided._'
+          : context.criteria.map((criterion) => `- ${criterion}`).join('\n'),
     role: context.role,
     memory: context.memory ?? '',
     previousHandoff: context.previousHandoff ?? '',

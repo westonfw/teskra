@@ -415,11 +415,14 @@ export function createReviewPanelService(deps: ReviewPanelServiceDeps): ReviewPa
       const confirmed = sets.data
         .filter((set) => set.status === 'confirmed')
         .sort((a, b) => b.version - a.version)[0]
-      let criteriaDescriptions: string[] | undefined
+      let criteriaDetails: { id: string; description: string }[] | undefined
       if (confirmed !== undefined) {
         const rows = deps.criteria.listCriteria(confirmed.id)
         if (!rows.ok) return rows
-        criteriaDescriptions = rows.data.map((criterion) => criterion.description)
+        criteriaDetails = rows.data.map((criterion) => ({
+          id: criterion.id,
+          description: criterion.description,
+        }))
       }
 
       const implementRunId = resolveImplementRunId(request)
@@ -475,7 +478,7 @@ export function createReviewPanelService(deps: ReviewPanelServiceDeps): ReviewPa
                     title: taskRow.title,
                     description: taskRow.description ?? '',
                   },
-                  ...(criteriaDescriptions === undefined ? {} : { criteria: criteriaDescriptions }),
+                  ...(criteriaDetails === undefined ? {} : { criteriaDetails }),
                   role: 'reviewer',
                   ...(previousHandoff === undefined ? {} : { previousHandoff }),
                   env: {

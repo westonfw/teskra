@@ -75,6 +75,34 @@ describe('PromptTemplateService (TASK-079)', () => {
     }
   })
 
+  it('renders criteria with their stable ids when criteriaDetails are provided', () => {
+    // Regression: plain description bullets gave reviewers nothing to echo as
+    // criterionId — they invented "1","2","3" and every score was discarded
+    // (criteria recorded 'unknown', blocking merge preflight).
+    const service = makeService()
+    const context = fullContext()
+    context.criteriaDetails = [
+      {
+        id: '056af275-ed5e-46b5-9e3e-f1ff4f6819d3',
+        description: 'Settings page has a theme toggle',
+      },
+      {
+        id: '5a43c23d-d927-4847-82be-1f0cd7169677',
+        description: 'Choice persists across restarts',
+      },
+    ]
+    const rendered = service.render({ name: 'review', context })
+    expect(rendered.ok).toBe(true)
+    if (rendered.ok) {
+      expect(rendered.data.content).toContain(
+        '- [056af275-ed5e-46b5-9e3e-f1ff4f6819d3] Settings page has a theme toggle',
+      )
+      expect(rendered.data.content).toContain(
+        '- [5a43c23d-d927-4847-82be-1f0cd7169677] Choice persists across restarts',
+      )
+    }
+  })
+
   it('renders {{memory}} as an empty string until ContextBuilder (TASK-068) exists', () => {
     const service = makeService()
     const context = fullContext()

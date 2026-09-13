@@ -40,6 +40,21 @@ export const promptTemplateContextSchema = z.strictObject({
   }),
   /** Acceptance Criteria (TASK-048 confirmed set), rendered as a bullet list. */
   criteria: z.array(z.string().max(IPC_CONTENT_MAX)).optional(),
+  /**
+   * Acceptance Criteria WITH their stable ids. When provided, the `{{criteria}}`
+   * bullet list renders each item with its id (`- [id] description`) so agents
+   * can echo the exact `criterionId` in structured outputs — plain `criteria`
+   * bullets gave reviewers nothing to echo, and they invented ordinal ids that
+   * never matched the stored criteria (scores landed as 'unknown').
+   */
+  criteriaDetails: z
+    .array(
+      z.strictObject({
+        id: z.string().max(IPC_NAME_MAX),
+        description: z.string().max(IPC_CONTENT_MAX),
+      }),
+    )
+    .optional(),
   role: z.string().max(IPC_NAME_MAX).optional(),
   /** Workspace Memory section packed by the ContextBuilder (TASK-068); empty when unwired. */
   memory: z.string().max(IPC_CONTENT_MAX).optional(),

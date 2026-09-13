@@ -36,7 +36,10 @@ fields `runId`, `type`, `summary`; optional fields `filesChanged`,
 finding into `findings` (each with `severity`, `title`, and where applicable
 `file`, `line`, `criterionId`, `evidence`). Score every acceptance criterion in
 `criterionScores` as `{ "criterionId", "result": "pass" | "fail" | "unknown",
-"evidence": [...] }` — use `unknown` when you cannot verify a criterion, never
+"evidence": [...] }` — each `criterionId` MUST be copied verbatim from the
+bracketed id in the Acceptance Criteria list above (never invent ordinals or
+short ids; scores with unknown ids are discarded and the criterion is recorded
+as unreviewed). Use `unknown` when you cannot verify a criterion, never
 guess `pass`. When `TESKRA_REVIEW_TARGET_RUN_ID` is set in your environment,
 echo it as `targetRunId` so the scores are attributed to the reviewed run.
 Teskra reads this file after your process exits — it is the only reliable

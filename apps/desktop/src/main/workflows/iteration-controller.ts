@@ -473,11 +473,14 @@ export function createIterationController(deps: IterationControllerDeps): Iterat
           )
         }
         const anchorSetId = run.criteriaSetId
-        let criteria: string[] | undefined
+        let criteriaDetails: { id: string; description: string }[] | undefined
         if (anchorSetId !== undefined) {
           const rows = deps.criteria.listCriteria(anchorSetId)
           if (!rows.ok) return rows
-          criteria = rows.data.map((criterion) => criterion.description)
+          criteriaDetails = rows.data.map((criterion) => ({
+            id: criterion.id,
+            description: criterion.description,
+          }))
         }
         let previousHandoff: string | undefined
         if (!isFirstRound && deps.handoffs !== undefined) {
@@ -498,7 +501,7 @@ export function createIterationController(deps: IterationControllerDeps): Iterat
             name: isFirstRound ? 'implement' : 'fix',
             context: {
               task: { title: taskRow.title, description: taskRow.description ?? '' },
-              ...(criteria === undefined ? {} : { criteria }),
+              ...(criteriaDetails === undefined ? {} : { criteriaDetails }),
               role: isFirstRound ? 'implementer' : 'fixer',
               ...(previousHandoff === undefined ? {} : { previousHandoff }),
               env: {

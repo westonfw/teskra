@@ -221,7 +221,7 @@ export function createDispatchService(deps: DispatchServiceDeps): DispatchServic
 
     let prompt = request.prompt
     if (prompt === undefined) {
-      let criteria: string[] | undefined
+      let criteriaDetails: { id: string; description: string }[] | undefined
       const sets = deps.criteria.listSetsByTask(request.taskId)
       if (!sets.ok) {
         discardWorktree()
@@ -236,7 +236,10 @@ export function createDispatchService(deps: DispatchServiceDeps): DispatchServic
           discardWorktree()
           return rows
         }
-        criteria = rows.data.map((criterion) => criterion.description)
+        criteriaDetails = rows.data.map((criterion) => ({
+          id: criterion.id,
+          description: criterion.description,
+        }))
       }
       // TASK-068: the {{memory}} variable carries the ContextBuilder-packed
       // Workspace Memory section (budget-limited; empty workspace memory
@@ -263,7 +266,7 @@ export function createDispatchService(deps: DispatchServiceDeps): DispatchServic
               title: task.data.title,
               description: task.data.description ?? '',
             },
-            ...(criteria === undefined ? {} : { criteria }),
+            ...(criteriaDetails === undefined ? {} : { criteriaDetails }),
             ...(memory === undefined ? {} : { memory }),
             role: 'implementer',
             env: {
