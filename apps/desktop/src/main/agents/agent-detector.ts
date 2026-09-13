@@ -12,6 +12,7 @@ import type {
 import type { ConfigService } from '../config/config-service'
 import { toPublicError } from '../errors'
 import type { CommandRunner } from '../process/command-runner'
+import { isWindowsCmdShim } from '../process/windows-shim'
 import { resolveExecutableLookup, type WorkspaceRuntime } from '../workspace/runtime'
 import type { AgentRegistry } from './agent-registry'
 
@@ -67,6 +68,28 @@ function firstLine(output: string): string | undefined {
     .split(/\r?\n/u)
     .map((line) => line.trim())
     .find((line) => line.length > 0)
+}
+
+/**
+ * Picks the executable line from a lookup (`where.exe` / `which`) result.
+ *
+ * Windows: npm global installs emit THREE shims and `where.exe` lists the
+ * extension-less bash script FIRST — a file CreateProcess cannot launch. So
+ * instead of the first line, prefer a `.exe`, then a `.cmd`/`.bat` shim
+ * (launched through cmd.exe downstream). Returns undefined when the output
+ * holds only non-executable shims (extension-less / `.ps1`).
+ *
+ * POSIX (`which`): the first line stays authoritative.
+ */
+export function selectLookupExecutable(output: string, windows: boolean): string | undefined {
+  if (!windows) {
+    return firstLine(output)
+  }
+  const lines = output
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+  return lines.find((line) => /\.exe$/i.test(line)) ?? lines.find((line) => isWindowsCmdShim(line))
 }
 
 export function createAgentDetector(deps: AgentDetectorDeps): AgentDetector {
@@ -143,12 +166,16 @@ export function createAgentDetector(deps: AgentDetectorDeps): AgentDetector {
           cache.set(key, { result, expiresAt: currentTime + cacheTtlMs })
           return { ok: true, data: result }
         }
-        executable = firstLine(located.data.stdout)
+        const windows = runtime.data.ref.kind === 'windows'
+        executable = selectLookupExecutable(located.data.stdout, windows)
         if (executable === undefined) {
+          const onlyShims = windows && firstLine(located.data.stdout) !== undefined
           const result: AgentDetectionResult = {
             ...base,
             installed: false,
-            error: `${found.data.name} lookup returned no executable path.`,
+            error: onlyShims
+              ? `${found.data.name} lookup only found shims Windows cannot execute (no .exe/.cmd/.bat); set an executable override.`
+              : `${found.data.name} lookup returned no executable path.`,
           }
           cache.set(key, { result, expiresAt: currentTime + cacheTtlMs })
           return { ok: true, data: result }

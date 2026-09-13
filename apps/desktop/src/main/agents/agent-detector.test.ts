@@ -149,4 +149,86 @@ describe('AgentDetector (TASK-023)', () => {
       data: { installed: false, error: expect.any(String) },
     })
   })
+
+  it('skips the extension-less npm shim line and picks the .cmd shim on Windows', async () => {
+    const commands = runner((request) =>
+      request.command === 'where.exe'
+        ? {
+            stdout:
+              'C:\\Users\\u\\AppData\\Roaming\\npm\\codex\r\n' +
+              'C:\\Users\\u\\AppData\\Roaming\\npm\\codex.cmd\r\n' +
+              'C:\\Users\\u\\AppData\\Roaming\\npm\\codex.ps1\r\n',
+            exitCode: 0,
+          }
+        : { stdout: 'codex-cli 1.2.3\n', exitCode: 0 },
+    )
+    const detector = createAgentDetector({
+      registry: registry(),
+      commands,
+      config: config(),
+      resolveRuntime: (ref) => createWorkspaceRuntime(ref, { hostPlatform: 'win32' }),
+    })
+
+    const result = await detector.detect({ agentId: 'codex', runtime: { kind: 'windows' } })
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        installed: true,
+        executable: 'C:\\Users\\u\\AppData\\Roaming\\npm\\codex.cmd',
+        version: 'codex-cli 1.2.3',
+      },
+    })
+    // The version probe runs against the .cmd shim, not the bash shim.
+    expect(commands.run).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        command: 'C:\\Users\\u\\AppData\\Roaming\\npm\\codex.cmd',
+        args: ['--version'],
+      }),
+    )
+  })
+
+  it('prefers a real .exe over .cmd shims regardless of line order', async () => {
+    const commands = runner((request) =>
+      request.command === 'where.exe'
+        ? {
+            stdout: 'C:\\npm\\codex.cmd\r\nC:\\Tools\\codex.exe\r\n',
+            exitCode: 0,
+          }
+        : { stdout: 'codex-cli 1.2.3\n', exitCode: 0 },
+    )
+    const detector = createAgentDetector({
+      registry: registry(),
+      commands,
+      config: config(),
+      resolveRuntime: (ref) => createWorkspaceRuntime(ref, { hostPlatform: 'win32' }),
+    })
+
+    const result = await detector.detect({ agentId: 'codex', runtime: { kind: 'windows' } })
+    expect(result).toMatchObject({
+      ok: true,
+      data: { installed: true, executable: 'C:\\Tools\\codex.exe' },
+    })
+  })
+
+  it('reports installed=false when where.exe only finds non-executable shims', async () => {
+    const commands = runner(() => ({
+      stdout:
+        'C:\\Users\\u\\AppData\\Roaming\\npm\\codex\r\nC:\\Users\\u\\AppData\\Roaming\\npm\\codex.ps1\r\n',
+      exitCode: 0,
+    }))
+    const detector = createAgentDetector({
+      registry: registry(),
+      commands,
+      config: config(),
+      resolveRuntime: (ref) => createWorkspaceRuntime(ref, { hostPlatform: 'win32' }),
+    })
+
+    const result = await detector.detect({ agentId: 'codex', runtime: { kind: 'windows' } })
+    expect(result).toMatchObject({ ok: true, data: { installed: false } })
+    if (!result.ok) return
+    expect(result.data.error).toContain('shim')
+    // No version probe is attempted when nothing executable was found.
+    expect(commands.run).toHaveBeenCalledTimes(1)
+  })
 })

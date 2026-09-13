@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from 'node:fs'
+
 import type { IPty } from 'node-pty'
 import { spawn as spawnPty } from 'node-pty'
 
@@ -11,6 +13,13 @@ import {
   type ShellExecutionContext,
   type WorkspaceRuntime,
 } from '../workspace/runtime'
+import {
+  buildCmdShimCommandLine,
+  cmdShimArgsNeedDirectLaunch,
+  type CmdShimIO,
+  isWindowsCmdShim,
+  resolveCmdShimDirectLaunch,
+} from './windows-shim'
 
 const DEFAULT_COLS = 120
 const DEFAULT_ROWS = 30
@@ -92,7 +101,23 @@ export interface ProcessManagerDeps {
   /** Native seam for deterministic tests; production always uses node-pty. */
   readonly spawn?: typeof spawnPty
   readonly hostPlatform?: NodeJS.Platform | undefined
+  /** Shim-file seam for cmd-shim unwrapping tests; production binds node:fs. */
+  readonly shimIO?: CmdShimIO
   readonly now?: () => string
+}
+
+/** node:fs binding for the CmdShimIO seam (read failures degrade to fallback). */
+function createNodeShimIO(): CmdShimIO {
+  return {
+    read(path) {
+      try {
+        return readFileSync(path, 'utf8')
+      } catch {
+        return undefined
+      }
+    },
+    exists: (path) => existsSync(path),
+  }
 }
 
 interface ActiveProcess {
@@ -158,6 +183,7 @@ export function createProcessManager(deps: ProcessManagerDeps): ProcessManager {
   const active = new Map<string, ActiveProcess>()
   const spawn = deps.spawn ?? spawnPty
   const hostPlatform = deps.hostPlatform ?? process.platform
+  const shimIO = deps.shimIO ?? createNodeShimIO()
   const now = deps.now ?? (() => new Date().toISOString())
   const logger = getLogger('process')
 
@@ -223,23 +249,56 @@ export function createProcessManager(deps: ProcessManagerDeps): ProcessManager {
       }
 
       const context = toPtyContext(request)
+      // npm `.cmd`/`.bat` shims cannot be CreateProcess'd directly; they
+      // normally launch through cmd.exe with the whole command line as ONE
+      // pre-quoted string, so node-pty's argsToCommandLine `isCommandLine`
+      // branch passes it through without re-escaping. Arguments cmd cannot
+      // transport at all (line breaks — cmd ends the batch command at the
+      // first one even inside quotes — or the ~8191-char ceiling) instead
+      // unwrap the shim and spawn its real target directly; unparseable
+      // shims fall back to the cmd.exe line, no worse than before.
+      const isShim = hostPlatform === 'win32' && isWindowsCmdShim(context.executable)
+      const needsDirect = isShim && cmdShimArgsNeedDirectLaunch(context.executable, context.args)
+      const directLaunch = needsDirect
+        ? resolveCmdShimDirectLaunch(context.executable, shimIO, process.env['PATH'])
+        : undefined
+      if (needsDirect && directLaunch === undefined) {
+        logger.warn(
+          { processId: request.id, executable: context.executable },
+          'Shim could not be unwrapped; multi-line/long arguments may reach the process truncated.',
+        )
+      }
+      const shimCommandLine =
+        isShim && directLaunch === undefined
+          ? buildCmdShimCommandLine(context.executable, context.args)
+          : undefined
       let terminal: IPty
       try {
-        terminal = spawn(context.executable, [...context.args], {
-          name: request.terminalName ?? 'xterm-256color',
-          cols,
-          rows,
-          ...(context.cwd !== undefined ? { cwd: context.cwd } : {}),
-          // P0-1: for a WSL-on-Windows runtime the env is set on the wsl.exe
-          // host process; resolveSpawnEnv declares every key in WSLENV so the
-          // values (TESKRA_HANDOFF_PATH, workspace env, secrets) actually
-          // reach the Linux process. Host-native runtimes pass through.
-          env: {
-            ...process.env,
-            ...resolveSpawnEnv(request.runtime, request.env ?? {}, process.env['WSLENV']),
+        terminal = spawn(
+          directLaunch !== undefined
+            ? directLaunch.command
+            : shimCommandLine === undefined
+              ? context.executable
+              : (process.env['ComSpec'] ?? 'cmd.exe'),
+          directLaunch !== undefined
+            ? [...directLaunch.argsPrefix, ...context.args]
+            : (shimCommandLine ?? [...context.args]),
+          {
+            name: request.terminalName ?? 'xterm-256color',
+            cols,
+            rows,
+            ...(context.cwd !== undefined ? { cwd: context.cwd } : {}),
+            // P0-1: for a WSL-on-Windows runtime the env is set on the wsl.exe
+            // host process; resolveSpawnEnv declares every key in WSLENV so the
+            // values (TESKRA_HANDOFF_PATH, workspace env, secrets) actually
+            // reach the Linux process. Host-native runtimes pass through.
+            env: {
+              ...process.env,
+              ...resolveSpawnEnv(request.runtime, request.env ?? {}, process.env['WSLENV']),
+            },
+            useConpty: true,
           },
-          useConpty: true,
-        })
+        )
       } catch (cause) {
         return fail({
           code: 'UNKNOWN',

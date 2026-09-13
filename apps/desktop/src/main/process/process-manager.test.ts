@@ -29,10 +29,10 @@ interface FakePty extends IPty {
 function fakePtyBackend(): {
   spawn: NonNullable<ProcessManagerDeps['spawn']>
   terminals: FakePty[]
-  calls: Array<{ file: string; args: string[]; options: unknown }>
+  calls: Array<{ file: string; args: string[] | string; options: unknown }>
 } {
   const terminals: FakePty[] = []
-  const calls: Array<{ file: string; args: string[]; options: unknown }> = []
+  const calls: Array<{ file: string; args: string[] | string; options: unknown }> = []
   let nextPid = 10_000
   const spawn: NonNullable<ProcessManagerDeps['spawn']> = (file, args, options) => {
     const dataListeners = new Set<(data: string) => void>()
@@ -75,7 +75,7 @@ function fakePtyBackend(): {
       },
     }
     terminals.push(terminal)
-    calls.push({ file, args: [...args], options })
+    calls.push({ file, args: typeof args === 'string' ? args : [...args], options })
     return terminal
   }
   return { spawn, terminals, calls }
@@ -93,6 +93,17 @@ const runtime: WorkspaceRuntime = {
   resolveHostPath: (path) => ({ ok: true, data: path }),
   resolveDataRoot: () => '/home/test/.teskra',
   validate: () => ({ ok: true, data: { kind: 'wsl', hostNative: false } }),
+}
+
+const windowsRuntime: WorkspaceRuntime = {
+  ref: { kind: 'windows' },
+  hostNative: true,
+  resolveCommand: (command, args = [], cwd) => ({ executable: command, args, cwd }),
+  resolveTerminal: () => ({ ok: true, data: { command: 'cmd.exe', args: [] } }),
+  resolveCwd: (path) => path,
+  resolveHostPath: (path) => ({ ok: true, data: path }),
+  resolveDataRoot: () => 'C:\\Users\\test',
+  validate: () => ({ ok: true, data: { kind: 'windows', hostNative: true } }),
 }
 
 function request(id: string): ProcessStartRequest {
@@ -124,6 +135,121 @@ describe('ProcessManager (TASK-014)', () => {
     expect(backend.calls[0]).toMatchObject({
       file: 'wsl.exe',
       args: ['-d', 'Ubuntu', '--cd', '/repo', 'bash', '-l'],
+    })
+  })
+
+  it('launches a Windows .cmd shim through cmd.exe with a pre-quoted command line', () => {
+    const backend = fakePtyBackend()
+    const manager = createProcessManager({
+      events: createEventBus(),
+      spawn: backend.spawn,
+      hostPlatform: 'win32',
+    })
+
+    const started = manager.start({
+      id: 'shim-1',
+      command: 'C:\\Users\\u\\AppData\\Roaming\\npm\\codex.cmd',
+      args: ['exec', 'fix the bug'],
+      cwd: 'C:\\repo',
+      runtime: windowsRuntime,
+    })
+
+    expect(started.ok).toBe(true)
+    expect(backend.calls).toHaveLength(1)
+    expect(backend.calls[0]!.file.toLowerCase()).toMatch(/cmd\.exe$/)
+    // node-pty receives ONE pre-quoted string (its isCommandLine branch).
+    expect(backend.calls[0]!.args).toBe(
+      '/d /s /c call "C:\\Users\\u\\AppData\\Roaming\\npm\\codex.cmd" exec "fix the bug"',
+    )
+  })
+
+  it('unwraps a .cmd shim into a direct node launch for multi-line args', () => {
+    // Regression: cmd ends the batch command at the first line break, so a
+    // multi-line prompt through codex.cmd arrived truncated to its first
+    // line. The shim's real target (node + entry .js) is spawned directly.
+    const NPM_SHIM = [
+      '@ECHO off',
+      'SET dp0=%~dp0',
+      'IF EXIST "%dp0%\\node.exe" (',
+      '  SET "_prog=%dp0%\\node.exe"',
+      ') ELSE (',
+      '  SET "_prog=node"',
+      ')',
+      'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*',
+      '',
+    ].join('\r\n')
+    const ENTRY = 'C:\\Users\\u\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js'
+    const NODE = 'C:\\Nodejs\\node.exe'
+    vi.stubEnv('PATH', 'C:\\Nodejs')
+    const backend = fakePtyBackend()
+    const manager = createProcessManager({
+      events: createEventBus(),
+      spawn: backend.spawn,
+      hostPlatform: 'win32',
+      shimIO: { read: () => NPM_SHIM, exists: (path) => path === ENTRY || path === NODE },
+    })
+
+    const started = manager.start({
+      id: 'shim-multiline',
+      command: 'C:\\Users\\u\\AppData\\Roaming\\npm\\codex.cmd',
+      args: ['exec', '# Implement the Task\n\n用c++开发一个数学计算器'],
+      cwd: 'C:\\repo',
+      runtime: windowsRuntime,
+    })
+    vi.unstubAllEnvs()
+
+    expect(started.ok).toBe(true)
+    expect(backend.calls).toHaveLength(1)
+    expect(backend.calls[0]!.file).toBe(NODE)
+    expect(backend.calls[0]!.args).toEqual([
+      ENTRY,
+      'exec',
+      '# Implement the Task\n\n用c++开发一个数学计算器',
+    ])
+  })
+
+  it('falls back to the cmd.exe line when a shim needing direct launch cannot be unwrapped', () => {
+    const backend = fakePtyBackend()
+    const manager = createProcessManager({
+      events: createEventBus(),
+      spawn: backend.spawn,
+      hostPlatform: 'win32',
+      shimIO: { read: () => undefined, exists: () => false },
+    })
+
+    const started = manager.start({
+      id: 'shim-fallback',
+      command: 'C:\\Users\\u\\AppData\\Roaming\\npm\\codex.cmd',
+      args: ['exec', 'line1\nline2'],
+      cwd: 'C:\\repo',
+      runtime: windowsRuntime,
+    })
+
+    expect(started.ok).toBe(true)
+    expect(backend.calls[0]!.file.toLowerCase()).toMatch(/cmd\.exe$/)
+    expect(typeof backend.calls[0]!.args).toBe('string')
+  })
+
+  it('does not wrap non-shim executables through cmd.exe on Windows', () => {
+    const backend = fakePtyBackend()
+    const manager = createProcessManager({
+      events: createEventBus(),
+      spawn: backend.spawn,
+      hostPlatform: 'win32',
+    })
+
+    const started = manager.start({
+      id: 'exe-1',
+      command: 'C:\\Tools\\codex.exe',
+      args: ['--version'],
+      cwd: 'C:\\repo',
+      runtime: windowsRuntime,
+    })
+
+    expect(started.ok).toBe(true)
+    expect(backend.calls[0]).toMatchObject({
+      file: 'C:\\Tools\\codex.exe',
+      args: ['--version'],
     })
   })
 

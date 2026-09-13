@@ -1,11 +1,17 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { EventEmitter } from 'node:events'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { WorkspaceRuntime } from '../workspace/runtime'
-import { createCommandRunner, decodeCommandOutput, type CommandRunner } from './command-runner'
+import {
+  createCommandRunner,
+  decodeCommandOutput,
+  type CommandRunner,
+  type CommandRunnerDeps,
+} from './command-runner'
 
 /** Node binary running a one-liner: a cross-platform one-shot command. */
 const NODE = process.execPath
@@ -259,4 +265,184 @@ describe('decodeCommandOutput', () => {
     const buffer = Buffer.from('WSL 版本: 2.4.11.0\r\n', 'utf16le')
     expect(decodeCommandOutput([buffer], 'utf16le')).toBe('WSL 版本: 2.4.11.0\r\n')
   })
+})
+
+describe('CommandRunner Windows .cmd shim support', () => {
+  interface SpawnCall {
+    file: string
+    args: string[]
+    options: Record<string, unknown>
+  }
+
+  /** A spawn seam that records the call and immediately closes with exit 0. */
+  function recordingSpawn(): {
+    spawn: NonNullable<CommandRunnerDeps['spawn']>
+    calls: SpawnCall[]
+  } {
+    const calls: SpawnCall[] = []
+    const spawn = ((file: string, args: string[], options: Record<string, unknown>) => {
+      const child = new EventEmitter() as EventEmitter & {
+        pid: number
+        stdout: EventEmitter
+        stderr: EventEmitter
+      }
+      child.pid = 7777
+      child.stdout = new EventEmitter()
+      child.stderr = new EventEmitter()
+      calls.push({ file, args: [...args], options })
+      queueMicrotask(() => child.emit('close', 0, null))
+      return child
+    }) as NonNullable<CommandRunnerDeps['spawn']>
+    return { spawn, calls }
+  }
+
+  it('launches a .cmd shim through cmd.exe with verbatim arguments', async () => {
+    const backend = recordingSpawn()
+    const runner = createCommandRunner({ hostPlatform: 'win32', spawn: backend.spawn })
+
+    const result = await runner.run({
+      command: 'C:\\Users\\u\\AppData\\Roaming\\npm\\codex.cmd',
+      args: ['exec', 'fix the bug'],
+      timeoutMs: 1000,
+    })
+
+    expect(result).toEqual({ ok: true, data: { stdout: '', stderr: '', exitCode: 0 } })
+    expect(backend.calls).toHaveLength(1)
+    const call = backend.calls[0]!
+    expect(call.file.toLowerCase()).toMatch(/cmd\.exe$/)
+    expect(call.args).toEqual([
+      '/d',
+      '/s',
+      '/c',
+      'call',
+      '"C:\\Users\\u\\AppData\\Roaming\\npm\\codex.cmd"',
+      'exec',
+      '"fix the bug"',
+    ])
+    expect(call.options).toMatchObject({ windowsVerbatimArguments: true, detached: false })
+  })
+
+  it('unwraps a .cmd shim into a direct node launch for multi-line args', async () => {
+    // Regression: cmd ends the batch command at the first line break, so a
+    // multi-line argument through a shim arrived truncated to its first
+    // line. The shim's real target (node + entry .js) is spawned directly.
+    const NPM_SHIM = [
+      '@ECHO off',
+      'SET dp0=%~dp0',
+      'IF EXIST "%dp0%\\node.exe" (',
+      '  SET "_prog=%dp0%\\node.exe"',
+      ') ELSE (',
+      '  SET "_prog=node"',
+      ')',
+      'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*',
+      '',
+    ].join('\r\n')
+    const ENTRY = 'C:\\Users\\u\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js'
+    const NODE = 'C:\\Nodejs\\node.exe'
+    vi.stubEnv('PATH', 'C:\\Nodejs')
+    const backend = recordingSpawn()
+    const runner = createCommandRunner({
+      hostPlatform: 'win32',
+      spawn: backend.spawn,
+      shimIO: { read: () => NPM_SHIM, exists: (path) => path === ENTRY || path === NODE },
+    })
+
+    const result = await runner.run({
+      command: 'C:\\Users\\u\\AppData\\Roaming\\npm\\codex.cmd',
+      args: ['exec', '# Implement the Task\n\n用c++开发一个数学计算器'],
+      timeoutMs: 1000,
+    })
+    vi.unstubAllEnvs()
+
+    expect(result.ok).toBe(true)
+    expect(backend.calls).toHaveLength(1)
+    const call = backend.calls[0]!
+    expect(call.file).toBe(NODE)
+    expect(call.args).toEqual([ENTRY, 'exec', '# Implement the Task\n\n用c++开发一个数学计算器'])
+    expect(call.options).not.toHaveProperty('windowsVerbatimArguments')
+  })
+
+  it('falls back to the cmd.exe shape when a shim needing direct launch cannot be unwrapped', async () => {
+    const backend = recordingSpawn()
+    const runner = createCommandRunner({
+      hostPlatform: 'win32',
+      spawn: backend.spawn,
+      shimIO: { read: () => undefined, exists: () => false },
+    })
+
+    await runner.run({
+      command: 'C:\\Users\\u\\AppData\\Roaming\\npm\\codex.cmd',
+      args: ['exec', 'line1\nline2'],
+      timeoutMs: 1000,
+    })
+
+    expect(backend.calls[0]!.file.toLowerCase()).toMatch(/cmd\.exe$/)
+    expect(backend.calls[0]!.options).toHaveProperty('windowsVerbatimArguments', true)
+  })
+
+  it('resolves a bare command name through PATH and launches the .cmd shim', async () => {
+    // Shell workflow steps run e.g. `npm test`: on Windows `npm` only exists
+    // as npm.cmd, and spawning the bare name fails outright (EINVAL). The
+    // runner must resolve it via PATH+PATHEXT, then the shim path applies.
+    const NPM_CMD = 'C:\\Users\\u\\AppData\\Roaming\\npm\\npm.cmd'
+    vi.stubEnv('PATH', 'C:\\Users\\u\\AppData\\Roaming\\npm')
+    vi.stubEnv('PATHEXT', '.COM;.EXE;.BAT;.CMD')
+    const backend = recordingSpawn()
+    const runner = createCommandRunner({
+      hostPlatform: 'win32',
+      spawn: backend.spawn,
+      shimIO: { read: () => undefined, exists: (path) => path === NPM_CMD },
+    })
+
+    const result = await runner.run({ command: 'npm', args: ['test'], timeoutMs: 1000 })
+    vi.unstubAllEnvs()
+
+    expect(result.ok).toBe(true)
+    const call = backend.calls[0]!
+    expect(call.file.toLowerCase()).toMatch(/cmd\.exe$/)
+    expect(call.args).toEqual(['/d', '/s', '/c', 'call', `"${NPM_CMD}"`, 'test'])
+  })
+
+  it('does not wrap non-shim executables on win32', async () => {
+    const backend = recordingSpawn()
+    const runner = createCommandRunner({ hostPlatform: 'win32', spawn: backend.spawn })
+
+    await runner.run({ command: 'C:\\Tools\\codex.exe', args: ['--version'], timeoutMs: 1000 })
+
+    expect(backend.calls[0]).toMatchObject({
+      file: 'C:\\Tools\\codex.exe',
+      args: ['--version'],
+    })
+    expect(backend.calls[0]!.options).not.toHaveProperty('windowsVerbatimArguments')
+  })
+
+  it('does not wrap .cmd paths on POSIX hosts', async () => {
+    const backend = recordingSpawn()
+    const runner = createCommandRunner({ hostPlatform: 'linux', spawn: backend.spawn })
+
+    await runner.run({ command: '/opt/codex.cmd', args: ['--version'], timeoutMs: 1000 })
+
+    expect(backend.calls[0]).toMatchObject({ file: '/opt/codex.cmd', args: ['--version'] })
+  })
+
+  it.skipIf(process.platform !== 'win32')(
+    'really executes a .cmd shim end-to-end on Windows',
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'teskra-shim-'))
+      try {
+        const shim = join(dir, 'fake agent.cmd')
+        writeFileSync(shim, '@echo off\r\necho shim-ok %1\r\n', 'utf8')
+        const runner = createCommandRunner({ hostPlatform: 'win32' })
+
+        const result = await runner.run({ command: shim, args: ['hello'], timeoutMs: 5000 })
+
+        expect(result.ok).toBe(true)
+        if (!result.ok) return
+        expect(result.data.exitCode).toBe(0)
+        expect(result.data.stdout).toContain('shim-ok hello')
+      } finally {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+      }
+    },
+  )
 })

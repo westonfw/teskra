@@ -1,10 +1,19 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { existsSync, readFileSync } from 'node:fs'
 
 import type { IpcResult } from '@teskra/contracts'
 
 import { type InternalAppError, toPublicError } from '../errors'
 import { getLogger } from '../logger'
 import type { WorkspaceRuntime } from '../workspace/runtime'
+import {
+  buildCmdShimSpawn,
+  cmdShimArgsNeedDirectLaunch,
+  type CmdShimIO,
+  isWindowsCmdShim,
+  resolveCmdShimDirectLaunch,
+  resolveWindowsCommandPath,
+} from './windows-shim'
 
 /**
  * CommandRunner (TASK-012, teskra-tasks.md; plan §150).
@@ -80,6 +89,24 @@ export interface CommandRunnerDeps {
   readonly hostPlatform?: string | undefined
   /** Tree-kill seam for tests; defaults to the platform killProcessTree. */
   readonly killTree?: (child: ChildProcess, hostPlatform: string) => void
+  /** Spawn seam for tests (e.g. asserting the .cmd shim launch shape). */
+  readonly spawn?: typeof spawn
+  /** Shim-file seam for cmd-shim unwrapping tests; production binds node:fs. */
+  readonly shimIO?: CmdShimIO
+}
+
+/** node:fs binding for the CmdShimIO seam (read failures degrade to fallback). */
+function createNodeShimIO(): CmdShimIO {
+  return {
+    read(path) {
+      try {
+        return readFileSync(path, 'utf8')
+      } catch {
+        return undefined
+      }
+    },
+    exists: (path) => existsSync(path),
+  }
 }
 
 export const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024
@@ -140,7 +167,35 @@ interface ActiveChild {
 export function createCommandRunner(deps: CommandRunnerDeps = {}): CommandRunner {
   const hostPlatform = deps.hostPlatform ?? process.platform
   const killTree = deps.killTree ?? killProcessTree
+  const spawnProcess = deps.spawn ?? spawn
+  const shimIO = deps.shimIO ?? createNodeShimIO()
   const logger = getLogger('process')
+  /** Bare-name → resolved path cache; PATH/PATHEXT are stable within a run. */
+  const commandPathCache = new Map<string, string | undefined>()
+
+  /**
+   * Bare command names (e.g. shell workflow steps like `npm test`) must be
+   * resolved to a real file first: on Windows the name usually exists only
+   * as a `.cmd` shim, which Node cannot spawn directly. Everything else
+   * (qualified paths, POSIX hosts) passes through untouched.
+   */
+  const resolveExecutable = (executable: string): string => {
+    if (hostPlatform !== 'win32') {
+      return executable
+    }
+    const cached = commandPathCache.get(executable)
+    if (cached !== undefined || commandPathCache.has(executable)) {
+      return cached ?? executable
+    }
+    const resolved = resolveWindowsCommandPath(
+      executable,
+      shimIO,
+      process.env['PATH'],
+      process.env['PATHEXT'],
+    )
+    commandPathCache.set(executable, resolved)
+    return resolved ?? executable
+  }
 
   /** Kill the tree exactly once and settle with the given error. */
   const terminate = (active: ActiveChild, error: InternalAppError): void => {
@@ -166,7 +221,7 @@ export function createCommandRunner(deps: CommandRunnerDeps = {}): CommandRunner
       }
 
       const args = request.args ?? []
-      const context =
+      const rawContext =
         request.runtime !== undefined
           ? request.runtime.resolveCommand(request.command, args, request.cwd)
           : {
@@ -174,6 +229,7 @@ export function createCommandRunner(deps: CommandRunnerDeps = {}): CommandRunner
               args,
               ...(request.cwd !== undefined ? { cwd: request.cwd } : {}),
             }
+      const context = { ...rawContext, executable: resolveExecutable(rawContext.executable) }
       const encoding = request.encoding ?? 'utf8'
       const maxBuffer = request.maxBuffer ?? DEFAULT_MAX_BUFFER
 
@@ -216,13 +272,42 @@ export function createCommandRunner(deps: CommandRunnerDeps = {}): CommandRunner
 
         let child: ChildProcess
         try {
-          child = spawn(context.executable, [...context.args], {
-            cwd: context.cwd,
-            // POSIX: own process group so tree-kill can signal -pid.
-            // Windows: process groups do not exist; taskkill /T instead.
-            detached: hostPlatform !== 'win32',
-            windowsHide: true,
-          })
+          // npm-installed CLIs resolve (via where.exe) to `.cmd`/`.bat` shims
+          // that Node refuses to spawn directly (EINVAL, CVE-2024-27980);
+          // launch those through cmd.exe with verbatim arguments instead.
+          // Arguments cmd cannot transport (line breaks, ~8191-char ceiling)
+          // unwrap the shim and spawn its real target directly; unparseable
+          // shims fall back to the cmd.exe shape, no worse than before.
+          const isShim = hostPlatform === 'win32' && isWindowsCmdShim(context.executable)
+          const needsDirect =
+            isShim && cmdShimArgsNeedDirectLaunch(context.executable, context.args)
+          const directLaunch = needsDirect
+            ? resolveCmdShimDirectLaunch(context.executable, shimIO, process.env['PATH'])
+            : undefined
+          if (needsDirect && directLaunch === undefined) {
+            logger.warn(
+              { command: request.command, executable: context.executable },
+              'Shim could not be unwrapped; multi-line/long arguments may reach the process truncated.',
+            )
+          }
+          const shim =
+            isShim && directLaunch === undefined
+              ? buildCmdShimSpawn(context.executable, context.args, process.env['ComSpec'])
+              : undefined
+          child = spawnProcess(
+            directLaunch?.command ?? shim?.command ?? context.executable,
+            directLaunch !== undefined
+              ? [...directLaunch.argsPrefix, ...context.args]
+              : [...(shim?.args ?? context.args)],
+            {
+              cwd: context.cwd,
+              // POSIX: own process group so tree-kill can signal -pid.
+              // Windows: process groups do not exist; taskkill /T instead.
+              detached: hostPlatform !== 'win32',
+              windowsHide: true,
+              ...(shim !== undefined ? { windowsVerbatimArguments: shim.verbatim } : {}),
+            },
+          )
         } catch (cause) {
           resolve(
             toPublicErrorResult({
