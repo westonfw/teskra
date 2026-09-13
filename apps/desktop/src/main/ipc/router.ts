@@ -501,6 +501,10 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.workflow.cancelRun(request)),
   )
   register(
+    ipcChannelDefinitions.workflowRunComplete,
+    withRuntime((runtime, request) => runtime.workflow.completeRun(request)),
+  )
+  register(
     ipcChannelDefinitions.workflowStepResolve,
     withRuntime((runtime, request) => runtime.workflow.resolveStep(request)),
   )

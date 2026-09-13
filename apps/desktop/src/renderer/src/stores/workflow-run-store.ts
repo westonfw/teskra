@@ -20,6 +20,8 @@ export interface WorkflowRunStoreBridge {
     startFullWorkflow(
       request: StartFullWorkflowRequest,
     ): Promise<IpcResult<FullWorkflowStartResult>>
+    cancelRun(request: WorkflowRunIdRequest): Promise<IpcResult<WorkflowRun>>
+    completeRun(request: WorkflowRunIdRequest): Promise<IpcResult<WorkflowRun>>
     runSummary(request: WorkflowRunIdRequest): Promise<IpcResult<FullWorkflowRunSummary>>
   }
   readonly events: {
@@ -54,6 +56,10 @@ interface WorkflowRunState {
   selectRun(runId: string | undefined): Promise<void>
   /** One-click default full workflow launch; selects the new run. */
   startFullWorkflow(request: StartFullWorkflowRequest): Promise<FullWorkflowStartResult | undefined>
+  /** Cancels an in-flight run (the IPC/engine support it; the panel exposes it). */
+  cancelRun(runId: string): Promise<boolean>
+  /** User-accepts a run parked at needs_user_review, closing it as completed. */
+  completeRun(runId: string): Promise<boolean>
   clearError(): void
 }
 
@@ -160,6 +166,40 @@ export function createWorkflowRunStore(getBridge: () => WorkflowRunStoreBridge) 
         } catch {
           set({ starting: false, error: transportError() })
           return undefined
+        }
+      },
+
+      async cancelRun(runId) {
+        try {
+          const result = await getBridge().workflow.cancelRun({ runId })
+          if (!result.ok) {
+            set({ error: result.error })
+            return false
+          }
+          const taskId = get().taskId
+          if (taskId !== undefined) await get().synchronize(taskId)
+          if (get().selectedId === runId) await refreshSelected()
+          return true
+        } catch {
+          set({ error: transportError() })
+          return false
+        }
+      },
+
+      async completeRun(runId) {
+        try {
+          const result = await getBridge().workflow.completeRun({ runId })
+          if (!result.ok) {
+            set({ error: result.error })
+            return false
+          }
+          const taskId = get().taskId
+          if (taskId !== undefined) await get().synchronize(taskId)
+          if (get().selectedId === runId) await refreshSelected()
+          return true
+        } catch {
+          set({ error: transportError() })
+          return false
         }
       },
 

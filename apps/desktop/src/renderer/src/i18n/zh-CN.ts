@@ -398,6 +398,18 @@ export const zhCN: Record<TranslationKey, string> = {
   'workflow.worktreeLine': 'Worktree {branch}（基线 {base}）',
   'workflow.criteriaResult': '验收标准结果',
   'workflow.required': '必需',
+  'workflow.cancel': '取消',
+  'workflow.accept': '接受并结案',
+  'workflow.launch.title': '启动完整工作流',
+  'workflow.launch.hint':
+    '以下均为可选项；留空则由服务端自动解析（Agent 默认角色 / 仓库内 full.* 定义）。',
+  'workflow.launch.implementer': '实现者（可选）',
+  'workflow.launch.implementerPlaceholder': '默认：自动解析',
+  'workflow.launch.reviewers': '评审者（可选）',
+  'workflow.launch.reviewersPlaceholder': '默认：自动解析',
+  'workflow.launch.testCommand': '测试命令（可选）',
+  'workflow.launch.testCommandPlaceholder': '默认：npm test 或仓库定义',
+  'workflow.launch.confirm': '启动',
 
   'worktree.title': 'Worktree',
   'worktree.gone': '关联的 worktree 记录已不存在。',

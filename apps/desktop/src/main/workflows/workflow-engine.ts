@@ -156,6 +156,13 @@ export interface WorkflowEngine {
   /** Stops queued (pending) steps and cancels running ones via their executor. */
   cancel(runId: string): Promise<IpcResult<WorkflowRun>>
   /**
+   * User-accepts a run parked at needs_user_review (iteration cap reached) and
+   * closes it as 'completed' — the "accept & close the books" action after the
+   * user reviewed/merged the outcome. Any other status is rejected: runs still
+   * working get cancelled instead, and terminal runs have no exits.
+   */
+  complete(runId: string): Promise<IpcResult<WorkflowRun>>
+  /**
    * Best-effort shutdown (TASK-059): cancels every active pass so executors
    * release their event subscriptions, and settles only once every cancel
    * has finished — the composition root awaits this so a cancel's trailing
@@ -801,6 +808,32 @@ export function createWorkflowEngine(deps: WorkflowEngineDeps): WorkflowEngine {
       }
       settleWithDetail(state, deps.runs.getRun(runId))
       return updated
+    },
+
+    complete(runId) {
+      const found = deps.runs.getRun(runId)
+      if (!found.ok) return Promise.resolve(found)
+      if (found.data === null) {
+        return Promise.resolve(
+          invalid(`Workflow run "${runId}" was not found.`, `engine complete run=${runId}`),
+        )
+      }
+      if (found.data.run.status !== 'needs_user_review') {
+        return Promise.resolve(
+          invalid(
+            `Workflow run "${runId}" is ${found.data.run.status}; only a run waiting for user review can be accepted.`,
+            `engine complete on ${found.data.run.status} run ${runId}`,
+          ),
+        )
+      }
+      // A capped run never has an in-flight pass (the controller parked the
+      // run); dropping any stale entry is defensive only.
+      passes.delete(runId)
+      const updated = deps.runs.setRunStatus(runId, 'completed')
+      if (updated.ok) {
+        deps.events.emit('workflow.run_updated', { runId, status: 'completed' })
+      }
+      return Promise.resolve(updated)
     },
 
     async dispose() {

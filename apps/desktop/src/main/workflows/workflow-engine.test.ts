@@ -406,6 +406,43 @@ describe('createWorkflowEngine (TASK-057)', () => {
     expect(stepByNode('a').status).toBe('cancelled')
   })
 
+  it('accepts a needs_user_review run and closes it as completed', async () => {
+    const { engine, store, run } = setup(SEQUENTIAL)
+    const parked = store.setRunStatus(run.id, 'needs_user_review')
+    expect(parked.ok).toBe(true)
+
+    const completed = await engine.complete(run.id)
+
+    expect(completed.ok).toBe(true)
+    if (completed.ok) {
+      expect(completed.data.status).toBe('completed')
+      expect(completed.data.completedAt).not.toBeNull()
+    }
+    const detail = store.getRun(run.id)
+    expect(detail.ok && detail.data?.run.status).toBe('completed')
+  })
+
+  it('rejects complete for runs not waiting for user review', async () => {
+    const { engine, run } = setup(SEQUENTIAL)
+
+    const created = await engine.complete(run.id)
+    expect(created.ok).toBe(false)
+    if (!created.ok) expect(created.error.message).toContain('created')
+
+    const missing = await engine.complete('run-missing')
+    expect(missing.ok).toBe(false)
+  })
+
+  it('rejects complete for terminal runs', async () => {
+    const { engine, store, run } = setup(SEQUENTIAL)
+    expect(store.setRunStatus(run.id, 'cancelled').ok).toBe(true)
+
+    const result = await engine.complete(run.id)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error.message).toContain('cancelled')
+  })
+
   it('filters runOn nodes per iteration and keeps their out-edges activated', async () => {
     const { engine, store, run, agent, stepByNode, steps } = setup(RUN_ON)
 

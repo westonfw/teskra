@@ -448,6 +448,7 @@ export const IPC_CHANNELS = {
   workflowRunGet: 'teskra:workflow:run:get',
   workflowRunStart: 'teskra:workflow:run:start',
   workflowRunCancel: 'teskra:workflow:run:cancel',
+  workflowRunComplete: 'teskra:workflow:run:complete',
   workflowStepResolve: 'teskra:workflow:step:resolve',
   workflowDispatch: 'teskra:workflow:dispatch',
   workflowIterate: 'teskra:workflow:iterate',
@@ -1029,6 +1030,11 @@ export const workflowRunCancelChannel = channel(
   workflowRunIdRequestSchema,
   workflowRunSchema,
 )
+export const workflowRunCompleteChannel = channel(
+  IPC_CHANNELS.workflowRunComplete,
+  workflowRunIdRequestSchema,
+  workflowRunSchema,
+)
 export const workflowStepResolveChannel = channel(
   IPC_CHANNELS.workflowStepResolve,
   workflowStepResolveRequestSchema,
@@ -1167,6 +1173,7 @@ export const ipcChannelDefinitions = {
   workflowRunGet: workflowRunGetChannel,
   workflowRunStart: workflowRunStartChannel,
   workflowRunCancel: workflowRunCancelChannel,
+  workflowRunComplete: workflowRunCompleteChannel,
   workflowStepResolve: workflowStepResolveChannel,
   workflowDispatch: workflowDispatchChannel,
   workflowIterate: workflowIterateChannel,
@@ -1349,6 +1356,12 @@ export interface TeskraBridge {
      */
     startRun(request: WorkflowRunStartRequest): Promise<IpcResult<WorkflowRunDetail>>
     cancelRun(request: WorkflowRunIdRequest): Promise<IpcResult<WorkflowRun>>
+    /**
+     * User-accepts a run parked at needs_user_review (cap reached), closing it
+     * as 'completed' — e.g. after reviewing and merging the worktree. Cancel
+     * remains the way to abandon one.
+     */
+    completeRun(request: WorkflowRunIdRequest): Promise<IpcResult<WorkflowRun>>
     resolveStep(request: WorkflowStepResolveRequest): Promise<IpcResult<WorkflowStep>>
     dispatch(request: WorkflowDispatchRequest): Promise<IpcResult<WorkflowDispatchResult>>
     iterate(request: WorkflowIterateRequest): Promise<IpcResult<WorkflowIterateResult>>

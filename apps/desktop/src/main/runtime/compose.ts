@@ -760,6 +760,7 @@ export async function composeTeskraRuntime(
           }),
         ),
       cancelRun: ({ runId }) => workflowEngine.cancel(runId),
+      completeRun: ({ runId }) => workflowEngine.complete(runId),
       resolveStep: ({ stepId, outcome, result }) =>
         workflowEngine.resolveStep(stepId, {
           ...(outcome === undefined ? {} : { outcome }),

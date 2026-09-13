@@ -438,6 +438,7 @@ function fakeRuntime(): TeskraRuntime {
       getRun: vi.fn(() => ok(null)),
       startRun: vi.fn(async () => ok(WORKFLOW_RUN_DETAIL)),
       cancelRun: vi.fn(async () => ok({ ...WORKFLOW_RUN, status: 'cancelled' as const })),
+      completeRun: vi.fn(async () => ok({ ...WORKFLOW_RUN, status: 'completed' as const })),
       resolveStep: vi.fn(() => ok(WORKFLOW_STEP)),
       dispatch: vi.fn(async () => ok(DISPATCH_RESULT)),
       iterate: vi.fn(async () =>

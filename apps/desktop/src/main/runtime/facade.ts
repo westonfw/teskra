@@ -358,6 +358,8 @@ export interface WorkflowPort {
    */
   startRun(request: WorkflowRunStartRequest): Promise<IpcResult<WorkflowRunDetail>>
   cancelRun(request: WorkflowRunIdRequest): Promise<IpcResult<WorkflowRun>>
+  /** User-accepts a run parked at needs_user_review, closing it as 'completed'. */
+  completeRun(request: WorkflowRunIdRequest): Promise<IpcResult<WorkflowRun>>
   resolveStep(request: WorkflowStepResolveRequest): IpcResult<WorkflowStep>
   dispatch(request: WorkflowDispatchRequest): Promise<IpcResult<WorkflowDispatchResult>>
   /** TASK-062 Iterate Primitive: Implement → Review → Fix → Review with safety caps. */

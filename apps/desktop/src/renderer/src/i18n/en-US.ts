@@ -425,6 +425,18 @@ export const enUS = {
   'workflow.worktreeLine': 'Worktree {branch} (base {base})',
   'workflow.criteriaResult': 'Criteria result',
   'workflow.required': 'required',
+  'workflow.cancel': 'Cancel',
+  'workflow.accept': 'Accept & close',
+  'workflow.launch.title': 'Start full workflow',
+  'workflow.launch.hint':
+    'All fields are optional; empty fields resolve server-side (agent default roles / repo full.* definition).',
+  'workflow.launch.implementer': 'Implementer (optional)',
+  'workflow.launch.implementerPlaceholder': 'Default: resolve automatically',
+  'workflow.launch.reviewers': 'Reviewers (optional)',
+  'workflow.launch.reviewersPlaceholder': 'Default: resolve automatically',
+  'workflow.launch.testCommand': 'Test command (optional)',
+  'workflow.launch.testCommandPlaceholder': 'Default: npm test or repo definition',
+  'workflow.launch.confirm': 'Start',
 
   'worktree.title': 'Worktree',
   'worktree.gone': 'The linked worktree record is gone.',

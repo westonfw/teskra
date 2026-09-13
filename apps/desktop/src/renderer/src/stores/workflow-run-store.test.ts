@@ -89,6 +89,30 @@ function setup(initialRuns: WorkflowRun[] = []) {
         const result: FullWorkflowStartResult = { run, worktree, rounds: 1, stopReason: 'passed' }
         return { ok: true as const, data: result }
       }),
+      cancelRun: vi.fn(async (request: { runId: string }) => {
+        const run = runs.get(request.runId)
+        if (run === undefined) {
+          return {
+            ok: false as const,
+            error: { code: 'VALIDATION_FAILED' as const, message: 'not found', retryable: false },
+          }
+        }
+        const cancelled = { ...run, status: 'cancelled' as const }
+        runs.set(run.id, cancelled)
+        return { ok: true as const, data: cancelled }
+      }),
+      completeRun: vi.fn(async (request: { runId: string }) => {
+        const run = runs.get(request.runId)
+        if (run === undefined || run.status !== 'needs_user_review') {
+          return {
+            ok: false as const,
+            error: { code: 'VALIDATION_FAILED' as const, message: 'not parked', retryable: false },
+          }
+        }
+        const completed = { ...run, status: 'completed' as const }
+        runs.set(run.id, completed)
+        return { ok: true as const, data: completed }
+      }),
       runSummary: vi.fn(async (request: { runId: string }) => {
         const run = runs.get(request.runId)
         if (run === undefined) {
@@ -233,5 +257,35 @@ describe('createWorkflowRunStore (TASK-063)', () => {
     })
     await store.getState().synchronize('task-1')
     expect(store.getState().error?.code).toBe('UNKNOWN')
+  })
+
+  it('cancels an in-flight run and refreshes the list', async () => {
+    const { bridge, store } = setup([makeRun({ id: 'wf-1', status: 'running' })])
+    const stop = store.getState().startSynchronization('task-1')
+    await vi.waitFor(() => {
+      expect(store.getState().runs).toHaveLength(1)
+    })
+
+    const cancelled = await store.getState().cancelRun('wf-1')
+
+    expect(cancelled).toBe(true)
+    expect(bridge.workflow.cancelRun).toHaveBeenCalledWith({ runId: 'wf-1' })
+    expect(store.getState().runs.find((run) => run.id === 'wf-1')?.status).toBe('cancelled')
+    stop()
+  })
+
+  it('accepts a capped run and closes it as completed', async () => {
+    const { bridge, store } = setup([makeRun({ id: 'wf-1', status: 'needs_user_review' })])
+    const stop = store.getState().startSynchronization('task-1')
+    await vi.waitFor(() => {
+      expect(store.getState().runs).toHaveLength(1)
+    })
+
+    const completed = await store.getState().completeRun('wf-1')
+
+    expect(completed).toBe(true)
+    expect(bridge.workflow.completeRun).toHaveBeenCalledWith({ runId: 'wf-1' })
+    expect(store.getState().runs.find((run) => run.id === 'wf-1')?.status).toBe('completed')
+    stop()
   })
 })

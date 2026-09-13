@@ -1,6 +1,20 @@
 import { RocketOutlined } from '@ant-design/icons'
-import { Alert, Button, Card, Collapse, Empty, List, Space, Spin, Tag, Typography } from 'antd'
-import { useEffect } from 'react'
+import {
+  Alert,
+  Button,
+  Card,
+  Collapse,
+  Empty,
+  Input,
+  List,
+  Modal,
+  Select,
+  Space,
+  Spin,
+  Tag,
+  Typography,
+} from 'antd'
+import { useEffect, useState } from 'react'
 
 import type {
   CriteriaReviewOutcome,
@@ -11,6 +25,7 @@ import type {
 
 import { AppErrorAlert } from '../components/app-error-alert'
 import { useTranslation } from '../i18n'
+import { useAgentStore } from '../stores/agent-store'
 import { latestScoresByCriterion } from '../stores/review-store'
 import { useWorkflowRunStore } from '../stores/workflow-run-store'
 
@@ -54,6 +69,16 @@ const scoreColor: Record<CriterionResult, string> = {
   unknown: 'default',
 }
 
+/** Runs still open (in flight or parked for the user); only these get a cancel action. */
+const CANCELLABLE_RUN_STATUSES: ReadonlySet<WorkflowRunStatus> = new Set([
+  'created',
+  'running',
+  'waiting',
+  // Capped runs park here until the user either resumes iterating or closes
+  // them — cancelling is the only "close the books" action that exists today.
+  'needs_user_review',
+])
+
 interface WorkflowRunPanelProps {
   readonly workspaceId: string
   readonly taskId: string
@@ -70,10 +95,41 @@ export function WorkflowRunPanel({ workspaceId, taskId }: WorkflowRunPanelProps)
   const startSynchronization = useWorkflowRunStore((state) => state.startSynchronization)
   const selectRun = useWorkflowRunStore((state) => state.selectRun)
   const startFullWorkflow = useWorkflowRunStore((state) => state.startFullWorkflow)
+  const cancelRun = useWorkflowRunStore((state) => state.cancelRun)
+  const completeRun = useWorkflowRunStore((state) => state.completeRun)
   const clearError = useWorkflowRunStore((state) => state.clearError)
+  const definitions = useAgentStore((state) => state.definitions)
+  const loadDefinitions = useAgentStore((state) => state.loadDefinitions)
   const { t } = useTranslation()
 
+  // Optional launch overrides; everything left empty resolves server-side
+  // (AgentRegistry default roles → repo-local full.* definition, ADR-0005).
+  const [launchOpen, setLaunchOpen] = useState(false)
+  const [implementer, setImplementer] = useState<string | undefined>(undefined)
+  const [reviewers, setReviewers] = useState<string[]>([])
+  const [testCommand, setTestCommand] = useState('')
+
   useEffect(() => startSynchronization(taskId), [startSynchronization, taskId])
+  useEffect(() => {
+    if (launchOpen && definitions.length === 0) void loadDefinitions()
+  }, [launchOpen, definitions.length, loadDefinitions])
+
+  const agentOptions = definitions.map((definition) => ({
+    value: definition.id,
+    label: `${definition.name} (${definition.id})`,
+  }))
+
+  const confirmLaunch = async (): Promise<void> => {
+    const command = testCommand.trim()
+    const result = await startFullWorkflow({
+      workspaceId,
+      taskId,
+      ...(implementer === undefined ? {} : { implementer }),
+      ...(reviewers.length === 0 ? {} : { reviewers }),
+      ...(command === '' ? {} : { testCommand: command }),
+    })
+    if (result !== undefined) setLaunchOpen(false)
+  }
 
   const selected = detail !== undefined && detail.run.id === selectedId ? detail : undefined
   const scores = latestScoresByCriterion(summary?.criterionScores ?? [])
@@ -87,7 +143,7 @@ export function WorkflowRunPanel({ workspaceId, taskId }: WorkflowRunPanelProps)
           type="primary"
           icon={<RocketOutlined />}
           loading={starting}
-          onClick={() => void startFullWorkflow({ workspaceId, taskId })}
+          onClick={() => setLaunchOpen(true)}
         >
           {t('workflow.start')}
         </Button>
@@ -106,6 +162,20 @@ export function WorkflowRunPanel({ workspaceId, taskId }: WorkflowRunPanelProps)
             renderItem={(run) => (
               <List.Item
                 actions={[
+                  ...(run.status === 'needs_user_review'
+                    ? [
+                        <a key="accept" onClick={() => void completeRun(run.id)}>
+                          {t('workflow.accept')}
+                        </a>,
+                      ]
+                    : []),
+                  ...(CANCELLABLE_RUN_STATUSES.has(run.status)
+                    ? [
+                        <a key="cancel" onClick={() => void cancelRun(run.id)}>
+                          {t('workflow.cancel')}
+                        </a>,
+                      ]
+                    : []),
                   <a
                     key="toggle"
                     onClick={() => void selectRun(run.id === selectedId ? undefined : run.id)}
@@ -238,6 +308,44 @@ export function WorkflowRunPanel({ workspaceId, taskId }: WorkflowRunPanelProps)
           </Space>
         )}
       </Spin>
+      <Modal
+        title={t('workflow.launch.title')}
+        open={launchOpen}
+        onCancel={() => setLaunchOpen(false)}
+        onOk={() => void confirmLaunch()}
+        okText={t('workflow.launch.confirm')}
+        confirmLoading={starting}
+        destroyOnHidden
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Typography.Text type="secondary">{t('workflow.launch.hint')}</Typography.Text>
+          <Typography.Text strong>{t('workflow.launch.implementer')}</Typography.Text>
+          <Select
+            style={{ width: '100%' }}
+            allowClear
+            options={agentOptions}
+            value={implementer}
+            placeholder={t('workflow.launch.implementerPlaceholder')}
+            onChange={(value: string | undefined) => setImplementer(value)}
+          />
+          <Typography.Text strong>{t('workflow.launch.reviewers')}</Typography.Text>
+          <Select
+            style={{ width: '100%' }}
+            mode="multiple"
+            allowClear
+            options={agentOptions}
+            value={reviewers}
+            placeholder={t('workflow.launch.reviewersPlaceholder')}
+            onChange={(value: string[]) => setReviewers(value)}
+          />
+          <Typography.Text strong>{t('workflow.launch.testCommand')}</Typography.Text>
+          <Input
+            value={testCommand}
+            placeholder={t('workflow.launch.testCommandPlaceholder')}
+            onChange={(event) => setTestCommand(event.target.value)}
+          />
+        </Space>
+      </Modal>
     </Card>
   )
 }
