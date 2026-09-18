@@ -106,13 +106,21 @@ function stepFor(nodeId: string): WorkflowStep {
 
 function executionFor(
   command: string,
-  overrides: { timeoutMs?: number; run?: WorkflowRun; context?: WorkflowExecutionContext } = {},
+  overrides: {
+    timeoutMs?: number
+    requireConfirmation?: boolean
+    run?: WorkflowRun
+    context?: WorkflowExecutionContext
+  } = {},
 ): WorkflowStepExecution {
   const node: WorkflowStepExecution['node'] = {
     id: 'verify',
     type: 'shell',
     command,
     ...(overrides.timeoutMs === undefined ? {} : { timeoutMs: overrides.timeoutMs }),
+    ...(overrides.requireConfirmation === undefined
+      ? {}
+      : { requireConfirmation: overrides.requireConfirmation }),
     runOn: 'always',
   }
   return {
@@ -412,5 +420,95 @@ describe('shell steps inside the workflow engine (TASK-057 + TASK-058)', () => {
     const step = detail.ok ? detail.data?.steps[0] : undefined
     expect(step?.status).toBe('failed')
     expect(step?.result).toMatchObject({ outcome: 'failure', exitCode: 1 })
+  })
+})
+
+describe('createShellStepExecutor — repo-defined command confirmation (TASK-118)', () => {
+  it('executes a requireConfirmation step only after the user approves the full command line', async () => {
+    const { commands, requests } = mockCommandRunner({
+      ok: true,
+      data: { stdout: '', stderr: '', exitCode: 0 },
+    })
+    const seen: { stepId: string; command: string; cwd: string }[] = []
+    const executor = createShellStepExecutor({
+      commands,
+      confirmation: {
+        async request(details) {
+          seen.push({ stepId: details.stepId, command: details.command, cwd: details.cwd })
+          // Nothing executes while the step awaits the user's decision.
+          expect(requests).toHaveLength(0)
+          return true
+        },
+        cancel() {},
+      },
+    })
+
+    const completion = await executor.execute(
+      executionFor('npm run repo-script', { requireConfirmation: true }),
+    )
+
+    expect(seen).toEqual([{ stepId: 'step-verify', command: 'npm run repo-script', cwd: '/repo' }])
+    expect(requests).toHaveLength(1)
+    expect(completion.outcome).toBe('success')
+  })
+
+  it('does not execute when the user rejects', async () => {
+    const { commands, requests } = mockCommandRunner({
+      ok: true,
+      data: { stdout: '', stderr: '', exitCode: 0 },
+    })
+    const executor = createShellStepExecutor({
+      commands,
+      confirmation: { request: async () => false, cancel() {} },
+    })
+
+    const completion = await executor.execute(
+      executionFor('npm run repo-script', { requireConfirmation: true }),
+    )
+
+    expect(requests).toHaveLength(0)
+    expect(completion).toMatchObject({
+      outcome: 'failure',
+      result: { rejected: true },
+    })
+  })
+
+  it('refuses a requireConfirmation step when no confirmation channel is wired', async () => {
+    const { commands, requests } = mockCommandRunner({
+      ok: true,
+      data: { stdout: '', stderr: '', exitCode: 0 },
+    })
+    const executor = createShellStepExecutor({ commands })
+
+    const completion = await executor.execute(
+      executionFor('npm run repo-script', { requireConfirmation: true }),
+    )
+
+    expect(requests).toHaveLength(0)
+    expect(completion).toMatchObject({ outcome: 'failure', result: { rejected: true } })
+  })
+
+  it('runs a step without requireConfirmation exactly as before (trusted / built-in path)', async () => {
+    const { commands, requests } = mockCommandRunner({
+      ok: true,
+      data: { stdout: '', stderr: '', exitCode: 0 },
+    })
+    let requested = false
+    const executor = createShellStepExecutor({
+      commands,
+      confirmation: {
+        async request() {
+          requested = true
+          return false
+        },
+        cancel() {},
+      },
+    })
+
+    const completion = await executor.execute(executionFor('npm test'))
+
+    expect(requested).toBe(false)
+    expect(requests).toHaveLength(1)
+    expect(completion.outcome).toBe('success')
   })
 })

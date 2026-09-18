@@ -34,6 +34,7 @@ const bridge: TeskraBridge = {
     listRecent: (request = {}) => invoke(IPC_CHANNELS.workspaceListRecent, request),
     validate: (request) => invoke(IPC_CHANNELS.workspaceValidate, request),
     selectDirectory: (request) => invoke(IPC_CHANNELS.workspaceSelectDirectory, request),
+    updateTrust: (request) => invoke(IPC_CHANNELS.workspaceUpdateTrust, request),
   },
   task: {
     create: (request) => invoke(IPC_CHANNELS.taskCreate, request),
@@ -202,6 +203,7 @@ const bridge: TeskraBridge = {
     cancelRun: (request) => invoke(IPC_CHANNELS.workflowRunCancel, request),
     completeRun: (request) => invoke(IPC_CHANNELS.workflowRunComplete, request),
     resolveStep: (request) => invoke(IPC_CHANNELS.workflowStepResolve, request),
+    confirmShellStep: (request) => invoke(IPC_CHANNELS.workflowShellConfirmation, request),
     dispatch: (request) => invoke(IPC_CHANNELS.workflowDispatch, request),
     iterate: (request) => invoke(IPC_CHANNELS.workflowIterate, request),
     startFullWorkflow: (request) => invoke(IPC_CHANNELS.workflowStartFull, request),

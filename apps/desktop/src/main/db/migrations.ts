@@ -17,6 +17,7 @@ import agentRunPidIdentitySql from './migrations/011_agent_run_pid_identity.sql?
 import agentAccountProfilesSql from './migrations/012_agent_account_profiles.sql?raw'
 import agentRunAccountProfileSql from './migrations/013_agent_run_account_profile.sql?raw'
 import agentExecutionProfilesSql from './migrations/014_agent_execution_profiles.sql?raw'
+import workspaceTrustSql from './migrations/015_workspace_trust.sql?raw'
 
 /**
  * The canonical migration chain (TASK-006). The .sql files under
@@ -56,6 +57,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 12, name: '012_agent_account_profiles', sql: agentAccountProfilesSql },
   { version: 13, name: '013_agent_run_account_profile', sql: agentRunAccountProfileSql },
   { version: 14, name: '014_agent_execution_profiles', sql: agentExecutionProfilesSql },
+  { version: 15, name: '015_workspace_trust', sql: workspaceTrustSql },
 ]
 
 /** Brings the database schema up to the latest known version. */

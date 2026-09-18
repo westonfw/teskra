@@ -42,6 +42,7 @@ import { type InternalAppError, toPublicError } from '../errors'
 import { getLogger } from '../logger'
 import type { TeskraPaths } from '../paths'
 import type { PromptTemplateService } from '../prompts/prompt-template-service'
+import { trustedRepoRoot } from '../workspace/trust'
 
 /**
  * ReviewPanelService (TASK-060, teskra-tasks.md; plan §141/§142) — the Review
@@ -400,7 +401,15 @@ export function createReviewPanelService(deps: ReviewPanelServiceDeps): ReviewPa
         )
       }
       const taskRow = task.data
-      const repoRoot = workspace.data.path
+      // TASK-118: repo-local prompt overrides load only for trusted
+      // workspaces (code-review P0-3); restricted ones render the built-ins.
+      const repoRoot = trustedRepoRoot(workspace.data)
+      if (repoRoot === undefined) {
+        logger.warn(
+          { workspaceId: request.workspaceId },
+          'Workspace is restricted; repo-local prompt templates are not loaded.',
+        )
+      }
       for (const agentId of request.reviewers) {
         if (deps.registry.get(agentId) === undefined) {
           return invalid(

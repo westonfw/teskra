@@ -211,4 +211,56 @@ describe('WorkspaceRepository', () => {
     if (result.ok) return
     expect(result.error.code).toBe('VALIDATION_FAILED')
   })
+
+  // TASK-118 Workspace Trust (migration 015)
+  it('defaults a new workspace to the restricted trust level', () => {
+    setup()
+    const created = repo.create({
+      id: 'ws-1',
+      name: 'Demo',
+      runtime: { kind: 'windows' },
+      path: 'C:\\dev\\demo',
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    expect(created.data.trustLevel).toBe('restricted')
+    const row = connection
+      .prepare('SELECT trust_level FROM workspaces WHERE id = ?')
+      .get('ws-1') as { trust_level: string }
+    expect(row.trust_level).toBe('restricted')
+  })
+
+  it('round-trips an explicit trust level and updates it', () => {
+    setup()
+    const created = repo.create({
+      id: 'ws-1',
+      name: 'Demo',
+      runtime: { kind: 'windows' },
+      path: 'C:\\dev\\demo',
+      trustLevel: 'trusted',
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    expect(created.data.trustLevel).toBe('trusted')
+
+    const restricted = repo.update('ws-1', { trustLevel: 'restricted' })
+    expect(restricted.ok).toBe(true)
+    if (!restricted.ok) return
+    expect(restricted.data?.trustLevel).toBe('restricted')
+  })
+
+  it('returns VALIDATION_FAILED for an unknown trust_level in stored data', () => {
+    setup()
+    repo.create({ id: 'ws-1', name: 'Demo', runtime: { kind: 'windows' }, path: 'C:\\d' })
+    // The CHECK constraint guards writes; bypass it to simulate a row written
+    // before the constraint existed or via manual SQL on a rebuilt table.
+    connection.pragma('ignore_check_constraints = ON')
+    connection.prepare('UPDATE workspaces SET trust_level = ? WHERE id = ?').run('unsafe', 'ws-1')
+    connection.pragma('ignore_check_constraints = OFF')
+
+    const result = repo.getById('ws-1')
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('VALIDATION_FAILED')
+  })
 })

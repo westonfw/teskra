@@ -98,7 +98,12 @@ interface Fixture {
   readonly releaseWorktreeCreation: () => void
 }
 
-async function setup(gateWorktreeCreation = false): Promise<Fixture> {
+async function setup(
+  options: boolean | { gateWorktreeCreation?: boolean; restricted?: boolean } = false,
+): Promise<Fixture> {
+  const gateWorktreeCreation =
+    typeof options === 'boolean' ? options : (options.gateWorktreeCreation ?? false)
+  const restricted = typeof options === 'boolean' ? false : (options.restricted ?? false)
   const directory = mkdtempSync(join(tmpdir(), 'teskra-dispatch-'))
   directories.push(directory)
   const repoDir = join(directory, 'repo')
@@ -142,6 +147,9 @@ async function setup(gateWorktreeCreation = false): Promise<Fixture> {
       name: 'Dispatch fixture',
       runtime: { kind: 'wsl', distro: 'Ubuntu' },
       path: repoDir,
+      // TASK-118: repo-local prompt overrides load for trusted workspaces
+      // only; the fixture opts into trust unless a test exercises the gate.
+      trustLevel: restricted ? 'restricted' : 'trusted',
     },
     '2026-09-10T00:00:00.000Z',
   )
@@ -360,6 +368,32 @@ describe('DispatchService (TASK-059)', () => {
       type: 'implementation',
       parseStatus: 'ok',
     })
+  })
+
+  it('uses a repo-local prompt override when trusted, and ignores it when restricted (TASK-118)', async () => {
+    for (const restricted of [false, true]) {
+      const fixture = await setup({ restricted })
+      mkdirSync(join(fixture.repoDir, '.teskra', 'prompts'), { recursive: true })
+      writeFileSync(
+        join(fixture.repoDir, '.teskra', 'prompts', 'implement.md'),
+        'REPO-LOCAL-OVERRIDE {{task.title}}',
+      )
+
+      const dispatched = fixture.service.dispatch({
+        workspaceId: 'workspace-1',
+        taskId: 'task-1',
+        agent: 'fake',
+      })
+      const start = await awaitAdapterStart(fixture.adapters.fake)
+      finishRun(fixture, start.runId, 'fake')
+      requireOk(await dispatched)
+
+      if (restricted) {
+        expect(start.prompt).not.toContain('REPO-LOCAL-OVERRIDE')
+      } else {
+        expect(start.prompt).toContain('REPO-LOCAL-OVERRIDE')
+      }
+    }
   })
 
   it('honors the requested worktree isolation tier', async () => {

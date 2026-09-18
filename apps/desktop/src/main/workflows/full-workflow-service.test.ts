@@ -24,6 +24,7 @@ import type { WorkbenchEvents } from '@teskra/contracts'
 import { createTaskManager } from '../tasks/task-manager'
 import { createCriteriaGateStepExecutor } from './criteria-gate-step-executor'
 import {
+  DEFAULT_FULL_TEST_COMMAND,
   DEFAULT_FULL_WORKFLOW_ID,
   FULL_WORKFLOW_NODE_IDS,
   buildDefaultFullWorkflowDefinition,
@@ -100,6 +101,8 @@ function setup(options?: {
   review?: (round: number) => StepCompletion
   reviewers?: boolean
   overrideDefinition?: boolean
+  /** TASK-118: keep the fixture workspace restricted (default is trusted). */
+  restricted?: boolean
   /** Parks every agent step forever, so start() stays inside the loop. */
   hangAgent?: boolean
   /** Parks worktree creation behind a manual gate (dispose race tests). */
@@ -120,7 +123,15 @@ function setup(options?: {
   const events = createEventBus()
 
   const workspace = workspaces.create(
-    { id: 'ws-1', name: 'FW fixture', runtime: { kind: 'wsl', distro: 'Ubuntu' }, path: '/repo' },
+    {
+      id: 'ws-1',
+      name: 'FW fixture',
+      runtime: { kind: 'wsl', distro: 'Ubuntu' },
+      path: '/repo',
+      // TASK-118: repo-local overrides load for trusted workspaces only; the
+      // fixture opts into trust unless a test exercises the restricted gate.
+      trustLevel: options?.restricted === true ? 'restricted' : 'trusted',
+    },
     AT,
   )
   if (!workspace.ok) throw new Error(workspace.error.message)
@@ -465,10 +476,41 @@ describe('FullWorkflowService (TASK-063)', () => {
       (node) => node.id === FULL_WORKFLOW_NODE_IDS.testImplement,
     )
     expect(testNode?.type === 'shell' && testNode.command).toBe('make test')
+    // TASK-118: a repo-defined shell command is marked for user confirmation.
+    expect(testNode?.type === 'shell' && testNode.requireConfirmation).toBe(true)
     const reviewNode = detail.run.definition.steps.find(
       (node) => node.id === FULL_WORKFLOW_NODE_IDS.reviewImplement,
     )
     expect(reviewNode?.type === 'review-panel' && reviewNode.agents).toEqual(['fake-rev'])
+  })
+
+  it('ignores the repo-local full.yaml override for a restricted workspace (TASK-118)', async () => {
+    const fixture = setup({ overrideDefinition: true, restricted: true })
+    const started = await fixture.service.start({ workspaceId: 'ws-1', taskId: 'task-1' })
+    if (!started.ok) throw new Error(started.error.message)
+    expect(started.data.stopReason).toBe('passed')
+    // The registry defaults win; the repo's agent ids and command never load.
+    expect(fixture.worktreeCreates[0]?.agentId).toBe('codex')
+    const detail = getRun(fixture.store, started.data.run.id)
+    const testNode = detail.run.definition.steps.find(
+      (node) => node.id === FULL_WORKFLOW_NODE_IDS.testImplement,
+    )
+    if (testNode?.type !== 'shell') throw new Error('expected the shell test node')
+    expect(testNode.command).toBe(DEFAULT_FULL_TEST_COMMAND)
+    expect(testNode.requireConfirmation).toBeUndefined()
+  })
+
+  it('does not mark the built-in test command for confirmation (trusted, no repo override)', async () => {
+    const fixture = setup()
+    const started = await fixture.service.start({ workspaceId: 'ws-1', taskId: 'task-1' })
+    if (!started.ok) throw new Error(started.error.message)
+    const detail = getRun(fixture.store, started.data.run.id)
+    const testNode = detail.run.definition.steps.find(
+      (node) => node.id === FULL_WORKFLOW_NODE_IDS.testImplement,
+    )
+    if (testNode?.type !== 'shell') throw new Error('expected the shell test node')
+    expect(testNode.command).toBe(DEFAULT_FULL_TEST_COMMAND)
+    expect(testNode.requireConfirmation).toBeUndefined()
   })
 
   it('resolves the worktree-bound step context for shell steps', async () => {

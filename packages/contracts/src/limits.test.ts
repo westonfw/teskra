@@ -102,6 +102,7 @@ describe('IPC request payload bounds (P2-20)', () => {
       name: longText,
       runtime: { kind: 'wsl', distro: 'Ubuntu' },
       path: longText,
+      trustLevel: 'restricted',
       createdAt: '2026-09-12T00:00:00.000Z',
       updatedAt: '2026-09-12T00:00:00.000Z',
     })

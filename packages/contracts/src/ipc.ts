@@ -321,6 +321,7 @@ import {
   listRecentWorkspacesRequestSchema,
   openWorkspaceRequestSchema,
   selectWorkspaceDirectoryRequestSchema,
+  updateWorkspaceTrustRequestSchema,
   workspaceIdRequestSchema,
   workspaceSchema,
   workspaceValidationSchema,
@@ -328,6 +329,7 @@ import {
   type ListRecentWorkspacesRequest,
   type OpenWorkspaceRequest,
   type SelectWorkspaceDirectoryRequest,
+  type UpdateWorkspaceTrustRequest,
   type Workspace,
   type WorkspaceIdRequest,
   type WorkspaceValidationResult,
@@ -355,6 +357,7 @@ import {
   workflowRunIdRequestSchema,
   workflowRunSchema,
   workflowRunStartRequestSchema,
+  workflowShellConfirmationRequestSchema,
   workflowStepResolveRequestSchema,
   workflowStepSchema,
   type FullWorkflowRunSummary,
@@ -373,6 +376,7 @@ import {
   type WorkflowRunDetail,
   type WorkflowRunIdRequest,
   type WorkflowRunStartRequest,
+  type WorkflowShellConfirmationRequest,
   type WorkflowStep,
   type WorkflowStepResolveRequest,
 } from './workflow'
@@ -385,6 +389,7 @@ export const IPC_CHANNELS = {
   workspaceListRecent: 'teskra:workspace:list-recent',
   workspaceValidate: 'teskra:workspace:validate',
   workspaceSelectDirectory: 'teskra:workspace:select-directory',
+  workspaceUpdateTrust: 'teskra:workspace:update-trust',
   taskCreate: 'teskra:task:create',
   taskUpdate: 'teskra:task:update',
   taskArchive: 'teskra:task:archive',
@@ -511,6 +516,7 @@ export const IPC_CHANNELS = {
   workflowRunCancel: 'teskra:workflow:run:cancel',
   workflowRunComplete: 'teskra:workflow:run:complete',
   workflowStepResolve: 'teskra:workflow:step:resolve',
+  workflowShellConfirmation: 'teskra:workflow:shell:confirm',
   workflowDispatch: 'teskra:workflow:dispatch',
   workflowIterate: 'teskra:workflow:iterate',
   workflowStartFull: 'teskra:workflow:start-full',
@@ -571,6 +577,11 @@ export const workspaceSelectDirectoryChannel = channel(
   IPC_CHANNELS.workspaceSelectDirectory,
   selectWorkspaceDirectoryRequestSchema,
   z.string().nullable(),
+)
+export const workspaceUpdateTrustChannel = channel(
+  IPC_CHANNELS.workspaceUpdateTrust,
+  updateWorkspaceTrustRequestSchema,
+  workspaceSchema,
 )
 export const taskCreateChannel = channel(
   IPC_CHANNELS.taskCreate,
@@ -1211,6 +1222,11 @@ export const workflowStepResolveChannel = channel(
   workflowStepResolveRequestSchema,
   workflowStepSchema,
 )
+export const workflowShellConfirmationChannel = channel(
+  IPC_CHANNELS.workflowShellConfirmation,
+  workflowShellConfirmationRequestSchema,
+  z.boolean(),
+)
 export const workflowDispatchChannel = channel(
   IPC_CHANNELS.workflowDispatch,
   workflowDispatchRequestSchema,
@@ -1240,6 +1256,7 @@ export const ipcChannelDefinitions = {
   workspaceListRecent: workspaceListRecentChannel,
   workspaceValidate: workspaceValidateChannel,
   workspaceSelectDirectory: workspaceSelectDirectoryChannel,
+  workspaceUpdateTrust: workspaceUpdateTrustChannel,
   taskCreate: taskCreateChannel,
   taskUpdate: taskUpdateChannel,
   taskArchive: taskArchiveChannel,
@@ -1366,6 +1383,7 @@ export const ipcChannelDefinitions = {
   workflowRunCancel: workflowRunCancelChannel,
   workflowRunComplete: workflowRunCompleteChannel,
   workflowStepResolve: workflowStepResolveChannel,
+  workflowShellConfirmation: workflowShellConfirmationChannel,
   workflowDispatch: workflowDispatchChannel,
   workflowIterate: workflowIterateChannel,
   workflowStartFull: workflowStartFullChannel,
@@ -1383,6 +1401,8 @@ export interface TeskraBridge {
     listRecent(request?: ListRecentWorkspacesRequest): Promise<IpcResult<Workspace[]>>
     validate(request: OpenWorkspaceRequest): Promise<IpcResult<WorkspaceValidationResult>>
     selectDirectory(request: SelectWorkspaceDirectoryRequest): Promise<IpcResult<string | null>>
+    /** TASK-118: flips the workspace trust level (trusted ⇄ restricted). */
+    updateTrust(request: UpdateWorkspaceTrustRequest): Promise<IpcResult<Workspace>>
   }
   readonly terminal: {
     create(request: CreateTerminalRequest): Promise<IpcResult<TerminalSession>>
@@ -1595,6 +1615,11 @@ export interface TeskraBridge {
      */
     completeRun(request: WorkflowRunIdRequest): Promise<IpcResult<WorkflowRun>>
     resolveStep(request: WorkflowStepResolveRequest): Promise<IpcResult<WorkflowStep>>
+    /**
+     * TASK-118: approves or rejects a shell step parked on
+     * workflow.shell_confirmation_required (true = it was awaiting a decision).
+     */
+    confirmShellStep(request: WorkflowShellConfirmationRequest): Promise<IpcResult<boolean>>
     dispatch(request: WorkflowDispatchRequest): Promise<IpcResult<WorkflowDispatchResult>>
     iterate(request: WorkflowIterateRequest): Promise<IpcResult<WorkflowIterateResult>>
     startFullWorkflow(

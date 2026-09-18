@@ -27,6 +27,7 @@ import type { TeskraPaths } from '../paths'
 import type { PromptTemplateService } from '../prompts/prompt-template-service'
 import type { TaskManager } from '../tasks/task-manager'
 import type { WorkspaceRuntime } from '../workspace/runtime'
+import { trustedRepoRoot } from '../workspace/trust'
 import type { WorkflowEngine } from './workflow-engine'
 import type { WorkflowRunStore } from './workflow-run-store'
 
@@ -496,6 +497,15 @@ export function createIterationController(deps: IterationControllerDeps): Iterat
         }
         const runFiles = deps.paths.runFiles(agentRunId)
         if (!runFiles.ok) return runFiles
+        // TASK-118: repo-local prompt overrides load only for trusted
+        // workspaces; restricted ones render the built-in templates.
+        const promptRepoRoot = trustedRepoRoot(workspace.data)
+        if (promptRepoRoot === undefined) {
+          getLogger('runtime').warn(
+            { workspaceId: request.workspaceId },
+            'Workspace is restricted; repo-local prompt templates are not loaded.',
+          )
+        }
         const rendered = deps.promptTemplates.render(
           {
             name: isFirstRound ? 'implement' : 'fix',
@@ -510,7 +520,7 @@ export function createIterationController(deps: IterationControllerDeps): Iterat
               },
             },
           },
-          workspace.data.path,
+          promptRepoRoot,
         )
         if (!rendered.ok) return rendered
         prompt = rendered.data.content

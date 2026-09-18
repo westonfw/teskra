@@ -55,6 +55,8 @@ const SCHEMA: Record<string, TableSpec> = {
       ['last_opened_at', 'TEXT', 0, null, 0],
       ['created_at', 'TEXT', 1, null, 0],
       ['updated_at', 'TEXT', 1, null, 0],
+      // TASK-118 (migration 015): appended by ALTER TABLE, after updated_at.
+      ['trust_level', 'TEXT', 1, "'restricted'", 0],
     ],
     foreignKeys: [],
     indexes: [

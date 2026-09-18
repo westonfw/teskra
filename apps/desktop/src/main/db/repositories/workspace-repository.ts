@@ -6,8 +6,13 @@ import type {
   Workspace,
   WorkspaceEnvValue,
   WorkspaceRuntimeRef,
+  WorkspaceTrustLevel,
 } from '@teskra/contracts'
-import { workspaceEnvValueSchema, workspaceRuntimeRefSchema } from '@teskra/contracts'
+import {
+  workspaceEnvValueSchema,
+  workspaceRuntimeRefSchema,
+  workspaceTrustLevelSchema,
+} from '@teskra/contracts'
 
 import {
   decodeJson,
@@ -42,6 +47,7 @@ const workspaceRowSchema = z.strictObject({
   gitRoot: z.string().optional(),
   defaultBranch: z.string().optional(),
   env: z.record(z.string(), workspaceEnvValueSchema).optional(),
+  trustLevel: workspaceTrustLevelSchema,
   lastOpenedAt: isoTimestampSchema.optional(),
   createdAt: isoTimestampSchema,
   updatedAt: isoTimestampSchema,
@@ -58,6 +64,7 @@ interface WorkspaceRow {
   git_root: string | null
   default_branch: string | null
   env_json: string | null
+  trust_level: string
   last_opened_at: string | null
   created_at: string
   updated_at: string
@@ -71,6 +78,8 @@ export interface CreateWorkspaceInput {
   readonly gitRoot?: string | undefined
   readonly defaultBranch?: string | undefined
   readonly env?: Record<string, WorkspaceEnvValue> | undefined
+  /** Defaults to 'restricted' (migration 015 column default) when omitted. */
+  readonly trustLevel?: WorkspaceTrustLevel | undefined
   readonly lastOpenedAt?: string | undefined
 }
 
@@ -82,6 +91,7 @@ export interface UpdateWorkspaceInput {
   readonly gitRoot?: string | null
   readonly defaultBranch?: string | null
   readonly env?: Record<string, WorkspaceEnvValue> | null
+  readonly trustLevel?: WorkspaceTrustLevel
   readonly lastOpenedAt?: string | null
 }
 
@@ -125,6 +135,7 @@ function toDomain(row: WorkspaceRow): IpcResult<Workspace> {
     gitRoot: row.git_root ?? undefined,
     defaultBranch: row.default_branch ?? undefined,
     env: env.data,
+    trustLevel: row.trust_level,
     lastOpenedAt: row.last_opened_at ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -140,8 +151,8 @@ export function createWorkspaceRepository(connection: Database.Database): Worksp
       const inserted = execute(ENTITY, 'create', () => {
         connection
           .prepare(
-            `INSERT INTO workspaces (id, name, runtime_kind, wsl_distro, ssh_host, container_id, path, git_root, default_branch, env_json, last_opened_at, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO workspaces (id, name, runtime_kind, wsl_distro, ssh_host, container_id, path, git_root, default_branch, env_json, trust_level, last_opened_at, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             input.id,
@@ -154,6 +165,7 @@ export function createWorkspaceRepository(connection: Database.Database): Worksp
             input.gitRoot ?? null,
             input.defaultBranch ?? null,
             encodeJson(input.env),
+            input.trustLevel ?? 'restricted',
             input.lastOpenedAt ?? null,
             now,
             now,
@@ -225,6 +237,10 @@ export function createWorkspaceRepository(connection: Database.Database): Worksp
       if (patch.env !== undefined) {
         sets.push('env_json = ?')
         values.push(patch.env === null ? null : encodeJson(patch.env))
+      }
+      if (patch.trustLevel !== undefined) {
+        sets.push('trust_level = ?')
+        values.push(patch.trustLevel)
       }
       if (patch.lastOpenedAt !== undefined) {
         sets.push('last_opened_at = ?')

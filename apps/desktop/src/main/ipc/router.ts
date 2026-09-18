@@ -107,6 +107,10 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.workspace.selectDirectory(request)),
   )
   register(
+    ipcChannelDefinitions.workspaceUpdateTrust,
+    withRuntime((runtime, request) => runtime.workspace.updateTrust(request)),
+  )
+  register(
     ipcChannelDefinitions.taskCreate,
     withRuntime((runtime, request) => runtime.task.create(request)),
   )
@@ -587,6 +591,10 @@ export function registerIpcRouter(
   register(
     ipcChannelDefinitions.workflowStepResolve,
     withRuntime((runtime, request) => runtime.workflow.resolveStep(request)),
+  )
+  register(
+    ipcChannelDefinitions.workflowShellConfirmation,
+    withRuntime((runtime, request) => runtime.workflow.confirmShellStep(request)),
   )
   register(
     ipcChannelDefinitions.workflowDispatch,

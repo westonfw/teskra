@@ -182,6 +182,20 @@ export const enUS = {
   'workspace.removeConfirm.body': 'The project files will not be deleted.',
   'workspace.remove': 'Remove workspace',
 
+  'workspace.trust.trusted': 'Trusted',
+  'workspace.trust.restricted': 'Restricted',
+  'workspace.trust.action.trust': 'Trust workspace',
+  'workspace.trust.action.restrict': 'Restrict workspace',
+  'workspace.trust.confirmTrust.title': 'Trust this workspace?',
+  'workspace.trust.confirmTrust.body':
+    'Repo-local workflows, prompts, and config can define executable commands and will load once trusted. Only trust repositories whose content you control or have reviewed.',
+  'workspace.trust.confirmRestrict.title': 'Restrict this workspace?',
+  'workspace.trust.confirmRestrict.body':
+    'Repo-local workflows, prompts, and config stop loading immediately.',
+  'workspace.trust.restrictedBanner.title': 'Restricted workspace',
+  'workspace.trust.restrictedBanner.body':
+    'Repo-local workflows, prompts, and config are not loaded. Trust the workspace to enable them.',
+
   'workspace.dialog.title': 'Open workspace',
   'workspace.dialog.environment': 'Environment',
   'workspace.dialog.windows': 'Windows',
@@ -435,6 +449,12 @@ export const enUS = {
   'workflow.passed.description':
     'Review the diff and the criteria result below, then merge or adjust the task.',
   'workflow.failed': 'The workflow run failed.',
+  'workflow.shellConfirm.title': 'Run this repo-defined command?',
+  'workflow.shellConfirm.body':
+    'A workflow defined by this repository wants to execute the following command. It runs with your user permissions — review the full command line before approving.',
+  'workflow.shellConfirm.cwd': 'Working directory: {cwd}',
+  'workflow.shellConfirm.approve': 'Run once',
+  'workflow.shellConfirm.reject': 'Reject',
   'workflow.steps': 'Steps',
   'workflow.worktreeLine': 'Worktree {branch} (base {base})',
   'workflow.criteriaResult': 'Criteria result',

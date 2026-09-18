@@ -147,6 +147,18 @@ export interface WorkbenchEvents {
     nodeId: string
     status: WorkflowStepStatus
   }
+  /**
+   * TASK-118: a shell step whose command came from repo-controlled content is
+   * parked until the user confirms the full command line
+   * (WorkflowPort.confirmShellStep).
+   */
+  'workflow.shell_confirmation_required': {
+    runId: string
+    stepId: string
+    nodeId: string
+    command: string
+    cwd: string
+  }
 
   /** TASK-060: a Review Panel was created or converged (running / completed / failed). */
   'review.panel_updated': {
@@ -222,6 +234,7 @@ export const WORKBENCH_EVENT_NAMES = [
   'permission.audit_recorded',
   'workflow.run_updated',
   'workflow.step_updated',
+  'workflow.shell_confirmation_required',
   'review.panel_updated',
   'account.created',
   'account.updated',

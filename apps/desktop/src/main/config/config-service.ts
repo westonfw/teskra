@@ -454,6 +454,18 @@ export function createConfigService(deps: ConfigServiceDeps): ConfigService {
               layer: 'workspace',
               message: `Unknown workspace "${options.workspaceId}"; skipping the workspace config layer.`,
             })
+          } else if (workspace.data.trustLevel !== 'trusted') {
+            // TASK-118 (code-review P0-3): the repo-local config layer is
+            // repo-controlled content; it only loads for trusted workspaces.
+            report(
+              warnings,
+              {
+                layer: 'workspace',
+                message:
+                  'The workspace is restricted; the repo-local config layer was not loaded (trust the workspace to enable it).',
+              },
+              { workspaceId: options.workspaceId },
+            )
           } else {
             const layer = loadLayerFile(
               'workspace',

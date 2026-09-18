@@ -35,6 +35,7 @@ const request: AgentStartRequest = {
     name: 'Demo',
     runtime: runtime.ref,
     path: '/repo',
+    trustLevel: 'trusted',
     createdAt: '2026-09-10T00:00:00.000Z',
     updatedAt: '2026-09-10T00:00:00.000Z',
   },

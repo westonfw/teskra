@@ -76,7 +76,10 @@ describe('migration 014 (TASK-110)', () => {
     insertAccountProfile(db)
 
     const upgraded = migrateDatabase(db)
-    expect(upgraded).toEqual({ ok: true, data: { fromVersion: 13, toVersion: 14, applied: [14] } })
+    expect(upgraded).toEqual({
+      ok: true,
+      data: { fromVersion: 13, toVersion: 15, applied: [14, 15] },
+    })
     expect(
       db
         .prepare(
@@ -92,7 +95,7 @@ describe('migration 014 (TASK-110)', () => {
     const db = migratedDb()
     expect(migrateDatabase(db)).toEqual({
       ok: true,
-      data: { fromVersion: 14, toVersion: 14, applied: [] },
+      data: { fromVersion: 15, toVersion: 15, applied: [] },
     })
   })
 

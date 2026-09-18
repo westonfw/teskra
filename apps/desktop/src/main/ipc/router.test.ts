@@ -47,6 +47,7 @@ const WORKSPACE: Workspace = {
   name: 'Demo',
   runtime: { kind: 'wsl', distro: 'Ubuntu' },
   path: '/repo',
+  trustLevel: 'trusted',
   createdAt: '2026-09-10T00:00:00.000Z',
   updatedAt: '2026-09-10T00:00:00.000Z',
 }
@@ -187,6 +188,7 @@ function fakeRuntime(): TeskraRuntime {
       listRecent: vi.fn(() => ok([WORKSPACE])),
       validate: vi.fn(() => ok({ exists: true })),
       selectDirectory: vi.fn(async () => ok('/repo')),
+      updateTrust: vi.fn(() => ok(WORKSPACE)),
     },
     task: {
       create: vi.fn(() => ok(TASK)),
@@ -511,6 +513,7 @@ function fakeRuntime(): TeskraRuntime {
       cancelRun: vi.fn(async () => ok({ ...WORKFLOW_RUN, status: 'cancelled' as const })),
       completeRun: vi.fn(async () => ok({ ...WORKFLOW_RUN, status: 'completed' as const })),
       resolveStep: vi.fn(() => ok(WORKFLOW_STEP)),
+      confirmShellStep: vi.fn(() => ok(true)),
       dispatch: vi.fn(async () => ok(DISPATCH_RESULT)),
       iterate: vi.fn(async () =>
         ok({ run: WORKFLOW_RUN, rounds: 1, stopReason: 'passed' as const }),

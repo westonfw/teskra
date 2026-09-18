@@ -86,6 +86,7 @@ import { createDispatchService } from '../workflows/dispatch-service'
 import { createFullWorkflowService } from '../workflows/full-workflow-service'
 import { createIterationController } from '../workflows/iteration-controller'
 import { createReviewPanelStepExecutor } from '../workflows/review-panel-step-executor'
+import { createShellConfirmationService } from '../workflows/shell-confirmation'
 import { createShellStepExecutor } from '../workflows/shell-step-executor'
 import { createWorkflowEngine } from '../workflows/workflow-engine'
 import { createWorkflowRunStore } from '../workflows/workflow-run-store'
@@ -94,6 +95,7 @@ import {
   type WorkspaceRuntime,
   type WslEnvironmentInfo,
 } from '../workspace/runtime'
+import { trustedRepoRoot } from '../workspace/trust'
 import { createWorkspaceManager } from '../workspace/workspace-manager'
 import { createWslManager } from '../workspace/wsl-manager'
 import type { TeskraRuntime } from './facade'
@@ -246,8 +248,12 @@ export async function composeTeskraRuntime(
     workflowRuns: repositories.workflowRuns,
     tasks: repositories.tasks,
   })
-  /** Maps a Facade workspaceId to its repo path for repo-local overrides. */
-  const repoRootFor = (workspaceId?: string): IpcResult<string | undefined> => {
+  /**
+   * TASK-118 (code-review P0-3): repo root handed to repo-local loaders
+   * (workflows / prompts); a restricted workspace gets undefined so only
+   * built-in / global content loads. Every skip is security-logged.
+   */
+  const trustedRepoRootFor = (workspaceId?: string): IpcResult<string | undefined> => {
     if (workspaceId === undefined) {
       return { ok: true, data: undefined }
     }
@@ -265,7 +271,14 @@ export async function composeTeskraRuntime(
         },
       }
     }
-    return { ok: true, data: workspace.data.path }
+    const trusted = trustedRepoRoot(workspace.data)
+    if (trusted === undefined) {
+      getLogger('security').warn(
+        { workspaceId },
+        'Workspace is restricted; repo-local content is not loaded.',
+      )
+    }
+    return { ok: true, data: trusted }
   }
   const criteriaManager = createCriteriaManager({
     criteria: repositories.criteria,
@@ -630,12 +643,19 @@ export async function composeTeskraRuntime(
   // generic engine keeps criteria-gate nodes suspended for external
   // resolveStep, while the full workflow needs them auto-evaluated, plus the
   // TASK-058 shell executor for its Build/Test steps.
+  // TASK-118: repo-defined shell commands only execute after the user
+  // confirms the full command line (workflow.shell_confirmation_required).
+  const shellConfirmation = createShellConfirmationService({ events })
   const fullWorkflowEngine = createWorkflowEngine({
     runs: workflowRunStore,
     events,
     agentManager,
     executors: {
-      shell: createShellStepExecutor({ commands, artifacts: artifactStore }),
+      shell: createShellStepExecutor({
+        commands,
+        artifacts: artifactStore,
+        confirmation: shellConfirmation,
+      }),
       'review-panel': createReviewPanelStepExecutor({ panel: reviewPanelService, events }),
       'criteria-gate': createCriteriaGateStepExecutor({
         reviews: repositories.reviews,
@@ -834,11 +854,11 @@ export async function composeTeskraRuntime(
     },
     prompts: {
       list: (request = {}) => {
-        const repoRoot = repoRootFor(request.workspaceId)
+        const repoRoot = trustedRepoRootFor(request.workspaceId)
         return repoRoot.ok ? promptTemplates.listTemplates(repoRoot.data) : repoRoot
       },
       render: (request) => {
-        const repoRoot = repoRootFor(request.workspaceId)
+        const repoRoot = trustedRepoRootFor(request.workspaceId)
         return repoRoot.ok
           ? promptTemplates.render({ name: request.name, context: request.context }, repoRoot.data)
           : repoRoot
@@ -846,15 +866,27 @@ export async function composeTeskraRuntime(
     },
     workflow: {
       listDefinitions: (request) => {
-        const repoRoot = repoRootFor(request.workspaceId)
+        const repoRoot = trustedRepoRootFor(request.workspaceId)
         if (!repoRoot.ok) return repoRoot
-        // request.workspaceId is required, so repoRootFor resolved a path.
-        return workflowDefinitions.list(repoRoot.data as string)
+        // TASK-118: a restricted workspace exposes no repo-local definitions.
+        if (repoRoot.data === undefined) return { ok: true, data: [] }
+        return workflowDefinitions.list(repoRoot.data)
       },
       loadDefinition: (request) => {
-        const repoRoot = repoRootFor(request.workspaceId)
+        const repoRoot = trustedRepoRootFor(request.workspaceId)
         if (!repoRoot.ok) return repoRoot
-        return workflowDefinitions.load(repoRoot.data as string, request.definitionId)
+        if (repoRoot.data === undefined) {
+          return {
+            ok: false,
+            error: {
+              code: 'VALIDATION_FAILED' as const,
+              message:
+                'The workspace is restricted; repo-local workflow definitions are not loaded.',
+              retryable: false as const,
+            },
+          }
+        }
+        return workflowDefinitions.load(repoRoot.data, request.definitionId)
       },
       listRuns: (request = {}) => workflowRunStore.listRuns(request),
       getRun: ({ runId }) => workflowRunStore.getRun(runId),
@@ -876,6 +908,7 @@ export async function composeTeskraRuntime(
           ...(outcome === undefined ? {} : { outcome }),
           ...(result === undefined ? {} : { result }),
         }),
+      confirmShellStep: ({ stepId, approved }) => shellConfirmation.resolve(stepId, approved),
       dispatch: (request) => dispatchService.dispatch(request),
       iterate: (request) => iterationController.iterate(request),
       startFullWorkflow: (request) => fullWorkflow.start(request),
@@ -964,6 +997,7 @@ export async function composeTeskraRuntime(
       remove: ({ id }) => workspaceManager.remove(id),
       listRecent: (request = {}) => workspaceManager.listRecent(request.limit),
       validate: (request) => workspaceManager.validate(request),
+      updateTrust: ({ id, trustLevel }) => workspaceManager.setTrustLevel(id, trustLevel),
       selectDirectory: async () => {
         if (options.selectDirectory === undefined) {
           return {
@@ -1116,6 +1150,9 @@ export async function composeTeskraRuntime(
       await dispatchService.dispose()
       await iterationController.dispose()
       await fullWorkflow.dispose()
+      // TASK-118: reject any shell confirmation still parked after the engine
+      // cancels above, so its execute() promise can settle.
+      shellConfirmation.dispose()
       permissionManager.dispose()
       // P0-2: stop every child process before the EventBus is cleared and the
       // database closes — Agent runs first (their exit path settles terminal

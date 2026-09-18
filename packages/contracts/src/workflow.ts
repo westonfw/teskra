@@ -93,6 +93,12 @@ export const shellWorkflowNodeSchema = z.strictObject({
   type: z.literal('shell'),
   command: z.string().min(1),
   timeoutMs: z.number().int().positive().optional(),
+  /**
+   * TASK-118 (code-review P0-3): set when the command originates from
+   * repo-controlled content. The shell executor shows the full command line
+   * to the user and only executes after an explicit confirmation.
+   */
+  requireConfirmation: z.boolean().optional(),
 })
 export type ShellWorkflowNode = z.infer<typeof shellWorkflowNodeSchema>
 
@@ -284,6 +290,18 @@ export const workflowStepResolveRequestSchema = z.strictObject({
   result: z.record(z.string(), z.unknown()).optional(),
 })
 export type WorkflowStepResolveRequest = z.infer<typeof workflowStepResolveRequestSchema>
+
+/**
+ * TASK-118: user decision for a shell step parked on
+ * `workflow.shell_confirmation_required` (approved = execute, else reject).
+ */
+export const workflowShellConfirmationRequestSchema = z.strictObject({
+  stepId: ipcIdSchema,
+  approved: z.boolean(),
+})
+export type WorkflowShellConfirmationRequest = z.infer<
+  typeof workflowShellConfirmationRequestSchema
+>
 
 /**
  * TASK-062 Iterate Safety Cap (plan §124): two independent round limits.

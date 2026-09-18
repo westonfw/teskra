@@ -21,6 +21,7 @@ import { getLogger } from '../logger'
 import type { ContextBuilder } from '../memory/context-builder'
 import type { TeskraPaths } from '../paths'
 import type { PromptTemplateService } from '../prompts/prompt-template-service'
+import { trustedRepoRoot } from '../workspace/trust'
 import type { WorkflowEngine } from './workflow-engine'
 import type { WorkflowRunStore } from './workflow-run-store'
 
@@ -258,6 +259,15 @@ export function createDispatchService(deps: DispatchServiceDeps): DispatchServic
           memory = built.data.content
         }
       }
+      // TASK-118: repo-local prompt overrides load only for trusted
+      // workspaces (code-review P0-3); restricted ones render the built-ins.
+      const promptRepoRoot = trustedRepoRoot(workspace.data)
+      if (promptRepoRoot === undefined) {
+        logger.warn(
+          { workspaceId: request.workspaceId },
+          'Workspace is restricted; repo-local prompt templates are not loaded.',
+        )
+      }
       const rendered = deps.promptTemplates.render(
         {
           name: 'implement',
@@ -275,7 +285,7 @@ export function createDispatchService(deps: DispatchServiceDeps): DispatchServic
             },
           },
         },
-        workspace.data.path,
+        promptRepoRoot,
       )
       if (!rendered.ok) {
         discardWorktree()

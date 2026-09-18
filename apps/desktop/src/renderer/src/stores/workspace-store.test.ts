@@ -8,6 +8,7 @@ const FIRST: Workspace = {
   name: 'Teskra',
   runtime: { kind: 'wsl', distro: 'Ubuntu' },
   path: '/repo/teskra',
+  trustLevel: 'trusted',
   createdAt: '2026-09-10T00:00:00.000Z',
   updatedAt: '2026-09-10T00:00:00.000Z',
 }
@@ -26,6 +27,10 @@ function bridge(): WorkspaceStoreBridge {
       remove: vi.fn(async () => ({ ok: true as const, data: true })),
       listRecent: vi.fn(async () => ({ ok: true as const, data: [SECOND, FIRST] })),
       selectDirectory: vi.fn(async () => ({ ok: true as const, data: 'C:\\repo\\desktop' })),
+      updateTrust: vi.fn(async (request: { id: string; trustLevel: Workspace['trustLevel'] }) => ({
+        ok: true as const,
+        data: { ...FIRST, trustLevel: request.trustLevel },
+      })),
     },
   }
 }
@@ -51,5 +56,20 @@ describe('workspace store', () => {
     expect(await store.getState().removeWorkspace(SECOND.id)).toBe(true)
     expect(store.getState().current?.id).toBe(FIRST.id)
     expect(store.getState().recent).toEqual([FIRST])
+  })
+
+  it('flips the trust level and refreshes the workspace in place (TASK-118)', async () => {
+    const api = bridge()
+    const store = createWorkspaceStore(() => api)
+    await store.getState().loadRecent()
+    store.getState().selectWorkspace(FIRST.id)
+
+    expect(await store.getState().setTrustLevel(FIRST.id, 'restricted')).toBe(true)
+    expect(api.workspace.updateTrust).toHaveBeenCalledWith({
+      id: FIRST.id,
+      trustLevel: 'restricted',
+    })
+    expect(store.getState().current?.trustLevel).toBe('restricted')
+    expect(store.getState().recent.find(({ id }) => id === FIRST.id)?.trustLevel).toBe('restricted')
   })
 })

@@ -2,6 +2,7 @@ import type {
   IpcResult,
   OpenWorkspaceRequest,
   PublicAppError,
+  UpdateWorkspaceTrustRequest,
   Workspace,
   WorkspaceRuntimeRef,
 } from '@teskra/contracts'
@@ -14,6 +15,7 @@ export interface WorkspaceStoreBridge {
     remove(request: { id: string }): Promise<IpcResult<boolean>>
     listRecent(request?: { limit?: number }): Promise<IpcResult<Workspace[]>>
     selectDirectory(request: { runtime: WorkspaceRuntimeRef }): Promise<IpcResult<string | null>>
+    updateTrust(request: UpdateWorkspaceTrustRequest): Promise<IpcResult<Workspace>>
   }
 }
 
@@ -27,6 +29,8 @@ interface WorkspaceState {
   removeWorkspace(id: string): Promise<boolean>
   selectWorkspace(id: string): void
   selectDirectory(runtime: WorkspaceRuntimeRef): Promise<string | null>
+  /** TASK-118: flips the workspace trust level and refreshes it in the list. */
+  setTrustLevel(id: string, trustLevel: Workspace['trustLevel']): Promise<boolean>
   clearError(): void
 }
 
@@ -115,6 +119,25 @@ export function createWorkspaceStore(getBridge: () => WorkspaceStoreBridge) {
       } catch {
         set({ error: transportError() })
         return null
+      }
+    },
+
+    async setTrustLevel(id, trustLevel) {
+      set({ error: undefined })
+      try {
+        const result = await getBridge().workspace.updateTrust({ id, trustLevel })
+        if (!result.ok) {
+          set({ error: result.error })
+          return false
+        }
+        set((state) => ({
+          recent: state.recent.map((workspace) => (workspace.id === id ? result.data : workspace)),
+          current: state.current?.id === id ? result.data : state.current,
+        }))
+        return true
+      } catch {
+        set({ error: transportError() })
+        return false
       }
     },
 

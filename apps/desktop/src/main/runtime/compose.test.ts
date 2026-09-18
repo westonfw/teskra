@@ -241,6 +241,12 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       path: repo,
     })
     if (!workspace.ok) throw new Error('expected workspace')
+    // TASK-118: the workspace config layer only loads for trusted workspaces.
+    const trusted = composed.data.workspace.updateTrust({
+      id: workspace.data.id,
+      trustLevel: 'trusted',
+    })
+    if (!trusted.ok) throw new Error('expected trust update')
 
     const global = composed.data.settings.updateConfig({
       layer: 'global',
@@ -548,6 +554,12 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       path: repo,
     })
     if (!workspace.ok) throw new Error('expected workspace')
+    // TASK-118: repo-local prompt overrides load for trusted workspaces only.
+    const trusted = runtime.workspace.updateTrust({
+      id: workspace.data.id,
+      trustLevel: 'trusted',
+    })
+    if (!trusted.ok) throw new Error('expected trust update')
     mkdirSync(paths.repoPromptsDir(repo), { recursive: true })
     writeFileSync(join(paths.repoPromptsDir(repo), 'implement.md'), 'OVERRIDE: {{task.title}}')
 

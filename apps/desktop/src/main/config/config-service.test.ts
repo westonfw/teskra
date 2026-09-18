@@ -77,6 +77,7 @@ function stubWorkspace(id: string): Workspace {
     name: 'demo',
     runtime: { kind: 'wsl', distro: 'Ubuntu' },
     path: REPO_ROOT,
+    trustLevel: 'trusted',
     createdAt: '2026-09-09T00:00:00.000Z',
     updatedAt: '2026-09-09T00:00:00.000Z',
   }
@@ -375,6 +376,79 @@ describe('ConfigService — global-only groups (P0-3)', () => {
     })
     expect(result).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
     expect(writes).toEqual([])
+  })
+})
+
+describe('ConfigService — workspace trust gate (TASK-118)', () => {
+  const restrictedWorkspace: Workspace = { ...stubWorkspace('ws1'), trustLevel: 'restricted' }
+  const restrictedDeps = (
+    files: Record<string, string>,
+    overrides: Partial<ConfigServiceDeps> = {},
+  ): ConfigServiceDeps =>
+    makeDeps(files, {
+      workspaces: {
+        getById: (id) => ({ ok: true, data: id === 'ws1' ? restrictedWorkspace : null }),
+      },
+      ...overrides,
+    })
+
+  it('skips the whole workspace layer for a restricted workspace, with a warning', () => {
+    const service = createConfigService(
+      restrictedDeps({
+        [`${REPO_ROOT}/.teskra/config.json`]: JSON.stringify({
+          concurrency: { maxGlobalRuns: 6 },
+        }),
+      }),
+    )
+    const resolved = service.resolve({ workspaceId: 'ws1' })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.data.warnings).toHaveLength(1)
+    expect(resolved.data.warnings[0]?.message).toContain('restricted')
+    // The repo-local value never applies; the default wins.
+    expect(resolved.data.config.concurrency.maxGlobalRuns).toBe(
+      DEFAULT_CONFIG.concurrency.maxGlobalRuns,
+    )
+    expect(resolved.data.sources['concurrency.maxGlobalRuns']).toBe('default')
+  })
+
+  it('keeps the global layer fully effective for a restricted workspace', () => {
+    const service = createConfigService(
+      restrictedDeps({
+        [GLOBAL_CONFIG_PATH]: JSON.stringify({
+          agents: { executableOverrides: { 'codex:wsl': '/usr/local/bin/codex' } },
+        }),
+        [`${REPO_ROOT}/.teskra/config.json`]: JSON.stringify({
+          agents: { executableOverrides: { 'codex:wsl': '/evil/codex' } },
+          concurrency: { maxGlobalRuns: 6 },
+        }),
+      }),
+    )
+    const resolved = service.resolve({ workspaceId: 'ws1' })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.data.config.agents.executableOverrides).toEqual({
+      'codex:wsl': '/usr/local/bin/codex',
+    })
+    expect(resolved.data.config.concurrency.maxGlobalRuns).toBe(
+      DEFAULT_CONFIG.concurrency.maxGlobalRuns,
+    )
+  })
+
+  it('loads the workspace layer unchanged for a trusted workspace', () => {
+    const service = createConfigService(
+      makeDeps({
+        [`${REPO_ROOT}/.teskra/config.json`]: JSON.stringify({
+          concurrency: { maxGlobalRuns: 6 },
+        }),
+      }),
+    )
+    const resolved = service.resolve({ workspaceId: 'ws1' })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    expect(resolved.data.warnings).toEqual([])
+    expect(resolved.data.config.concurrency.maxGlobalRuns).toBe(6)
+    expect(resolved.data.sources['concurrency.maxGlobalRuns']).toBe('workspace')
   })
 })
 

@@ -237,6 +237,33 @@ describe('WorkspaceManager.remove / listRecent', () => {
   })
 })
 
+describe('WorkspaceManager.setTrustLevel (TASK-118)', () => {
+  it('creates workspaces as restricted by default and flips the level', () => {
+    const created = manager.create({
+      name: 'Demo',
+      runtime: { kind: 'wsl', distro: 'Ubuntu-24.04' },
+      path: '/home/user/demo',
+    })
+    if (!created.ok) throw new Error('create should succeed')
+    expect(created.data.trustLevel).toBe('restricted')
+
+    const trusted = manager.setTrustLevel(created.data.id, 'trusted')
+    expect(trusted.ok).toBe(true)
+    if (!trusted.ok) return
+    expect(trusted.data.trustLevel).toBe('trusted')
+
+    const restricted = manager.setTrustLevel(created.data.id, 'restricted')
+    expect(restricted.ok).toBe(true)
+    if (!restricted.ok) return
+    expect(restricted.data.trustLevel).toBe('restricted')
+  })
+
+  it('reports WORKSPACE_NOT_FOUND for an unknown id', () => {
+    const result = manager.setTrustLevel('nope', 'trusted')
+    expect(result).toMatchObject({ ok: false, error: { code: 'WORKSPACE_NOT_FOUND' } })
+  })
+})
+
 /** Deterministic stand-in for safeStorage: reversibly "encrypts" via base64. */
 function mockCipher(available = true): CredentialCipher {
   return {

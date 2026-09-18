@@ -31,6 +31,7 @@ import { useWorkspaceStore } from '../stores/workspace-store'
 import { TerminalKeepAliveHost } from '../terminal/terminal-keep-alive-host'
 import { THEME_MODES, useThemeStore, type ThemeMode } from '../theme/theme-store'
 import { WorkspacePage } from '../workspace/workspace-page'
+import { ShellConfirmationHost } from '../workflows/shell-confirmation-host'
 
 const navigation = [
   { key: 'home', labelKey: 'nav.home', icon: <HomeOutlined /> },
@@ -199,6 +200,7 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
             <TerminalKeepAliveHost workspace={workspace} visible={page === 'terminal'} />
           )}
         </main>
+        <ShellConfirmationHost />
       </Layout>
     </Layout>
   )

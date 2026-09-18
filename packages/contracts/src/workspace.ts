@@ -32,6 +32,18 @@ export type WorkspaceSecretRef = z.infer<typeof workspaceSecretRefSchema>
 export const workspaceEnvValueSchema = z.union([z.string(), workspaceSecretRefSchema])
 export type WorkspaceEnvValue = z.infer<typeof workspaceEnvValueSchema>
 
+/**
+ * TASK-118 Workspace Trust (design doc §43, code-review P0-3). Repo-local
+ * content (`<repo>/.teskra/` workflows / prompts / config) can carry
+ * executable commands, so it only loads for workspaces the user explicitly
+ * trusted. Everything else stays `restricted` — the safe default, mirroring
+ * VS Code Workspace Trust.
+ */
+export const WORKSPACE_TRUST_LEVELS = ['trusted', 'restricted'] as const
+export const workspaceTrustLevelSchema = z.enum(WORKSPACE_TRUST_LEVELS)
+export type WorkspaceTrustLevel = z.infer<typeof workspaceTrustLevelSchema>
+export const DEFAULT_WORKSPACE_TRUST_LEVEL: WorkspaceTrustLevel = 'restricted'
+
 export function isWorkspaceSecretRef(value: WorkspaceEnvValue): value is WorkspaceSecretRef {
   return typeof value !== 'string'
 }
@@ -46,6 +58,7 @@ export const workspaceSchema = z.strictObject({
   defaultBranch: z.string().optional(),
   /** Non-sensitive values are plain strings; secrets are Credential Store refs. */
   env: z.record(z.string(), workspaceEnvValueSchema).optional(),
+  trustLevel: workspaceTrustLevelSchema,
   lastOpenedAt: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -75,6 +88,13 @@ export type OpenWorkspaceRequest = z.infer<typeof openWorkspaceRequestSchema>
 
 export const workspaceIdRequestSchema = z.strictObject({ id: ipcIdSchema })
 export type WorkspaceIdRequest = z.infer<typeof workspaceIdRequestSchema>
+
+/** TASK-118: flips the workspace trust level (WorkspacePort.updateTrust). */
+export const updateWorkspaceTrustRequestSchema = z.strictObject({
+  id: ipcIdSchema,
+  trustLevel: workspaceTrustLevelSchema,
+})
+export type UpdateWorkspaceTrustRequest = z.infer<typeof updateWorkspaceTrustRequestSchema>
 
 export const listRecentWorkspacesRequestSchema = z.strictObject({
   limit: z.number().int().positive().max(100).optional(),

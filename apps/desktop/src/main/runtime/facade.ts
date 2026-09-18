@@ -138,6 +138,7 @@ import type {
   UpdateMemoryRequest,
   UpdatePermissionRuleRequest,
   UpdateTaskRequest,
+  UpdateWorkspaceTrustRequest,
   Workspace,
   WorkspaceIdRequest,
   WorkspaceValidationResult,
@@ -151,6 +152,7 @@ import type {
   WorkflowRunDetail,
   WorkflowRunIdRequest,
   WorkflowRunStartRequest,
+  WorkflowShellConfirmationRequest,
   WorkflowStep,
   WorkflowStepResolveRequest,
   WriteAccountLoginRequest,
@@ -217,6 +219,8 @@ export interface WorkspacePort {
   listRecent(request?: ListRecentWorkspacesRequest): IpcResult<Workspace[]>
   validate(request: OpenWorkspaceRequest): IpcResult<WorkspaceValidationResult>
   selectDirectory(request: SelectWorkspaceDirectoryRequest): Promise<IpcResult<string | null>>
+  /** TASK-118: flips the workspace trust level (explicit user decision). */
+  updateTrust(request: UpdateWorkspaceTrustRequest): IpcResult<Workspace>
 }
 
 export interface TerminalPort {
@@ -423,6 +427,11 @@ export interface WorkflowPort {
   /** User-accepts a run parked at needs_user_review, closing it as 'completed'. */
   completeRun(request: WorkflowRunIdRequest): Promise<IpcResult<WorkflowRun>>
   resolveStep(request: WorkflowStepResolveRequest): IpcResult<WorkflowStep>
+  /**
+   * TASK-118: user decision for a shell step parked on
+   * workflow.shell_confirmation_required; true = it was awaiting a decision.
+   */
+  confirmShellStep(request: WorkflowShellConfirmationRequest): IpcResult<boolean>
   dispatch(request: WorkflowDispatchRequest): Promise<IpcResult<WorkflowDispatchResult>>
   /** TASK-062 Iterate Primitive: Implement → Review → Fix → Review with safety caps. */
   iterate(request: WorkflowIterateRequest): Promise<IpcResult<WorkflowIterateResult>>

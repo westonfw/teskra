@@ -175,6 +175,19 @@ export const zhCN: Record<TranslationKey, string> = {
   'workspace.removeConfirm.body': '项目文件不会被删除。',
   'workspace.remove': '移除工作区',
 
+  'workspace.trust.trusted': '已信任',
+  'workspace.trust.restricted': '受限',
+  'workspace.trust.action.trust': '信任此工作区',
+  'workspace.trust.action.restrict': '设为受限',
+  'workspace.trust.confirmTrust.title': '信任此工作区？',
+  'workspace.trust.confirmTrust.body':
+    '仓库内定义的 workflows、prompts 与配置可以包含可执行命令，信任后将被加载。请只信任你掌控或已审查过的仓库。',
+  'workspace.trust.confirmRestrict.title': '将此工作区设为受限？',
+  'workspace.trust.confirmRestrict.body': '仓库内定义的 workflows、prompts 与配置将立即停止加载。',
+  'workspace.trust.restrictedBanner.title': '受限工作区',
+  'workspace.trust.restrictedBanner.body':
+    '仓库内定义的 workflows、prompts 与配置未被加载。信任此工作区后即可启用。',
+
   'workspace.dialog.title': '打开工作区',
   'workspace.dialog.environment': '环境',
   'workspace.dialog.windows': 'Windows',
@@ -407,6 +420,12 @@ export const zhCN: Record<TranslationKey, string> = {
   'workflow.passed.message': '已通过 — 等待用户评审',
   'workflow.passed.description': '请在下方评审 diff 与验收标准结果，然后合并或调整任务。',
   'workflow.failed': '工作流运行失败。',
+  'workflow.shellConfirm.title': '执行这条仓库定义的命令？',
+  'workflow.shellConfirm.body':
+    '此仓库定义的工作流请求执行以下命令。该命令将以你的用户权限运行——请在批准前检查完整命令行。',
+  'workflow.shellConfirm.cwd': '工作目录：{cwd}',
+  'workflow.shellConfirm.approve': '执行一次',
+  'workflow.shellConfirm.reject': '拒绝',
   'workflow.steps': '步骤',
   'workflow.worktreeLine': 'Worktree {branch}（基线 {base}）',
   'workflow.criteriaResult': '验收标准结果',

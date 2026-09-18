@@ -7,6 +7,7 @@ import type {
   Workspace,
   WorkspaceEnvValue,
   WorkspaceRuntimeRef,
+  WorkspaceTrustLevel,
 } from '@teskra/contracts'
 
 import type { WorkspaceRepository } from '../db/repositories'
@@ -63,6 +64,12 @@ export interface WorkspaceManager {
   listRecent(limit?: number): IpcResult<Workspace[]>
   /** Domain validation + existence probe; never writes anything. */
   validate(input: OpenWorkspaceInput): IpcResult<WorkspaceValidation>
+  /**
+   * TASK-118: flips the workspace trust level. Trusting a workspace is an
+   * explicit user decision and is audit-logged; untrusting it re-enables the
+   * repo-local content gates immediately.
+   */
+  setTrustLevel(id: string, trustLevel: WorkspaceTrustLevel): IpcResult<Workspace>
 }
 
 export interface WorkspaceManagerOptions {
@@ -347,6 +354,28 @@ export function createWorkspaceManager(
         return exists
       }
       return { ok: true, data: { exists: exists.data } }
+    },
+
+    setTrustLevel(id, trustLevel) {
+      const updated = repository.update(id, { trustLevel }, now())
+      if (!updated.ok) {
+        return updated
+      }
+      if (updated.data === null) {
+        return fail({
+          code: 'WORKSPACE_NOT_FOUND',
+          message: 'The selected workspace no longer exists.',
+          retryable: false,
+          detail: `setTrustLevel workspaceId=${id}`,
+        })
+      }
+      getLogger('security').info(
+        { workspaceId: id, trustLevel },
+        trustLevel === 'trusted'
+          ? 'Workspace trusted; repo-local workflows, prompts, and config will load.'
+          : 'Workspace restricted; repo-local workflows, prompts, and config are blocked.',
+      )
+      return { ok: true, data: updated.data }
     },
   }
 

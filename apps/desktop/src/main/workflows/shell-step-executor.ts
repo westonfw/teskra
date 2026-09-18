@@ -3,6 +3,7 @@ import type { ArtifactType, IpcResult } from '@teskra/contracts'
 import type { ArtifactStore } from '../artifacts/artifact-store'
 import { getLogger } from '../logger'
 import type { CommandRequest, CommandResult, CommandRunner } from '../process/command-runner'
+import type { ShellConfirmationService } from './shell-confirmation'
 import type { StepCompletion, WorkflowStepExecutor } from './workflow-engine'
 
 /**
@@ -33,6 +34,12 @@ export const MAX_ARTIFACT_OUTPUT_CHARS = 256 * 1024
 export interface ShellStepExecutorDeps {
   readonly commands: CommandRunner
   readonly artifacts?: Pick<ArtifactStore, 'record'>
+  /**
+   * TASK-118: gate for `node.requireConfirmation` steps (command came from
+   * repo-controlled content). The step parks until the user confirms the full
+   * command line; without this dep such steps REFUSE to run.
+   */
+  readonly confirmation?: Pick<ShellConfirmationService, 'request' | 'cancel'>
   readonly defaultTimeoutMs?: number
   readonly maxArtifactChars?: number
 }
@@ -116,6 +123,39 @@ export function createShellStepExecutor(deps: ShellStepExecutorDeps): WorkflowSt
         return { outcome: 'failure', result: { error: 'The shell step command is empty.' } }
       }
 
+      // TASK-118: a repo-defined command executes only after the user saw and
+      // confirmed the full command line. Without a confirmation channel the
+      // step refuses to run — a missing gate must never silently execute.
+      if (node.requireConfirmation === true) {
+        if (deps.confirmation === undefined) {
+          logger.error(
+            { runId: run.id, stepId: step.id, nodeId: node.id, command: node.command },
+            'A shell step requires confirmation but no confirmation service is wired; refusing to execute.',
+          )
+          return {
+            outcome: 'failure',
+            result: {
+              error:
+                'This shell step requires user confirmation, but no confirmation channel is available.',
+              rejected: true,
+            },
+          }
+        }
+        const approved = await deps.confirmation.request({
+          runId: run.id,
+          stepId: step.id,
+          nodeId: node.id,
+          command: node.command,
+          cwd: context.cwd,
+        })
+        if (!approved) {
+          return {
+            outcome: 'failure',
+            result: { error: 'The shell step was rejected by the user.', rejected: true },
+          }
+        }
+      }
+
       const abort = new AbortController()
       aborts.set(step.id, abort)
       let commandResult: IpcResult<CommandResult>
@@ -160,6 +200,7 @@ export function createShellStepExecutor(deps: ShellStepExecutorDeps): WorkflowSt
     },
 
     cancel(stepId) {
+      deps.confirmation?.cancel(stepId)
       aborts.get(stepId)?.abort()
     },
   }

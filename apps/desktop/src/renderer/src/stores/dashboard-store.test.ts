@@ -26,6 +26,7 @@ const workspace: Workspace = {
   path: '/repos/teskra',
   defaultBranch: 'main',
   runtime: { kind: 'windows' },
+  trustLevel: 'trusted',
   createdAt: '2026-09-10T00:00:00.000Z',
   updatedAt: '2026-09-10T00:00:00.000Z',
 }

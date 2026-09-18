@@ -29,6 +29,7 @@ const baseRequest: AgentStartRequest = {
     name: 'Demo',
     runtime: { kind: 'wsl', distro: 'Ubuntu' },
     path: '/workspaces/demo',
+    trustLevel: 'trusted',
     createdAt: '2026-09-10T00:00:00.000Z',
     updatedAt: '2026-09-10T00:00:00.000Z',
   },

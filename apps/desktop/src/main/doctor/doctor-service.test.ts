@@ -12,6 +12,7 @@ const workspace: Workspace = {
   runtime: { kind: 'wsl', distro: 'Ubuntu' },
   path: '/repo',
   defaultBranch: 'main',
+  trustLevel: 'trusted',
   createdAt: '2026-09-10T00:00:00.000Z',
   updatedAt: '2026-09-10T00:00:00.000Z',
 }

@@ -58,6 +58,12 @@ export interface FullWorkflowConfig {
   readonly reviewers: readonly string[]
   /** Shell step command for the Build/Test step. */
   readonly testCommand: string
+  /**
+   * TASK-118: mark the Build/Test shell nodes requireConfirmation — used when
+   * the test command came from the repo-local definition override, so the
+   * user confirms the full command line before it executes.
+   */
+  readonly shellRequireConfirmation?: boolean
 }
 
 function invalid<T>(message: string, detail: string): IpcResult<T> {
@@ -91,6 +97,7 @@ export function buildDefaultFullWorkflowDefinition(config: FullWorkflowConfig): 
         command: config.testCommand,
         runOn: 'first',
         dependsOn: [ids.implement],
+        ...(config.shellRequireConfirmation === true ? { requireConfirmation: true } : {}),
       },
       {
         id: ids.testFix,
@@ -98,6 +105,7 @@ export function buildDefaultFullWorkflowDefinition(config: FullWorkflowConfig): 
         command: config.testCommand,
         runOn: 'subsequent',
         dependsOn: [ids.fix],
+        ...(config.shellRequireConfirmation === true ? { requireConfirmation: true } : {}),
       },
       {
         id: ids.reviewImplement,

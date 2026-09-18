@@ -25,6 +25,7 @@ import { type InternalAppError, toPublicError } from '../errors'
 import type { GitManager } from '../git/git-manager'
 import type { WorktreeManager } from '../git/worktree-manager'
 import { getLogger } from '../logger'
+import { repoLocalContentAllowed } from '../workspace/trust'
 import { latestCriterionScores } from './criteria-gate-step-executor'
 import {
   buildDefaultFullWorkflowDefinition,
@@ -234,12 +235,27 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
       ...(request.reviewers === undefined ? {} : { reviewers: request.reviewers }),
       ...(request.testCommand === undefined ? {} : { testCommand: request.testCommand }),
     }
+    // TASK-118: the repo-local `full.*` override is repo-controlled content —
+    // it only loads for trusted workspaces (code-review P0-3). A test command
+    // taken from it is a repo-defined shell command, so the Build/Test steps
+    // get requireConfirmation: the user sees the full command line first.
+    let testCommandFromRepo = false
     if (merged.implementer === undefined || merged.reviewers === undefined) {
-      const override = resolveConfig(workspace.data.path)
-      if (!override.ok) return override
-      merged.implementer ??= override.data?.implementer
-      merged.reviewers ??= override.data?.reviewers
-      merged.testCommand ??= override.data?.testCommand
+      if (repoLocalContentAllowed(workspace.data)) {
+        const override = resolveConfig(workspace.data.path)
+        if (!override.ok) return override
+        if (merged.testCommand === undefined && override.data?.testCommand !== undefined) {
+          testCommandFromRepo = true
+        }
+        merged.implementer ??= override.data?.implementer
+        merged.reviewers ??= override.data?.reviewers
+        merged.testCommand ??= override.data?.testCommand
+      } else {
+        getLogger('security').warn(
+          { workspaceId: request.workspaceId },
+          'Workspace is restricted; ignoring the repo-local full workflow definition override.',
+        )
+      }
     }
     let config: FullWorkflowConfig
     if (merged.implementer !== undefined && merged.reviewers !== undefined) {
@@ -247,6 +263,7 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
         implementer: merged.implementer,
         reviewers: merged.reviewers,
         testCommand: merged.testCommand ?? DEFAULT_FULL_TEST_COMMAND,
+        ...(testCommandFromRepo ? { shellRequireConfirmation: true } : {}),
       }
     } else {
       const defaults = resolveDefaultFullWorkflowConfig(deps.registry.list())
@@ -255,6 +272,7 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
         implementer: merged.implementer ?? defaults.data.implementer,
         reviewers: merged.reviewers ?? defaults.data.reviewers,
         testCommand: merged.testCommand ?? defaults.data.testCommand,
+        ...(testCommandFromRepo ? { shellRequireConfirmation: true } : {}),
       }
     }
     for (const agentId of [config.implementer, ...config.reviewers]) {

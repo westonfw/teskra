@@ -1,5 +1,5 @@
 import { DeleteOutlined, FolderOpenOutlined, PlusOutlined } from '@ant-design/icons'
-import { Button, Card, Empty, List, Popconfirm, Space, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Empty, List, Popconfirm, Space, Tag, Typography } from 'antd'
 import { useState } from 'react'
 
 import { AppErrorAlert } from '../components/app-error-alert'
@@ -17,6 +17,7 @@ export function WorkspacePage() {
   const error = useWorkspaceStore((state) => state.error)
   const selectWorkspace = useWorkspaceStore((state) => state.selectWorkspace)
   const removeWorkspace = useWorkspaceStore((state) => state.removeWorkspace)
+  const setTrustLevel = useWorkspaceStore((state) => state.setTrustLevel)
   const clearError = useWorkspaceStore((state) => state.clearError)
   const navigate = useNavigationStore((state) => state.navigate)
 
@@ -35,6 +36,16 @@ export function WorkspacePage() {
 
       {error !== undefined && (
         <AppErrorAlert error={error} onClose={clearError} className="page-alert" />
+      )}
+
+      {current?.trustLevel === 'restricted' && (
+        <Alert
+          className="page-alert"
+          type="warning"
+          showIcon
+          message={t('workspace.trust.restrictedBanner.title')}
+          description={t('workspace.trust.restrictedBanner.body')}
+        />
       )}
 
       {recent.length === 0 ? (
@@ -66,6 +77,31 @@ export function WorkspacePage() {
               <List.Item
                 {...(workspace.id === current?.id ? { className: 'workspace-list-active' } : {})}
                 actions={[
+                  <Popconfirm
+                    key="trust"
+                    title={
+                      workspace.trustLevel === 'trusted'
+                        ? t('workspace.trust.confirmRestrict.title')
+                        : t('workspace.trust.confirmTrust.title')
+                    }
+                    description={
+                      workspace.trustLevel === 'trusted'
+                        ? t('workspace.trust.confirmRestrict.body')
+                        : t('workspace.trust.confirmTrust.body')
+                    }
+                    onConfirm={() =>
+                      void setTrustLevel(
+                        workspace.id,
+                        workspace.trustLevel === 'trusted' ? 'restricted' : 'trusted',
+                      )
+                    }
+                  >
+                    <Button type="text">
+                      {workspace.trustLevel === 'trusted'
+                        ? t('workspace.trust.action.restrict')
+                        : t('workspace.trust.action.trust')}
+                    </Button>
+                  </Popconfirm>,
                   <Button
                     key="open"
                     type={workspace.id === current?.id ? 'primary' : 'default'}
@@ -98,6 +134,14 @@ export function WorkspacePage() {
                     <Space>
                       <Typography.Text strong>{workspace.name}</Typography.Text>
                       <Tag bordered={false}>{workspace.runtime.kind.toUpperCase()}</Tag>
+                      <Tag
+                        bordered={false}
+                        color={workspace.trustLevel === 'trusted' ? 'green' : 'orange'}
+                      >
+                        {workspace.trustLevel === 'trusted'
+                          ? t('workspace.trust.trusted')
+                          : t('workspace.trust.restricted')}
+                      </Tag>
                     </Space>
                   }
                   description={workspace.path}

@@ -402,9 +402,13 @@ CSP + sandbox 已经挡掉了大部分利用路径，但这些是零成本的纵
   `process/host-processes.ts`（POSIX `kill(pid, 0)` / Windows `tasklist`·`taskkill`，经
   CommandRunner），Reconciliation 按 pid 探测：幸存进程终止后标 interrupted、终止失败则
   不改状态（杜绝 resume 双写）。**[Windows 验证] 待办**：tasklist/taskkill 分支与退出无残留。
-- **P0-3 部分修复**：(1) 已完成——ConfigService 加载/写入 workspace 层时剥离 global-only
+- **P0-3 已修复**：(1) ConfigService 加载/写入 workspace 层时剥离 global-only
   组（`agents`），复用 stripSecrets 告警机制，即使将来 `resolve({ workspaceId })` 也无法生效。
-  **(2) Workspace Trust 闸门与 (3) shell 步骤执行前确认未做**（属独立 Task）。
+  (2)(3) 由 TASK-118 完成——workspaces 表新增 `trust_level`（migration 015，默认
+  `restricted`，显式信任才放行）；Restricted 下 ConfigService 跳过整个 workspace 层、
+  repo-local workflows / prompts 不加载；来自 repo 定义的 shell 步骤（如 full workflow
+  覆盖定义的 testCommand）携带 `requireConfirmation`，执行前经
+  `workflow.shell_confirmation_required` 事件向用户展示完整命令行确认。
 - **P0-4 已修复**：`workflowEngine.begin()` 同步校验后立即返回 run 快照，IPC `startRun`
   不再 await 整轮 pass，推进完全走 `workflow.run_updated` / `workflow.step_updated` 事件。
 
