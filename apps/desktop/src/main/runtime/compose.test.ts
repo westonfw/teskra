@@ -660,6 +660,102 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     await runtime.dispose()
   })
 
+  it('wires the profile alias channels and gates repo-local workflow aliases on trust (TASK-111)', async () => {
+    const home = makeHome()
+    const paths = createTeskraPaths({ TESKRA_HOME: home })
+    const composed = await composeTeskraRuntime({
+      paths,
+      commands: wslCommands(),
+      hostPlatform: 'linux',
+      initializeLogs: false,
+    })
+    if (!composed.ok) throw new Error('expected runtime')
+    runtimes.push(composed.data)
+    const runtime = composed.data
+
+    const repo = join(home, 'repo')
+    mkdirSync(repo)
+    const workspace = runtime.workspace.create({
+      name: 'Demo',
+      runtime: nativeRuntimeRef('Ubuntu-24.04'),
+      path: repo,
+    })
+    if (!workspace.ok) throw new Error('expected workspace')
+    const workspaceId = workspace.data.id
+
+    // A repo workflow referencing profile aliases (§53.1).
+    mkdirSync(paths.repoWorkflowsDir(repo), { recursive: true })
+    writeFileSync(
+      join(paths.repoWorkflowsDir(repo), 'aliased.yaml'),
+      [
+        'id: aliased',
+        'steps:',
+        '  - id: impl',
+        '    type: agent',
+        '    agent: codex',
+        '    accountProfile: work',
+        '    profile: high-work',
+      ].join('\n'),
+    )
+
+    // TASK-118 gate: restricted workspaces never load repo-local definitions,
+    // so alias-bearing workflows cannot even start (TASK-111 relies on this).
+    expect(runtime.workflow.listDefinitions({ workspaceId })).toEqual({ ok: true, data: [] })
+    const restrictedLoad = runtime.workflow.loadDefinition({ workspaceId, definitionId: 'aliased' })
+    expect(restrictedLoad.ok).toBe(false)
+    if (!restrictedLoad.ok) expect(restrictedLoad.error.code).toBe('VALIDATION_FAILED')
+
+    const trusted = runtime.workspace.updateTrust({ id: workspaceId, trustLevel: 'trusted' })
+    if (!trusted.ok) throw new Error('expected trust update')
+    // The DefinitionLoader keeps alias strings verbatim — resolution to local
+    // Profile ids happens at run time (§54), never at load time.
+    const loaded = runtime.workflow.loadDefinition({ workspaceId, definitionId: 'aliased' })
+    expect(loaded.ok).toBe(true)
+    if (loaded.ok) {
+      const step = loaded.data.steps[0]
+      expect(step?.type === 'agent' && step.accountProfile).toBe('work')
+      expect(step?.type === 'agent' && step.profile).toBe('high-work')
+    }
+
+    // §28 alias IPC through the facade: bind validates the target table + agent.
+    const account = await runtime.account.create({
+      agentId: 'codex',
+      name: 'Codex Work',
+      authType: 'external',
+      runtime: nativeRuntimeRef('Ubuntu-24.04'),
+      configHome: join(home, 'codex-work'),
+    })
+    if (!account.ok) throw new Error(`expected account profile: ${account.error.message}`)
+
+    const missing = await runtime.account.bindAlias({
+      agentId: 'codex',
+      kind: 'execution',
+      alias: 'high-work',
+      profileId: account.data.id,
+    })
+    expect(missing).toMatchObject({ ok: false, error: { code: 'EXECUTION_PROFILE_NOT_FOUND' } })
+
+    const bound = await runtime.account.bindAlias({
+      agentId: 'codex',
+      kind: 'account',
+      alias: 'work',
+      profileId: account.data.id,
+    })
+    expect(bound).toMatchObject({
+      ok: true,
+      data: { agentId: 'codex', kind: 'account', alias: 'work', profileId: account.data.id },
+    })
+    expect(await runtime.account.listAliases({ agentId: 'codex' })).toMatchObject({
+      ok: true,
+      data: [{ alias: 'work', kind: 'account' }],
+    })
+    expect(
+      await runtime.account.unbindAlias({ agentId: 'codex', kind: 'account', alias: 'work' }),
+    ).toEqual({ ok: true, data: true })
+    expect(await runtime.account.listAliases()).toEqual({ ok: true, data: [] })
+    await runtime.dispose()
+  })
+
   it('falls back to the build-time APP_VERSION when no appVersion is injected (P2-16)', async () => {
     const composed = await composeTeskraRuntime({
       paths: createTeskraPaths({ TESKRA_HOME: makeHome() }),

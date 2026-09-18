@@ -20,6 +20,7 @@ import { createAccountProfileManager } from '../agents/accounts/account-profile-
 import { createAccountProfileStatusService } from '../agents/accounts/account-profile-status-service'
 import { createAccountLoginService } from '../agents/accounts/account-login-service'
 import { createExecutionProfileManager } from '../agents/execution-profiles/execution-profile-manager'
+import { createProfileAliasManager } from '../agents/profile-alias-manager'
 import { createClaudeAccountProfileAdapter } from '../agents/accounts/adapters/claude-account-profile-adapter'
 import { registerCodexAccountProfileAdapter } from '../agents/accounts/adapters/codex-account-profile-adapter'
 import { createClaudeAdapter } from '../agents/adapters/claude-adapter'
@@ -42,6 +43,7 @@ import {
   createHandoffRepository,
   createMemoryRepository,
   createPermissionRepository,
+  createProfileAliasRepository,
   createReviewRepository,
   createTaskRepository,
   createWorkflowRunRepository,
@@ -136,6 +138,7 @@ function createRepositories(connection: TeskraDatabase['connection']) {
     accountProfiles: createAccountProfileRepository(connection),
     accountEvents: createAccountEventRepository(connection),
     executionProfiles: createExecutionProfileRepository(connection),
+    profileAliases: createProfileAliasRepository(connection),
     artifacts: createArtifactRepository(connection),
     worktrees: createWorktreeRepository(connection),
     workflowRuns: createWorkflowRunRepository(connection),
@@ -427,6 +430,14 @@ export async function composeTeskraRuntime(
     registry: registeredAgents.data,
     config,
   })
+  // TASK-111 (§28/§53.1): workflow profile alias bindings + the §54/§55
+  // runtime resolution the workflow engines consume below.
+  const profileAliasManager = createProfileAliasManager({
+    aliases: repositories.profileAliases,
+    accountProfiles: repositories.accountProfiles,
+    executionProfiles: repositories.executionProfiles,
+    reservedEnvKeys: () => accountProfileManager.reservedEnvKeys(),
+  })
   // TASK-102 (§24): the interactive login sessions — spawned through the
   // ProcessManager with adapter-built argv/env, never a shell string.
   const accountLoginService = createAccountLoginService({
@@ -605,6 +616,7 @@ export async function composeTeskraRuntime(
     runs: workflowRunStore,
     events,
     agentManager,
+    profileAliases: profileAliasManager,
     executors: {
       'review-panel': createReviewPanelStepExecutor({ panel: reviewPanelService, events }),
     },
@@ -650,6 +662,7 @@ export async function composeTeskraRuntime(
     runs: workflowRunStore,
     events,
     agentManager,
+    profileAliases: profileAliasManager,
     executors: {
       shell: createShellStepExecutor({
         commands,
@@ -980,6 +993,11 @@ export async function composeTeskraRuntime(
       resizeLogin: ({ sessionId, cols, rows }) =>
         Promise.resolve(accountLoginService.resize(sessionId, cols, rows)),
       cancelLogin: ({ sessionId }) => accountLoginService.cancel(sessionId),
+      // TASK-111 (§28): alias list/bind/unbind; bind validation (profileId in
+      // the kind's table + agentId match) lives in ProfileAliasManager.
+      listAliases: (request = {}) => Promise.resolve(profileAliasManager.list(request)),
+      bindAlias: (request) => Promise.resolve(profileAliasManager.bind(request)),
+      unbindAlias: (request) => Promise.resolve(profileAliasManager.unbind(request)),
     },
     executionProfile: {
       list: (request = {}) => executionProfileManager.list(request),

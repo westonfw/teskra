@@ -4,7 +4,7 @@ import { agentRoleSchema, agentRunSchema } from './agent'
 import { acceptanceCriterionSchema } from './criteria'
 import { diffPatchResultSchema, worktreeIsolationSchema, worktreeSchema } from './git'
 import { handoffRecordSchema } from './handoff'
-import { IPC_NAME_MAX, ipcIdSchema, ipcTextSchema } from './limits'
+import { IPC_NAME_MAX, IPC_TEXT_MAX, ipcIdSchema, ipcTextSchema } from './limits'
 import { criteriaReviewOutcomeSchema, criterionScoreRecordSchema } from './review'
 
 /**
@@ -85,6 +85,25 @@ export const agentWorkflowNodeSchema = z.strictObject({
   agent: z.string().min(1),
   role: agentRoleSchema.optional(),
   isolation: worktreeIsolationSchema.optional(),
+  /**
+   * TASK-111 (§53.1 / ADR-0011): account-profile ALIAS, never a Profile id —
+   * ids are machine-local and cannot be committed to a repo. Resolution to a
+   * local accountProfileId happens in Main at run time (§54).
+   */
+  accountProfile: z.string().min(1).optional(),
+  /**
+   * TASK-111 (§53.1): execution-profile ALIAS (kind = 'execution'). Resolving
+   * it brings the whole ExecutionProfile along (model / reasoningEffort /
+   * approvalMode / account); `accountProfile` above still wins for the
+   * account dimension (§54).
+   */
+  profile: z.string().min(1).optional(),
+  /**
+   * Extra environment for the launched CLI. §13.2: account-profile reserved
+   * keys (CODEX_HOME / CLAUDE_CONFIG_DIR) are rejected at run time, never
+   * silently dropped.
+   */
+  env: z.record(z.string(), z.string().max(IPC_TEXT_MAX)).optional(),
 })
 export type AgentWorkflowNode = z.infer<typeof agentWorkflowNodeSchema>
 

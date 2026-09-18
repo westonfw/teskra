@@ -17,6 +17,7 @@ import {
 } from '@teskra/shared'
 
 import type { AgentManager } from '../agents/agent-manager'
+import type { ProfileAliasManager } from '../agents/profile-alias-manager'
 import type { EventBus } from '../events/event-bus'
 import { type InternalAppError, toPublicError } from '../errors'
 import { getLogger } from '../logger'
@@ -176,6 +177,13 @@ export interface WorkflowEngineDeps {
   readonly events: EventBus<WorkbenchEvents>
   /** Enables the default `agent` executor; without it agent nodes fail. */
   readonly agentManager?: Pick<AgentManager, 'start' | 'cancel'>
+  /**
+   * TASK-111 (§53.1/§54/§55): resolves the profile ALIASES on agent nodes
+   * (`accountProfile` / `profile`) to machine-local Profile ids before launch,
+   * and screens node `env` against the §13.2 reserved keys. Without it, a
+   * node carrying aliases fails closed rather than guessing an identity.
+   */
+  readonly profileAliases?: Pick<ProfileAliasManager, 'resolveAgentNodeProfiles'>
   /** Per-node-type executor overrides (tests, TASK-058 shell executor). */
   readonly executors?: Partial<Record<WorkflowNodeType, WorkflowStepExecutor>>
 }
@@ -285,6 +293,7 @@ function createConditionStepExecutor(): WorkflowStepExecutor {
 function createAgentStepExecutor(deps: {
   readonly agents: Pick<AgentManager, 'start' | 'cancel'>
   readonly events: EventBus<WorkbenchEvents>
+  readonly profileAliases?: Pick<ProfileAliasManager, 'resolveAgentNodeProfiles'> | undefined
 }): WorkflowStepExecutor {
   /** stepId → agentRunId, for cancel routing. */
   const agentRuns = new Map<string, string>()
@@ -301,6 +310,50 @@ function createAgentStepExecutor(deps: {
           result: { error: 'agent executor received a non-agent node' },
         })
       }
+      // TASK-111 (§53.1/§54): the node names profile ALIASES, never ids —
+      // resolve them against this machine's binding table before launch.
+      // Failure modes are all fail-closed: unbound alias, id-instead-of-alias
+      // (§55), deleted/disabled target, or a §13.2 reserved env key each stop
+      // the step instead of silently falling back to another identity.
+      let resolvedNodeProfiles:
+        | {
+            accountProfileId?: string | undefined
+            executionProfileId?: string | undefined
+            env?: Record<string, string> | undefined
+          }
+        | undefined
+      if (
+        node.accountProfile !== undefined ||
+        node.profile !== undefined ||
+        node.env !== undefined
+      ) {
+        if (deps.profileAliases === undefined) {
+          return Promise.resolve({
+            outcome: 'failure',
+            result: {
+              error:
+                `Workflow node "${node.id}" declares profile aliases or env, ` +
+                'but profile alias resolution is not available in this runtime.',
+            },
+          })
+        }
+        const profiles = deps.profileAliases.resolveAgentNodeProfiles({
+          agentId: node.agent,
+          ...(node.accountProfile === undefined
+            ? {}
+            : { accountProfileAlias: node.accountProfile }),
+          ...(node.profile === undefined ? {} : { executionProfileAlias: node.profile }),
+          ...(node.env === undefined ? {} : { env: node.env }),
+          source: `workflow node "${node.id}"`,
+        })
+        if (!profiles.ok) {
+          return Promise.resolve({
+            outcome: 'failure',
+            result: { error: profiles.error.message, errorCode: profiles.error.code },
+          })
+        }
+        resolvedNodeProfiles = profiles.data
+      }
       const request: StartAgentRunRequest = {
         workspaceId: context.workspaceId,
         agentType: node.agent,
@@ -315,6 +368,15 @@ function createAgentStepExecutor(deps: {
         ...(context.worktreeId === undefined ? {} : { worktreeId: context.worktreeId }),
         ...(context.prompt === undefined ? {} : { prompt: context.prompt }),
         ...(context.model === undefined ? {} : { model: context.model }),
+        ...(resolvedNodeProfiles?.accountProfileId === undefined
+          ? {}
+          : { accountProfileId: resolvedNodeProfiles.accountProfileId }),
+        ...(resolvedNodeProfiles?.executionProfileId === undefined
+          ? {}
+          : { executionProfileId: resolvedNodeProfiles.executionProfileId }),
+        ...(resolvedNodeProfiles?.env === undefined
+          ? {}
+          : { environment: resolvedNodeProfiles.env }),
       }
       const executed = (async (): Promise<StepCompletion> => {
         const started = await deps.agents.start(request)
@@ -403,7 +465,11 @@ export function createWorkflowEngine(deps: WorkflowEngineDeps): WorkflowEngine {
   const agentExecutor =
     deps.agentManager === undefined
       ? undefined
-      : createAgentStepExecutor({ agents: deps.agentManager, events: deps.events })
+      : createAgentStepExecutor({
+          agents: deps.agentManager,
+          events: deps.events,
+          profileAliases: deps.profileAliases,
+        })
   const passes = new Map<string, PassState>()
   /** stepId → runId for every suspended step, so resolveStep can route. */
   const suspendedSteps = new Map<string, string>()

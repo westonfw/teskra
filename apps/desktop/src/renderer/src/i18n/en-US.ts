@@ -308,6 +308,14 @@ export const enUS = {
   'errorMessage.resumeWorktreeNotResumable': 'The Run worktree is not in a resumable state.',
   'errorMessage.resumeWorktreeDirGone': 'The Run worktree directory no longer exists.',
   'errorMessage.resumeBranchGone': 'The Run worktree branch no longer exists.',
+  'errorMessage.profileAliasUnbound':
+    'Profile alias "{alias}" ({kind}) is not bound for agent "{agentId}". Bind it in Settings → Accounts → Aliases — the run will not fall back to a default account.',
+  'errorMessage.profileAliasIdRejected':
+    '"{value}" is a machine-local Profile id. Repo workflows must reference a profile alias instead — bind one in Settings → Accounts → Aliases.',
+  'errorMessage.profileAliasTargetMissing':
+    'Alias "{alias}" ({kind}) is bound to a profile that no longer exists. Re-bind it in Settings → Accounts → Aliases.',
+  'errorMessage.profileAliasTargetDisabled':
+    'Alias "{alias}" points at the disabled account profile "{name}". Enable it or re-bind the alias.',
 
   'tasks.eyebrow': 'TASK-FIRST WORKBENCH',
   'tasks.title': 'Tasks',
@@ -777,6 +785,25 @@ export const enUS = {
 
   'accounts.select.label': 'Account',
   'accounts.select.auto': 'Auto (default account)',
+
+  'aliases.title': 'Aliases',
+  'aliases.subtitle':
+    'Repo workflows reference profiles by alias (accountProfile: work / profile: high-work). Bind each alias to a local profile here — the binding never enters the repository.',
+  'aliases.add': 'Bind Alias',
+  'aliases.empty': 'No aliases bound yet.',
+  'aliases.column.agent': 'Agent',
+  'aliases.column.kind': 'Kind',
+  'aliases.column.alias': 'Alias',
+  'aliases.column.profile': 'Bound Profile',
+  'aliases.kind.account': 'Account',
+  'aliases.kind.execution': 'Execution',
+  'aliases.targetMissing': '⚠ Profile no longer exists — re-bind',
+  'aliases.unbind.confirm': 'Unbind this alias?',
+  'aliases.form.agent': 'Agent',
+  'aliases.form.alias': 'Alias (e.g. work)',
+  'aliases.form.profile': 'Profile',
+  'aliases.form.bind': 'Bind',
+  'aliases.form.cancel': 'Cancel',
 
   'rateLimit.title': '⚠ Usage limit reached',
   'rateLimit.resetAt': 'Reset: {time}',

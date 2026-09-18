@@ -122,6 +122,9 @@ const bridge: TeskraBridge = {
     writeLogin: (request) => invoke(IPC_CHANNELS.accountLoginWrite, request),
     resizeLogin: (request) => invoke(IPC_CHANNELS.accountLoginResize, request),
     cancelLogin: (request) => invoke(IPC_CHANNELS.accountLoginCancel, request),
+    listAliases: (request = {}) => invoke(IPC_CHANNELS.accountAliasList, request),
+    bindAlias: (request) => invoke(IPC_CHANNELS.accountAliasBind, request),
+    unbindAlias: (request) => invoke(IPC_CHANNELS.accountAliasUnbind, request),
   },
   executionProfile: {
     list: (request = {}) => invoke(IPC_CHANNELS.executionProfileList, request),

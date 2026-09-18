@@ -22,6 +22,7 @@ import type {
   BindRunCriteriaRequest,
   BuildContextRequest,
   BuiltContext,
+  BindProfileAliasRequest,
   CancelAccountLoginRequest,
   ContinueAgentRunRequest,
   CreateAccountProfileRequest,
@@ -66,6 +67,7 @@ import type {
   ListMemoriesRequest,
   ListPermissionAuditRequest,
   ListPermissionRulesRequest,
+  ListProfileAliasesRequest,
   ListPromptTemplatesRequest,
   ListReviewFindingsRequest,
   ListReviewPanelsRequest,
@@ -83,6 +85,7 @@ import type {
   PermissionDecisionResult,
   PermissionRule,
   PermissionRuleIdRequest,
+  ProfileAlias,
   PromptTemplateInfo,
   RecordArtifactRequest,
   RecoveryReport,
@@ -138,6 +141,7 @@ import type {
   UpdateMemoryRequest,
   UpdatePermissionRuleRequest,
   UpdateTaskRequest,
+  UnbindProfileAliasRequest,
   UpdateWorkspaceTrustRequest,
   Workspace,
   WorkspaceIdRequest,
@@ -194,6 +198,13 @@ export interface AccountPort {
   writeLogin(request: WriteAccountLoginRequest): Promise<IpcResult<void>>
   resizeLogin(request: ResizeAccountLoginRequest): Promise<IpcResult<void>>
   cancelLogin(request: CancelAccountLoginRequest): Promise<IpcResult<void>>
+  /**
+   * TASK-111 (§28/§53.1): workflow profile alias bindings. bind validates
+   * that profileId exists in the kind's table and belongs to agentId.
+   */
+  listAliases(request?: ListProfileAliasesRequest): Promise<IpcResult<readonly ProfileAlias[]>>
+  bindAlias(request: BindProfileAliasRequest): Promise<IpcResult<ProfileAlias>>
+  unbindAlias(request: UnbindProfileAliasRequest): Promise<IpcResult<boolean>>
 }
 
 /**

@@ -281,6 +281,14 @@ export const zhCN: Record<TranslationKey, string> = {
   'errorMessage.resumeWorktreeNotResumable': '该运行的 Worktree 当前状态不可恢复。',
   'errorMessage.resumeWorktreeDirGone': '该运行的 Worktree 目录已不存在。',
   'errorMessage.resumeBranchGone': '该运行的 Worktree 分支已不存在。',
+  'errorMessage.profileAliasUnbound':
+    'Profile alias「{alias}」（{kind}）尚未为 Agent「{agentId}」绑定。请在 设置 → Accounts → Aliases 中绑定——运行不会回退到默认账号。',
+  'errorMessage.profileAliasIdRejected':
+    '「{value}」是机器本地的 Profile id。仓库里的 Workflow 必须引用 alias——请在 设置 → Accounts → Aliases 中绑定一个。',
+  'errorMessage.profileAliasTargetMissing':
+    'Alias「{alias}」（{kind}）绑定的 Profile 已不存在。请在 设置 → Accounts → Aliases 中重新绑定。',
+  'errorMessage.profileAliasTargetDisabled':
+    'Alias「{alias}」指向已停用的账号 Profile「{name}」。请启用它或重新绑定 alias。',
 
   'tasks.eyebrow': '任务优先工作台',
   'tasks.title': '任务',
@@ -732,6 +740,25 @@ export const zhCN: Record<TranslationKey, string> = {
 
   'accounts.select.label': '账号',
   'accounts.select.auto': '自动（默认账号）',
+
+  'aliases.title': 'Aliases（别名绑定）',
+  'aliases.subtitle':
+    '仓库里的 Workflow 通过 alias 引用 Profile（accountProfile: work / profile: high-work）。在这里把 alias 绑定到本机 Profile——绑定关系不会进入仓库。',
+  'aliases.add': '绑定 Alias',
+  'aliases.empty': '尚未绑定任何 alias。',
+  'aliases.column.agent': 'Agent',
+  'aliases.column.kind': '类型',
+  'aliases.column.alias': 'Alias',
+  'aliases.column.profile': '绑定的 Profile',
+  'aliases.kind.account': '账号',
+  'aliases.kind.execution': '执行',
+  'aliases.targetMissing': '⚠ Profile 已不存在——请重新绑定',
+  'aliases.unbind.confirm': '解除该 alias 的绑定？',
+  'aliases.form.agent': 'Agent',
+  'aliases.form.alias': 'Alias（如 work）',
+  'aliases.form.profile': 'Profile',
+  'aliases.form.bind': '绑定',
+  'aliases.form.cancel': '取消',
 
   'rateLimit.title': '⚠ 已达用量上限',
   'rateLimit.resetAt': '重置时间：{time}',

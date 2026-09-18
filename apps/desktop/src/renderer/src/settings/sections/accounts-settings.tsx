@@ -20,6 +20,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { AgentAccountProfile } from '@teskra/contracts'
 
 import { AddAccountWizard } from '../../accounts/add-account-wizard'
+import { AliasBindingsCard } from '../../accounts/alias-bindings'
 import { useAccountProfileStore } from '../../accounts/account-profile-store'
 import {
   accountLastUsedLabel,
@@ -136,6 +137,10 @@ export function AccountsSettingsSection() {
           </Space>
         )}
       </Spin>
+
+      {/* §53.1 (TASK-111): repo workflows reference aliases; the binding to a
+          machine-local Profile lives here and never enters the repo. */}
+      <AliasBindingsCard />
 
       <AddAccountWizard
         open={addingFor !== undefined}

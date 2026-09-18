@@ -331,6 +331,18 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.account.cancelLogin(request)),
   )
   register(
+    ipcChannelDefinitions.accountAliasList,
+    withRuntime((runtime, request) => runtime.account.listAliases(request)),
+  )
+  register(
+    ipcChannelDefinitions.accountAliasBind,
+    withRuntime((runtime, request) => runtime.account.bindAlias(request)),
+  )
+  register(
+    ipcChannelDefinitions.accountAliasUnbind,
+    withRuntime((runtime, request) => runtime.account.unbindAlias(request)),
+  )
+  register(
     ipcChannelDefinitions.executionProfileList,
     withRuntime((runtime, request) => runtime.executionProfile.list(request)),
   )

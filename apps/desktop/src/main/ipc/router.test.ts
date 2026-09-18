@@ -10,6 +10,7 @@ import {
   type AgentExecutionProfile,
   type AgentRun,
   type IpcResult,
+  type ProfileAlias,
   type Task,
   type WorkflowDispatchResult,
   type WorkflowRun,
@@ -124,6 +125,15 @@ const LOGIN_SESSION: AccountLoginSession = {
   sessionId: 'sess-1',
   profileId: 'acct-1',
   startedAt: '2026-09-10T00:00:00.000Z',
+}
+
+const PROFILE_ALIAS: ProfileAlias = {
+  agentId: 'codex',
+  kind: 'account',
+  alias: 'work',
+  profileId: 'acct-1',
+  createdAt: '2026-09-10T00:00:00.000Z',
+  updatedAt: '2026-09-10T00:00:00.000Z',
 }
 
 const EXECUTION_PROFILE: AgentExecutionProfile = {
@@ -345,6 +355,9 @@ function fakeRuntime(): TeskraRuntime {
       writeLogin: vi.fn(async () => ok(undefined)),
       resizeLogin: vi.fn(async () => ok(undefined)),
       cancelLogin: vi.fn(async () => ok(undefined)),
+      listAliases: vi.fn(async () => ok([])),
+      bindAlias: vi.fn(async () => ok(PROFILE_ALIAS)),
+      unbindAlias: vi.fn(async () => ok(true)),
     },
     executionProfile: {
       list: vi.fn(async () => ok([])),
@@ -1120,6 +1133,58 @@ describe('Typed IPC Router (TASK-020)', () => {
     expect(badResize).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
     expect(runtime.account.startLogin).toHaveBeenCalledTimes(1)
     expect(runtime.account.resizeLogin).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes the alias channels through the runtime facade (TASK-111 §28)', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    expect(await ipc.invoke(IPC_CHANNELS.accountAliasList, { agentId: 'codex' })).toEqual({
+      ok: true,
+      data: [],
+    })
+    expect(runtime.account.listAliases).toHaveBeenCalledWith({ agentId: 'codex' })
+
+    expect(
+      await ipc.invoke(IPC_CHANNELS.accountAliasBind, {
+        agentId: 'codex',
+        kind: 'account',
+        alias: 'work',
+        profileId: 'acct-1',
+      }),
+    ).toEqual({ ok: true, data: PROFILE_ALIAS })
+    expect(runtime.account.bindAlias).toHaveBeenCalledWith({
+      agentId: 'codex',
+      kind: 'account',
+      alias: 'work',
+      profileId: 'acct-1',
+    })
+
+    expect(
+      await ipc.invoke(IPC_CHANNELS.accountAliasUnbind, {
+        agentId: 'codex',
+        kind: 'account',
+        alias: 'work',
+      }),
+    ).toEqual({ ok: true, data: true })
+
+    // kind is required — the (agentId, kind, alias) primary key cannot be
+    // inferred from the profileId (§28).
+    const kindless = await ipc.invoke(IPC_CHANNELS.accountAliasBind, {
+      agentId: 'codex',
+      alias: 'work',
+      profileId: 'acct-1',
+    })
+    expect(kindless).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    const badKind = await ipc.invoke(IPC_CHANNELS.accountAliasBind, {
+      agentId: 'codex',
+      kind: 'tool',
+      alias: 'work',
+      profileId: 'acct-1',
+    })
+    expect(badKind).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    expect(runtime.account.bindAlias).toHaveBeenCalledTimes(1)
   })
 
   it('returns a clone-safe capability signal instead of the live runtime port', async () => {

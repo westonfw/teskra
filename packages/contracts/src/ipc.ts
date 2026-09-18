@@ -64,6 +64,16 @@ import {
 } from './agent'
 import { continueAgentRunRequestSchema, type ContinueAgentRunRequest } from './agent-continuation'
 import {
+  bindProfileAliasRequestSchema,
+  listProfileAliasesRequestSchema,
+  profileAliasSchema,
+  unbindProfileAliasRequestSchema,
+  type BindProfileAliasRequest,
+  type ListProfileAliasesRequest,
+  type ProfileAlias,
+  type UnbindProfileAliasRequest,
+} from './profile-alias'
+import {
   agentExecutionProfileSchema,
   createExecutionProfileRequestSchema,
   executionProfileIdRequestSchema,
@@ -451,6 +461,9 @@ export const IPC_CHANNELS = {
   accountLoginWrite: 'teskra:account:login:write',
   accountLoginResize: 'teskra:account:login:resize',
   accountLoginCancel: 'teskra:account:login:cancel',
+  accountAliasList: 'teskra:account:alias:list',
+  accountAliasBind: 'teskra:account:alias:bind',
+  accountAliasUnbind: 'teskra:account:alias:unbind',
   executionProfileList: 'teskra:execution-profile:list',
   executionProfileGet: 'teskra:execution-profile:get',
   executionProfileCreate: 'teskra:execution-profile:create',
@@ -825,7 +838,7 @@ export const agentRunContinueWithProfileChannel = channel(
   agentRunSchema,
 )
 // TASK-102 (Milestone 24 §28): account profile CRUD + default + status detect.
-// Alias channels are deliberately absent — they ship with TASK-111.
+// The alias channels (TASK-111) live right after the login session block.
 export const accountListChannel = channel(
   IPC_CHANNELS.accountList,
   listAccountProfilesRequestSchema,
@@ -892,6 +905,24 @@ export const accountLoginCancelChannel = channel(
   IPC_CHANNELS.accountLoginCancel,
   cancelAccountLoginRequestSchema,
   voidResponseSchema,
+)
+// TASK-111 (Milestone 24 §28/§53.1): workflow profile alias bindings. `kind`
+// is required on bind/unbind — the primary key is (agentId, kind, alias) and
+// the two Profile tables' id namespaces cannot be assumed disjoint.
+export const accountAliasListChannel = channel(
+  IPC_CHANNELS.accountAliasList,
+  listProfileAliasesRequestSchema,
+  z.array(profileAliasSchema),
+)
+export const accountAliasBindChannel = channel(
+  IPC_CHANNELS.accountAliasBind,
+  bindProfileAliasRequestSchema,
+  profileAliasSchema,
+)
+export const accountAliasUnbindChannel = channel(
+  IPC_CHANNELS.accountAliasUnbind,
+  unbindProfileAliasRequestSchema,
+  z.boolean(),
 )
 // TASK-110 (Milestone 24 §6.1/§14): execution profile CRUD + per-agent
 // default. Same shape as the account domain; the default itself is stored in
@@ -1318,6 +1349,9 @@ export const ipcChannelDefinitions = {
   accountLoginWrite: accountLoginWriteChannel,
   accountLoginResize: accountLoginResizeChannel,
   accountLoginCancel: accountLoginCancelChannel,
+  accountAliasList: accountAliasListChannel,
+  accountAliasBind: accountAliasBindChannel,
+  accountAliasUnbind: accountAliasUnbindChannel,
   executionProfileList: executionProfileListChannel,
   executionProfileGet: executionProfileGetChannel,
   executionProfileCreate: executionProfileCreateChannel,
@@ -1509,6 +1543,14 @@ export interface TeskraBridge {
     writeLogin(request: WriteAccountLoginRequest): Promise<IpcResult<void>>
     resizeLogin(request: ResizeAccountLoginRequest): Promise<IpcResult<void>>
     cancelLogin(request: CancelAccountLoginRequest): Promise<IpcResult<void>>
+    /**
+     * TASK-111 (§28/§53.1): workflow profile alias bindings. bind validates
+     * Main-side that profileId exists in the kind's table and belongs to
+     * agentId; unbind returns false when no such binding existed.
+     */
+    listAliases(request?: ListProfileAliasesRequest): Promise<IpcResult<ProfileAlias[]>>
+    bindAlias(request: BindProfileAliasRequest): Promise<IpcResult<ProfileAlias>>
+    unbindAlias(request: UnbindProfileAliasRequest): Promise<IpcResult<boolean>>
   }
   /**
    * TASK-110 (Milestone 24 §6.1/§14): execution profile CRUD + per-agent
