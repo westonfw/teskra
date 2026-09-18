@@ -23,11 +23,14 @@ import { createExecutionProfileManager } from '../agents/execution-profiles/exec
 import { createProfileAliasManager } from '../agents/profile-alias-manager'
 import { createClaudeAccountProfileAdapter } from '../agents/accounts/adapters/claude-account-profile-adapter'
 import { registerCodexAccountProfileAdapter } from '../agents/accounts/adapters/codex-account-profile-adapter'
+import { createFakeAccountProfileAdapter } from '../agents/accounts/adapters/fake-account-profile-adapter'
 import { createClaudeAdapter } from '../agents/adapters/claude-adapter'
 import { createClaudeFailureClassifier } from '../agents/adapters/claude-failure-classifier'
 import { createCodexAdapter } from '../agents/adapters/codex-adapter'
 import { createCodexFailureClassifier } from '../agents/adapters/codex-failure-classifier'
 import { createFakeAgentAdapter } from '../agents/adapters/fake-agent-adapter'
+import { createTextFailureClassifier } from '../agents/adapters/failure-classifier'
+import { FAKE_AGENT } from '../agents/definitions/fake'
 import { createKimiAdapter } from '../agents/adapters/kimi-adapter'
 import { createRunLogStore } from '../agents/run-log-store'
 import { openDatabase, type TeskraDatabase } from '../db'
@@ -399,6 +402,18 @@ export async function composeTeskraRuntime(
     database.close()
     return claudeAccountAdapter
   }
+  // TASK-115: the Fake Agent participates in the account profile lifecycle on
+  // the same development/test boundary as its agent registration — a profile
+  // pinned Run would otherwise fail projection with "no adapter registered".
+  if (options.includeDevelopmentAgents === true) {
+    const fakeAccountAdapter = accountProfileAdapters.data.register(
+      createFakeAccountProfileAdapter(),
+    )
+    if (!fakeAccountAdapter.ok) {
+      database.close()
+      return fakeAccountAdapter
+    }
+  }
   // TASK-106 (§18/§18.0): profile health — Run-outcome projection plus the
   // lazy-degrade/sweep recovery of expired `limited` rows. Created before
   // the Manager so its reads (list/get) get the lazy degrade; the projection
@@ -520,8 +535,15 @@ export async function composeTeskraRuntime(
     credentials,
     accountProfiles: accountProfileManager,
     executionProfiles: executionProfileManager,
-    // TASK-105 (§17): post-hoc failure classification for Codex / Claude runs.
-    failureClassifiers: [createCodexFailureClassifier(), createClaudeFailureClassifier()],
+    // TASK-105 (§17): post-hoc failure classification for Codex / Claude runs;
+    // the development-only Fake Agent shares the base text patterns (TASK-115).
+    failureClassifiers: [
+      createCodexFailureClassifier(),
+      createClaudeFailureClassifier(),
+      ...(options.includeDevelopmentAgents === true
+        ? [createTextFailureClassifier(FAKE_AGENT.id)]
+        : []),
+    ],
     resolveRuntime: runtimeFor,
     resolveConcurrency: (workspaceId) => {
       const resolved = config.resolve({ workspaceId })
