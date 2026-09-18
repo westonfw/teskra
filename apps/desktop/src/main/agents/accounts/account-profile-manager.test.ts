@@ -1,5 +1,13 @@
 import Database from 'better-sqlite3'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -189,6 +197,21 @@ describe('AccountProfileManager create (TASK-097)', () => {
       expect(result.ok).toBe(false)
       if (result.ok) return
       expect(result.error.code).toBe('VALIDATION_FAILED')
+    },
+  )
+
+  it.each(['..', '../..', 'a/b', 'a\\b', 'a/../b', '.work', 'work.'])(
+    'rejects the traversal-shaped slug %j before any path is built (TASK-114, §48.1/§58)',
+    async (slug) => {
+      const fixture = setup()
+      const result = await createManaged(fixture, { slug })
+      expect(result.ok).toBe(false)
+      if (result.ok) return
+      expect(result.error.code).toBe('VALIDATION_FAILED')
+      expect(result.error.message).toContain('slug')
+      // Nothing was inserted and no directory appeared anywhere.
+      expect(requireOk(await fixture.manager.list()).length).toBe(0)
+      expect(existsSync(fixture.paths.agentProfilesRoot())).toBe(false)
     },
   )
 
@@ -430,6 +453,33 @@ describe('AccountProfileManager remove / enable (TASK-097, §47)', () => {
     expect(result.error.code).toBe('VALIDATION_FAILED')
   })
 
+  it('deleteHome on an external profile leaves a real on-disk home and the profile untouched (TASK-114, §58)', async () => {
+    const fixture = setup()
+    // An external home that really exists on disk, with credential material in it.
+    const externalHome = join(fixture.dataRoot, 'external-codex')
+    mkdirSync(externalHome, { recursive: true })
+    writeFileSync(join(externalHome, 'auth.json'), '{"token":"secret"}')
+    const created = requireOk(
+      await fixture.manager.create({
+        agentId: 'codex',
+        name: 'Default Codex',
+        authType: 'external',
+        runtime: UBUNTU,
+        configHome: externalHome,
+      }),
+    )
+
+    const result = await fixture.manager.remove(created.id, { deleteHome: true })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('VALIDATION_FAILED')
+    // The whole remove is refused: the directory (and its credentials) survives
+    // and the profile is NOT disabled.
+    expect(existsSync(join(externalHome, 'auth.json'))).toBe(true)
+    expect((await requireProfile(fixture, created.id)).enabled).toBe(true)
+  })
+
   it('enable on an external profile never touches its home or status (TASK-113, §49/§50.2)', async () => {
     const fixture = setup()
     const created = requireOk(
@@ -469,6 +519,51 @@ describe('AccountProfileManager ownership guard (TASK-097, §48.2)', () => {
     if (result.ok) return
     expect(result.error.code).toBe('VALIDATION_FAILED')
     expect(requireOk(await fixture.manager.list()).length).toBe(0)
+  })
+
+  it('rejects creation when a mid-chain ancestor was swapped for a symlink out of the root (TASK-114, §48.2 (a))', async () => {
+    const fixture = setup()
+    // Establish the trusted root with a first profile, then replace the agent
+    // directory with a symlink pointing outside the root (check-to-create
+    // race window). A string-prefix check would pass here — only the realpath
+    // of the nearest existing ancestor catches it.
+    requireOk(await createManaged(fixture, { slug: 'first' }))
+    const agentDir = join(fixture.paths.agentProfilesRoot(), 'codex')
+    const outside = join(fixture.dataRoot, 'outside')
+    mkdirSync(outside, { recursive: true })
+    rmSync(agentDir, { recursive: true, force: true })
+    symlinkSync(outside, agentDir, process.platform === 'win32' ? 'junction' : 'dir')
+
+    const result = await createManaged(fixture, { name: 'Second', slug: 'second' })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('VALIDATION_FAILED')
+    expect(result.error.message).toContain('escapes')
+    // Compensation removed the just-INSERTed row and nothing was created
+    // through the symlink.
+    expect(requireOk(await fixture.manager.list()).length).toBe(1)
+    expect(existsSync(join(outside, 'second'))).toBe(false)
+  })
+
+  it('refuses deleteHome when the managed home was swapped for a symlink out of the root (TASK-114, §48.2)', async () => {
+    const fixture = setup()
+    const created = requireOk(await createManaged(fixture))
+    const home = created.configHome as string
+    const outside = join(fixture.dataRoot, 'victim')
+    mkdirSync(outside, { recursive: true })
+    writeFileSync(join(outside, 'keep.txt'), 'do not delete')
+    rmSync(home, { recursive: true, force: true })
+    symlinkSync(outside, home, process.platform === 'win32' ? 'junction' : 'dir')
+
+    const result = await fixture.manager.remove(created.id, { deleteHome: true })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('VALIDATION_FAILED')
+    // The symlink target survives untouched and the profile stays enabled.
+    expect(readFileSync(join(outside, 'keep.txt'), 'utf8')).toBe('do not delete')
+    expect((await requireProfile(fixture, created.id)).enabled).toBe(true)
   })
 })
 

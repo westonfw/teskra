@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -28,6 +28,7 @@ import {
   type AccountProfileRepository,
 } from '../db/repositories'
 import { createEventBus, type EventBus } from '../events/event-bus'
+import { initializeLogging, resetLoggingStateForTests } from '../logger'
 import { createTeskraPaths, type TeskraPaths } from '../paths'
 import type { ProcessStartRequest } from '../process/process-manager'
 import type { WorkspaceRuntime } from '../workspace/runtime'
@@ -461,6 +462,110 @@ describe('AgentManager account profile integration (TASK-100)', () => {
     expect(started.error.message).toContain('request.environment')
     expect(started.error.message).toContain('CLAUDE_CONFIG_DIR')
     expect(fixture.processes.starts).toHaveLength(0)
+  })
+
+  // §13.2: rejections are "拒绝并记录" — a rejected reserved key must leave a
+  // WARN record in the agent log, not just an IPC error. Logging is armed
+  // BEFORE setup() because createAgentManager captures the logger at creation.
+  function setupWithAgentLog(): {
+    fixture: Fixture
+    readRecords: () => Array<Record<string, unknown>>
+  } {
+    resetLoggingStateForTests()
+    const logHome = mkdtempSync(join(tmpdir(), 'teskra-task114-log-'))
+    directories.push(logHome)
+    const initialized = initializeLogging(createTeskraPaths({ TESKRA_HOME: logHome }), {
+      sync: true,
+    })
+    if (!initialized.ok) throw new Error(initialized.error.message)
+    const fixture = setup()
+    const readRecords = (): Array<Record<string, unknown>> =>
+      readFileSync(join(logHome, 'logs', 'agent.log'), 'utf8')
+        .trim()
+        .split('\n')
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+    return { fixture, readRecords }
+  }
+
+  it('logs the workspace.env reserved-key rejection (TASK-114, §13.2 "拒绝并记录")', async () => {
+    const { fixture, readRecords } = setupWithAgentLog()
+    requireOk(fixture.workspaces.update('workspace-1', { env: { CODEX_HOME: '/evil' } }))
+
+    const started = await fixture.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+
+    expect(started.ok).toBe(false)
+    const rejections = readRecords().filter(
+      (record) => record['msg'] === 'Reserved account-profile env key rejected.',
+    )
+    expect(rejections).toHaveLength(1)
+    expect(rejections[0]).toMatchObject({ level: 40, source: 'workspace.env' })
+  })
+
+  it('logs the request.environment reserved-key rejection (TASK-114, §13.2 "拒绝并记录")', async () => {
+    const { fixture, readRecords } = setupWithAgentLog()
+
+    const started = await fixture.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      environment: { CLAUDE_CONFIG_DIR: '/evil' },
+    })
+
+    expect(started.ok).toBe(false)
+    const rejections = readRecords().filter(
+      (record) => record['msg'] === 'Reserved account-profile env key rejected.',
+    )
+    expect(rejections).toHaveLength(1)
+    expect(rejections[0]).toMatchObject({ level: 40, source: 'request.environment' })
+  })
+
+  it('profile env isolation: no value from profile A leaks into the run env of profile B (TASK-114, §58)', async () => {
+    const fixture = setup()
+    const work = await createExternalProfile(fixture)
+    const personal = await createExternalProfile(fixture, {
+      name: 'Codex Personal',
+      configHome: PERSONAL_HOME,
+    })
+
+    // read-only so the two attended runs may coexist on the same workspace.
+    const first = await fixture.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      accountProfileId: work.id,
+      approvalMode: 'read-only',
+    })
+    const second = await fixture.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      accountProfileId: personal.id,
+      approvalMode: 'read-only',
+    })
+    expect(first).toMatchObject({ ok: true, data: { status: 'running' } })
+    expect(second).toMatchObject({ ok: true, data: { status: 'running' } })
+
+    const envA = envOf(fixture, 0)
+    const envB = envOf(fixture, 1)
+    expect(envA.CODEX_HOME).toBe(WORK_HOME)
+    expect(envB.CODEX_HOME).toBe(PERSONAL_HOME)
+    // Not just the reserved key: NO env value of one run may reference the
+    // other profile's home, id, or name.
+    for (const value of Object.values(envA)) {
+      expect(value).not.toContain(PERSONAL_HOME)
+      expect(value).not.toContain(personal.id)
+      expect(value).not.toContain('Codex Personal')
+    }
+    for (const value of Object.values(envB)) {
+      expect(value).not.toContain(WORK_HOME)
+      expect(value).not.toContain(work.id)
+      expect(value).not.toContain('Codex Work')
+    }
+    // The persisted snapshots pin each run to its own account identity.
+    const runA = requireOk(fixture.runs.getById('run-1'))
+    const runB = requireOk(fixture.runs.getById('run-2'))
+    expect(runA?.profileSnapshot?.configHome).toBe(WORK_HOME)
+    expect(runA?.profileSnapshot?.accountProfileId).toBe(work.id)
+    expect(runB?.profileSnapshot?.configHome).toBe(PERSONAL_HOME)
+    expect(runB?.profileSnapshot?.accountProfileId).toBe(personal.id)
   })
 
   it('rejects executionProfileId when no ExecutionProfileManager is composed (TASK-110)', async () => {

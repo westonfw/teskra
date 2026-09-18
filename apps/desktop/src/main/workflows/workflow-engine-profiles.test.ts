@@ -1,5 +1,9 @@
 import Database from 'better-sqlite3'
 
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type {
@@ -20,6 +24,8 @@ import {
 import { migrateDatabase } from '../db/migrations'
 import { createProfileAliasManager } from '../agents/profile-alias-manager'
 import { createEventBus } from '../events/event-bus'
+import { initializeLogging, resetLoggingStateForTests } from '../logger'
+import { createTeskraPaths } from '../paths'
 import { createWorkflowEngine, type WorkflowExecutionContext } from './workflow-engine'
 import { createWorkflowRunStore } from './workflow-run-store'
 
@@ -34,10 +40,14 @@ const AT = '2026-09-14T08:00:00.000Z'
 const CONTEXT: WorkflowExecutionContext = { workspaceId: 'ws-1' }
 
 const openConnections: Database.Database[] = []
+const directories: string[] = []
 
 afterEach(() => {
   for (const connection of openConnections.splice(0)) {
     connection.close()
+  }
+  for (const directory of directories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
   }
 })
 
@@ -339,7 +349,16 @@ describe('WorkflowEngine profile aliases (TASK-111)', () => {
     expect(s.captured.requests).toHaveLength(0)
   })
 
-  it('rejects a node env carrying a reserved account-profile key (§13.2)', async () => {
+  it('rejects a node env carrying a reserved account-profile key — and logs it (§13.2)', async () => {
+    // §13.2 "拒绝并记录": arm the agent log BEFORE setup so the
+    // ProfileAliasManager's rejection leaves a WARN record (TASK-114).
+    resetLoggingStateForTests()
+    const logHome = mkdtempSync(join(tmpdir(), 'teskra-task114-wf-log-'))
+    directories.push(logHome)
+    const initialized = initializeLogging(createTeskraPaths({ TESKRA_HOME: logHome }), {
+      sync: true,
+    })
+    if (!initialized.ok) throw new Error(initialized.error.message)
     const definition: WorkflowDefinition = {
       id: 'reserved-env-workflow',
       steps: [
@@ -361,6 +380,13 @@ describe('WorkflowEngine profile aliases (TASK-111)', () => {
     expect(step.status).toBe('failed')
     expect(String(step.result?.['error'])).toContain('CODEX_HOME')
     expect(s.captured.requests).toHaveLength(0)
+    const logged = readFileSync(join(logHome, 'logs', 'agent.log'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((record) => record['msg'] === 'Reserved account-profile env key rejected.')
+    expect(logged).toHaveLength(1)
+    expect(logged[0]).toMatchObject({ level: 40, source: 'workflow node "impl"' })
   })
 
   it('fails closed when the runtime has no alias resolver but a node declares aliases', async () => {

@@ -13,6 +13,7 @@ import type {
   ProfileAliasRepository,
 } from '../db/repositories'
 import { type InternalAppError, toPublicError } from '../errors'
+import { getLogger } from '../logger'
 import { assertNoReservedEnvKeys } from './accounts/reserved-env-keys'
 
 /**
@@ -246,10 +247,17 @@ export function createProfileAliasManager(deps: ProfileAliasManagerDeps): Profil
 
     resolveAgentNodeProfiles(input) {
       // §13.2 third line of defense: a workflow node must not set the env
-      // keys an account profile owns — rejected, never silently dropped.
+      // keys an account profile owns — rejected AND logged (never silently
+      // dropped), same contract as the AgentManager start path.
       const reserved = deps.reservedEnvKeys?.() ?? []
       const envCheck = assertNoReservedEnvKeys(input.env, `${input.source} env`, reserved)
-      if (!envCheck.ok) return envCheck
+      if (!envCheck.ok) {
+        getLogger('agent').warn(
+          { source: input.source, error: envCheck.error },
+          'Reserved account-profile env key rejected.',
+        )
+        return envCheck
+      }
 
       let accountProfileId: string | undefined
       if (input.accountProfileAlias !== undefined) {
