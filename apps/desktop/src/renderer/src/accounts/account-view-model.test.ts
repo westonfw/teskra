@@ -2,9 +2,11 @@ import type { AgentAccountProfile, ResolvedConfig } from '@teskra/contracts'
 import { describe, expect, it, vi } from 'vitest'
 
 import { enUS, type TranslationKey } from '../i18n/en-US'
+import { zhCN } from '../i18n/zh-CN'
 import { accountLoginTransport, type AccountLoginBridge } from './account-login-transport'
 import {
   accountLastUsedLabel,
+  accountLoginAvailable,
   accountRuntimeLabel,
   accountStatusTag,
   defaultAccountProfileId,
@@ -198,5 +200,31 @@ describe('isValidConfigHomePath (§5.3)', () => {
     expect(isValidConfigHomePath(String.raw`%USERPROFILE%\.codex`)).toBe(false)
     expect(isValidConfigHomePath('.codex')).toBe(false)
     expect(isValidConfigHomePath('')).toBe(false)
+  })
+})
+
+describe('accountLoginAvailable (TASK-113, §49)', () => {
+  it('offers the login terminal for managed profiles but never for external ones', () => {
+    expect(accountLoginAvailable(makeProfile({ authType: 'subscription' }))).toBe(true)
+    expect(accountLoginAvailable(makeProfile({ authType: 'external' }))).toBe(false)
+  })
+})
+
+describe('§51 migration guidance copy (TASK-113)', () => {
+  it('keeps the first-run guidance and external-account strings in both dictionaries', () => {
+    const keys = [
+      'accounts.empty.guidance',
+      'accounts.addExternal',
+      'accounts.managedExternally',
+      'accounts.remove.deleteHomeExternal',
+    ] as const
+    for (const key of keys) {
+      expect(typeof enUS[key]).toBe('string')
+      expect(typeof zhCN[key]).toBe('string')
+    }
+    // The zh-CN guidance is the design document's §51 sentence verbatim.
+    expect(zhCN['accounts.empty.guidance']).toBe(
+      '你当前在用 CLI 的默认账号。要挂多个账号，请添加 Profile。',
+    )
   })
 })

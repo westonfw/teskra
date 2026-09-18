@@ -15,7 +15,8 @@ import type {
 } from '@teskra/contracts'
 
 import { createConfigService } from '../config/config-service'
-import { migrateDatabase } from '../db/migrations'
+import { runMigrations } from '../db/migrate'
+import { MIGRATIONS, migrateDatabase } from '../db/migrations'
 import {
   createAccountProfileRepository,
   createAgentEventRepository,
@@ -145,7 +146,7 @@ interface Fixture {
   readonly paths: TeskraPaths
 }
 
-function setup(options: { withAccountProfiles?: boolean } = {}): Fixture {
+function setup(options: { withAccountProfiles?: boolean; legacyUpgrade?: boolean } = {}): Fixture {
   const withAccountProfiles = options.withAccountProfiles !== false
   const directory = mkdtempSync(join(tmpdir(), 'teskra-task100-'))
   directories.push(directory)
@@ -153,6 +154,24 @@ function setup(options: { withAccountProfiles?: boolean } = {}): Fixture {
 
   const connection = new Database(':memory:')
   connection.pragma('foreign_keys = ON')
+  if (options.legacyUpgrade === true) {
+    // TASK-113 (§51): simulate a pre-Milestone-24 database — apply up to v11,
+    // hold real pre-upgrade rows, then let the normal migration chain finish.
+    const upToEleven = runMigrations(connection, MIGRATIONS.slice(0, 11))
+    if (!upToEleven.ok) throw new Error(upToEleven.error.message)
+    connection
+      .prepare(
+        `INSERT INTO workspaces (id, name, runtime_kind, path, created_at, updated_at)
+         VALUES ('legacy-ws', 'Legacy WS', 'wsl', '/legacy', '2026-09-12T00:00:00.000Z', '2026-09-12T00:00:00.000Z')`,
+      )
+      .run()
+    connection
+      .prepare(
+        `INSERT INTO agent_runs (id, workspace_id, agent_type, status, execution_mode, run_dir, created_at, updated_at)
+         VALUES ('legacy-run', 'legacy-ws', 'codex', 'failed', 'attended', 'runs/legacy-run', '2026-09-12T00:00:00.000Z', '2026-09-12T00:00:00.000Z')`,
+      )
+      .run()
+  }
   const migrated = migrateDatabase(connection)
   if (!migrated.ok) throw new Error(migrated.error.message)
   databases.push(connection)
@@ -288,6 +307,36 @@ describe('assertNoReservedEnvKeys (§13.2)', () => {
 })
 
 describe('AgentManager account profile integration (TASK-100)', () => {
+  it('upgraded-from-v11 database: zero profile rows, legacy start stays byte-identical (TASK-113, §50.1/§51)', async () => {
+    const fixture = setup({ legacyUpgrade: true })
+    // §51: the upgrade creates tables only — no virtual default Profile (§50).
+    for (const table of ['agent_account_profiles', 'account_events', 'profile_aliases']) {
+      expect(fixture.connection.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()).toEqual({
+        n: 0,
+      })
+    }
+    // Historical runs gained the identity columns as NULL.
+    expect(
+      fixture.connection
+        .prepare(
+          `SELECT account_profile_id, profile_snapshot_json FROM agent_runs WHERE id = 'legacy-run'`,
+        )
+        .get(),
+    ).toEqual({ account_profile_id: null, profile_snapshot_json: null })
+
+    const started = await fixture.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+
+    expect(started).toMatchObject({ ok: true, data: { id: 'run-1', status: 'running' } })
+    // §50.1: no CODEX_HOME / CLAUDE_CONFIG_DIR projection — the CLI keeps
+    // using its own default home, exactly as before the upgrade.
+    const env = envOf(fixture)
+    expect(env).not.toHaveProperty('CODEX_HOME')
+    expect(env).not.toHaveProperty('CLAUDE_CONFIG_DIR')
+    const run = requireOk(fixture.runs.getById('run-1'))
+    expect(run?.accountProfileId).toBeUndefined()
+    expect(run?.profileSnapshot).toBeUndefined()
+  })
+
   it('legacy start (no profile, no default) projects no config dir env — byte-identical (§52)', async () => {
     const fixture = setup()
     // A profile EXISTING but not being the default must not change anything (§37.1).

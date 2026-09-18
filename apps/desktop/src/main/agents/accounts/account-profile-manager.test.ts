@@ -429,6 +429,29 @@ describe('AccountProfileManager remove / enable (TASK-097, §47)', () => {
     if (result.ok) return
     expect(result.error.code).toBe('VALIDATION_FAILED')
   })
+
+  it('enable on an external profile never touches its home or status (TASK-113, §49/§50.2)', async () => {
+    const fixture = setup()
+    const created = requireOk(
+      await fixture.manager.create({
+        agentId: 'codex',
+        name: 'Default Codex',
+        authType: 'external',
+        runtime: UBUNTU,
+        configHome: '/home/weston/.codex',
+      }),
+    )
+    requireOk(await fixture.manager.remove(created.id))
+
+    const enabled = requireOk(await fixture.manager.enable(created.id))
+
+    expect(enabled.enabled).toBe(true)
+    // §47.2 (3) home rebuild applies to managed homes only — an external home
+    // (which may not even exist on this machine) is never recreated, and its
+    // status is never forced to login-required.
+    expect(enabled.status).toBe('unknown')
+    expect(existsSync(fixture.paths.agentProfilesRoot())).toBe(false)
+  })
 })
 
 describe('AccountProfileManager ownership guard (TASK-097, §48.2)', () => {

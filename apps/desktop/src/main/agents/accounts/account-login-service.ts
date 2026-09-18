@@ -37,6 +37,8 @@ import type { AccountProfileAdapterRegistry } from './account-profile-adapter'
  *   value (no detect, never writes expired).
  * - Only a NATURAL exit runs the post-exit detect that updates Profile.status.
  * - dispose() stops every session (P0-2) — no orphaned login processes.
+ * - External profiles (§49) are refused: Teskra never modifies the login
+ *   state of a home it does not manage.
  *
  * The service also owns detectProfileStatus() — the "probe with the adapter,
  * persist, emit account.status_changed" sequence — shared by the post-exit
@@ -296,6 +298,18 @@ export function createAccountLoginService(deps: AccountLoginServiceDeps): Accoun
       return profileNotFound(profileId)
     }
     const profile = found.data
+    // §49: an external home is managed outside Teskra — the login terminal
+    // would run the CLI's login flow against it and rewrite its auth files,
+    // so Teskra refuses to start a login session for it at all.
+    if (profile.authType === 'external') {
+      return fail({
+        code: 'VALIDATION_FAILED',
+        message:
+          'This account profile is managed externally — sign in with the CLI directly, outside Teskra.',
+        retryable: false,
+        detail: `login rejected for external profile ${profileId} (design §49)`,
+      })
+    }
     const adapter = deps.adapters.get(profile.agentId)
     if (adapter === undefined) {
       return fail({

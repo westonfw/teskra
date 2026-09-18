@@ -214,6 +214,44 @@ describe('AccountLoginService (TASK-102 §24)', () => {
     if (!noAdapter.ok) expect(noAdapter.error.code).toBe('CAPABILITY_NOT_AVAILABLE')
   })
 
+  it('refuses to start a login session for an external profile (TASK-113, §49)', async () => {
+    const external: AgentAccountProfile = {
+      ...PROFILE,
+      id: 'acct-external',
+      authType: 'external',
+      configHome: '/home/dev/.codex',
+    }
+    const { processes, service } = setup({ profiles: [external] })
+
+    const result = await service.start({ profileId: 'acct-external' })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('VALIDATION_FAILED')
+      expect(result.error.message).toContain('managed externally')
+    }
+    // Teskra never modifies an external home's login state (§49): no process,
+    // no session.
+    expect(processes.starts).toHaveLength(0)
+    expect(service.sessionForProfile('acct-external')).toBeUndefined()
+  })
+
+  it('still detects the status of an external profile — probing reads, never writes login state (§49)', async () => {
+    const external: AgentAccountProfile = {
+      ...PROFILE,
+      id: 'acct-external',
+      authType: 'external',
+      configHome: '/home/dev/.codex',
+      status: 'unknown',
+    }
+    const { profiles, service } = setup({ profiles: [external] })
+
+    const detected = await service.detectProfileStatus('acct-external')
+
+    expect(detected.ok && detected.data.status).toBe('ready')
+    expect(profiles.statuses).toEqual([{ id: 'acct-external', status: 'ready' }])
+  })
+
   it('mutex: a repeated start for the same profile returns the existing session without spawning', async () => {
     const { processes, service } = setup()
 

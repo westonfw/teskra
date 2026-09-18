@@ -24,6 +24,7 @@ import { AliasBindingsCard } from '../../accounts/alias-bindings'
 import { useAccountProfileStore } from '../../accounts/account-profile-store'
 import {
   accountLastUsedLabel,
+  accountLoginAvailable,
   accountRuntimeLabel,
   accountStatusTag,
   defaultAccountProfileId,
@@ -231,9 +232,12 @@ function AccountCard({ profile, isDefault, onEdit, onRemove, onLogin }: AccountC
               {t('accounts.useAsDefault')}
             </Button>
           )}
-          <Button size="small" onClick={onLogin}>
-            {t('accounts.open')}
-          </Button>
+          {/* §49: external homes are managed outside Teskra — no login terminal. */}
+          {accountLoginAvailable(profile) && (
+            <Button size="small" onClick={onLogin}>
+              {t('accounts.open')}
+            </Button>
+          )}
           <Dropdown
             menu={{
               items: [

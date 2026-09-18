@@ -108,6 +108,20 @@ describe('migrations 012/013 (TASK-095)', () => {
     }
   })
 
+  it('writes ZERO profile rows during the upgrade — tables only (TASK-113, §51)', () => {
+    const db = memoryDb()
+    expect(runMigrations(db, MIGRATIONS.slice(0, 11)).ok).toBe(true)
+    insertWorkspace(db)
+    insertRun(db, 'run-1')
+    expect(migrateDatabase(db).ok).toBe(true)
+
+    // §50/§51: no virtual default Profile, no migration-side seeding — the
+    // legacy fallback needs no record, so every new table must stay empty.
+    for (const table of ['agent_account_profiles', 'account_events', 'profile_aliases']) {
+      expect(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()).toEqual({ n: 0 })
+    }
+  })
+
   it('is re-runnable: a second migrateDatabase applies nothing', () => {
     const db = migratedDb()
     const second = migrateDatabase(db)

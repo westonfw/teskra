@@ -110,6 +110,15 @@ export function slugifyAccountName(name: string): string {
     .replace(/-+$/, '')
 }
 
+/**
+ * §49 — an external profile's login state is managed outside Teskra, so the
+ * login terminal (which would rewrite its auth files) is not offered for it.
+ * Main rejects the login channel too; this mirrors that decision in the UI.
+ */
+export function accountLoginAvailable(profile: AgentAccountProfile): boolean {
+  return profile.authType !== 'external'
+}
+
 /** Groups profiles by agentId, preserving definition order then createdAt. */
 export function profilesByAgent(
   profiles: readonly AgentAccountProfile[],
