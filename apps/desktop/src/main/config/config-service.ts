@@ -463,6 +463,7 @@ export function createConfigService(deps: ConfigServiceDeps): ConfigService {
                 layer: 'workspace',
                 message:
                   'The workspace is restricted; the repo-local config layer was not loaded (trust the workspace to enable it).',
+                kind: 'workspace-restricted',
               },
               { workspaceId: options.workspaceId },
             )

@@ -518,6 +518,8 @@ export const zhCN: Record<TranslationKey, string> = {
   'settings.noWorkspaceBody': '全局设置仍然可用。打开工作区即可读写其仓库本地配置。',
   'settings.loading': '正在加载配置…',
   'settings.noSections': '尚未注册任何设置区块。',
+  'settings.warning.workspace-restricted':
+    '工作区处于受限模式，未加载仓库本地配置（信任该工作区后才会加载）。',
   'settings.section.agents.title': 'Agents',
   'settings.section.agents.description': '已安装的 Coding Agent 集成',
   'settings.section.permissions.title': '权限',

@@ -155,6 +155,11 @@ export const configWarningSchema = z.strictObject({
   layer: configLayerNameSchema,
   fieldPath: z.string().optional(),
   message: z.string(),
+  /**
+   * Stable machine-readable identifier. When present, the renderer translates
+   * `settings.warning.<kind>` and falls back to `message` for unknown kinds.
+   */
+  kind: z.string().min(1).optional(),
 })
 export type ConfigWarning = z.infer<typeof configWarningSchema>
 

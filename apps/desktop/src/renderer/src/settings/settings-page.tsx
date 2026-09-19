@@ -4,7 +4,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { ResolvedConfig, WritableConfigLayer } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../components/app-error-alert'
-import { useTranslation } from '../i18n'
+import { hasTranslationKey, useTranslation } from '../i18n'
 import type { SettingsSectionRegistry } from './registry'
 import { useSettingsStore } from './settings-store'
 
@@ -90,15 +90,20 @@ export function SettingsPage({ registry, workspaceId: selectedWorkspaceId }: Set
         {error !== undefined && (
           <AppErrorAlert className="settings-notice" error={error} onClose={clearError} />
         )}
-        {warnings.map((warning) => (
-          <Alert
-            className="settings-notice"
-            key={`${warning.layer}:${warning.fieldPath ?? warning.message}`}
-            type="warning"
-            showIcon
-            message={warning.message}
-          />
-        ))}
+        {warnings.map((warning) => {
+          const kindKey = `settings.warning.${warning.kind ?? ''}`
+          const message =
+            warning.kind !== undefined && hasTranslationKey(kindKey) ? t(kindKey) : warning.message
+          return (
+            <Alert
+              className="settings-notice"
+              key={`${warning.layer}:${warning.fieldPath ?? warning.message}`}
+              type="warning"
+              showIcon
+              message={message}
+            />
+          )
+        })}
 
         <div className="settings-panel">
           <Spin spinning={loading} tip={t('settings.loading')}>

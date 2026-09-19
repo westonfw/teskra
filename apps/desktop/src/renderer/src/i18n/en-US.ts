@@ -551,6 +551,8 @@ export const enUS = {
     'Global settings remain available. Open a workspace to read or write its repository-local configuration.',
   'settings.loading': 'Loading configuration…',
   'settings.noSections': 'No Settings sections are registered.',
+  'settings.warning.workspace-restricted':
+    'The workspace is restricted; the repo-local config layer was not loaded (trust the workspace to enable it).',
   'settings.section.agents.title': 'Agents',
   'settings.section.agents.description': 'Installed coding Agent integrations',
   'settings.section.permissions.title': 'Permissions',
