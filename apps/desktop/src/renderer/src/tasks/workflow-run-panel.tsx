@@ -149,7 +149,7 @@ export function WorkflowRunPanel({ workspaceId, taskId }: WorkflowRunPanelProps)
         </Button>
       }
     >
-      {error !== undefined && (
+      {error !== undefined && !launchOpen && (
         <AppErrorAlert className="page-alert" error={error} onClose={clearError} />
       )}
       <Spin spinning={loading}>
@@ -318,6 +318,9 @@ export function WorkflowRunPanel({ workspaceId, taskId }: WorkflowRunPanelProps)
         destroyOnHidden
       >
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          {/* Launch failures keep the modal open — surface the reason inside
+              it, otherwise the page-level alert sits hidden behind the modal. */}
+          {error !== undefined && <AppErrorAlert error={error} onClose={clearError} />}
           <Typography.Text type="secondary">{t('workflow.launch.hint')}</Typography.Text>
           <Typography.Text strong>{t('workflow.launch.implementer')}</Typography.Text>
           <Select
