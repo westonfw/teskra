@@ -125,14 +125,27 @@ function fail<T>(error: InternalAppError): IpcResult<T> {
   return { ok: false, error: toPublicError(error) }
 }
 
-function invalid<T>(message: string, detail: string): IpcResult<T> {
-  return fail({ code: 'VALIDATION_FAILED', message, retryable: false, detail })
+function invalid<T>(
+  message: string,
+  detail: string,
+  messageKey?: string,
+  params?: Record<string, string | number>,
+): IpcResult<T> {
+  return fail({
+    code: 'VALIDATION_FAILED',
+    message,
+    ...(messageKey === undefined ? {} : { messageKey }),
+    ...(params === undefined ? {} : { params }),
+    retryable: false,
+    detail,
+  })
 }
 
 function shuttingDown<T>(detail: string): IpcResult<T> {
   return fail({
     code: 'UNKNOWN',
     message: 'Teskra is shutting down; the workflow run was not started.',
+    messageKey: 'errorMessage.shuttingDown',
     retryable: false,
     detail,
   })
@@ -195,6 +208,8 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
       return invalid(
         `Workflow definition "${DEFAULT_FULL_WORKFLOW_ID}" is invalid and cannot drive the default full workflow.`,
         `${override.path}: ${override.issues.join('; ')}`,
+        'errorMessage.fullWorkflowOverrideInvalid',
+        { id: DEFAULT_FULL_WORKFLOW_ID },
       )
     }
     return extractFullWorkflowConfig(override.definition)
@@ -209,12 +224,15 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
       return invalid(
         `Task "${request.taskId}" was not found.`,
         `FullWorkflowService could not resolve task id=${JSON.stringify(request.taskId)}`,
+        'errorMessage.taskNotFound',
+        { id: request.taskId },
       )
     }
     if (task.data.workspaceId !== request.workspaceId) {
       return invalid(
         'The task belongs to a different workspace.',
         `task workspace=${task.data.workspaceId} full-workflow workspace=${request.workspaceId}`,
+        'errorMessage.taskWorkspaceMismatch',
       )
     }
     const workspace = deps.workspaces.getById(request.workspaceId)
@@ -223,6 +241,8 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
       return invalid(
         `Workspace "${request.workspaceId}" was not found.`,
         `FullWorkflowService could not resolve workspace id=${JSON.stringify(request.workspaceId)}`,
+        'errorMessage.workspaceNotFound',
+        { id: request.workspaceId },
       )
     }
 
@@ -237,6 +257,7 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
       return invalid(
         'The default full workflow requires a confirmed acceptance criteria set; confirm one first.',
         `task id=${JSON.stringify(request.taskId)} has no confirmed criteria set`,
+        'errorMessage.fullWorkflowNoConfirmedCriteria',
       )
     }
 
@@ -314,6 +335,8 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
         return invalid(
           `Agent "${agentId}" is not registered.`,
           `FullWorkflowService could not resolve agent=${JSON.stringify(agentId)}`,
+          'errorMessage.agentNotRegistered',
+          { agentType: agentId },
         )
       }
     }
@@ -424,6 +447,8 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
         return invalid(
           `Workflow run "${runId}" was not found.`,
           `FullWorkflowService could not resolve run id=${JSON.stringify(runId)}`,
+          'errorMessage.workflowRunNotFound',
+          { id: runId },
         )
       }
       const { run, steps } = detail.data

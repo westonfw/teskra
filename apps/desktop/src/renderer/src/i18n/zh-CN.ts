@@ -255,6 +255,12 @@ export const zhCN: Record<TranslationKey, string> = {
   'errorMessage.onlyInterruptedResumable': '只有已中断的 Agent 运行可以恢复。',
   'errorMessage.workspaceRequiredForRunHistory': '列出历史 Agent 运行时必须指定工作区。',
   'errorMessage.taskNotFound': '找不到任务“{id}”。',
+  'errorMessage.taskWorkspaceMismatch': '该任务属于另一个工作区。',
+  'errorMessage.workflowRunNotFound': '找不到 Workflow 运行“{id}”。',
+  'errorMessage.fullWorkflowOverrideInvalid': 'Workflow 定义“{id}”无效，无法驱动默认完整流程。',
+  'errorMessage.fullWorkflowNoConfirmedCriteria':
+    '默认完整流程需要一个已确认的验收标准集——请先确认一个。',
+  'errorMessage.shuttingDown': 'Teskra 正在关闭，未启动该 Workflow 运行。',
   'errorMessage.worktreeNotFound': '找不到 Worktree“{id}”。',
   'errorMessage.agentNotRegistered': 'Agent“{agentType}”未注册。',
   'errorMessage.agentNotInstalled': '当前工作区运行环境中未安装 {agent}。',

@@ -278,6 +278,13 @@ export const enUS = {
   'errorMessage.workspaceRequiredForRunHistory':
     'A workspace is required when listing historical Agent runs.',
   'errorMessage.taskNotFound': 'Task "{id}" was not found.',
+  'errorMessage.taskWorkspaceMismatch': 'The task belongs to a different workspace.',
+  'errorMessage.workflowRunNotFound': 'Workflow run "{id}" was not found.',
+  'errorMessage.fullWorkflowOverrideInvalid':
+    'Workflow definition "{id}" is invalid and cannot drive the default full workflow.',
+  'errorMessage.fullWorkflowNoConfirmedCriteria':
+    'The default full workflow requires a confirmed acceptance criteria set; confirm one first.',
+  'errorMessage.shuttingDown': 'Teskra is shutting down; the workflow run was not started.',
   'errorMessage.worktreeNotFound': 'Worktree "{id}" was not found.',
   'errorMessage.agentNotRegistered': 'Agent "{agentType}" is not registered.',
   'errorMessage.agentNotInstalled': '{agent} is not installed in this workspace runtime.',
