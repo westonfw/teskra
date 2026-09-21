@@ -90,6 +90,17 @@ export interface AccountLoginServiceDeps {
   readonly accountEvents?: Pick<AccountEventRepository, 'append'> | undefined
   readonly createRuntime?: ((ref: WorkspaceRuntimeRef) => IpcResult<WorkspaceRuntime>) | undefined
   /**
+   * Resolves the agent's executable through the AgentDetector — the same
+   * where.exe/which resolution the Agent Run path (cli-agent-adapter) uses —
+   * because node-pty's CreateProcess cannot resolve npm shims from PATH.
+   * Detection results are cached (5 min TTL), so the probe is cheap. Returns
+   * undefined when detection fails or the CLI is not installed; the login
+   * then falls back to the adapter's bare command, matching the Run path's
+   * "detection failure falls back to previous behavior" contract.
+   */
+  readonly detectExecutable?:
+    ((agentId: string, runtime: WorkspaceRuntimeRef) => Promise<string | undefined>) | undefined
+  /**
    * WSL-on-Windows only: creates the per-profile login working directory
    * inside the distro filesystem (argv-array `mkdir -p --`, the same
    * mechanism the AccountProfileManager uses). Without a runner a WSL login
@@ -434,6 +445,24 @@ export function createAccountLoginService(deps: AccountLoginServiceDeps): Accoun
     if (!command.ok) {
       return command
     }
+    // Launch with the detector-resolved full path (e.g. the `codex.cmd`
+    // where.exe line) instead of the bare command name — node-pty's
+    // CreateProcess cannot resolve npm shims from PATH. Same contract as the
+    // Agent Run path: any detection failure falls back to the bare command.
+    let executable = command.data.command
+    if (deps.detectExecutable !== undefined) {
+      try {
+        const detected = await deps.detectExecutable(profile.agentId, profile.runtime)
+        if (detected !== undefined) {
+          executable = detected
+        }
+      } catch (cause) {
+        logger.warn(
+          { profileId, agentId: profile.agentId, err: cause },
+          'Executable detection failed; falling back to the bare login command.',
+        )
+      }
+    }
     const runtime = createRuntime(profile.runtime)
     if (!runtime.ok) {
       return runtime
@@ -475,7 +504,7 @@ export function createAccountLoginService(deps: AccountLoginServiceDeps): Accoun
 
     const started = deps.processes.start({
       id: processId,
-      command: command.data.command,
+      command: executable,
       args: command.data.args,
       // codex/claude login is a global CLI operation against the profile's
       // CLI Home (CODEX_HOME / CLAUDE_CONFIG_DIR via env), not a workspace

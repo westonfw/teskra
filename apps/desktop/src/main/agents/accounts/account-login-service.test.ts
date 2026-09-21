@@ -169,6 +169,7 @@ function setup(
     sessionTimeoutMs?: number
     idValues?: string[]
     commands?: FakeCommands
+    detectExecutable?: AccountLoginServiceDeps['detectExecutable']
   } = {},
 ) {
   const events = createEventBus<WorkbenchEvents>()
@@ -196,6 +197,7 @@ function setup(
     createId: ids(...(overrides.idValues ?? ['sess-1', 'proc-1', 'sess-2', 'proc-2'])),
     now: () => AT,
     sessionTimeoutMs: overrides.sessionTimeoutMs,
+    detectExecutable: overrides.detectExecutable,
   })
   return { events, processes, profiles, adapter, commands, service }
 }
@@ -234,6 +236,45 @@ describe('AccountLoginService (TASK-102 §24)', () => {
     ])
     // No workspace binding — login is a global CLI operation (§24).
     expect(start?.workspaceId).toBeUndefined()
+  })
+
+  it('launches the detector-resolved executable path instead of the bare command, args unchanged', async () => {
+    const detectExecutable = vi.fn(() =>
+      Promise.resolve('C:\\Users\\dev\\AppData\\Roaming\\npm\\codex.cmd'),
+    )
+    const { processes, service } = setup({ detectExecutable })
+
+    const result = await service.start({ profileId: 'acct-1' })
+
+    expect(result.ok).toBe(true)
+    expect(detectExecutable).toHaveBeenCalledWith('codex', PROFILE.runtime)
+    const start = processes.starts[0]
+    expect(start?.command).toBe('C:\\Users\\dev\\AppData\\Roaming\\npm\\codex.cmd')
+    expect(start?.args).toEqual(['login'])
+  })
+
+  it('falls back to the bare command when detection reports the CLI as not installed', async () => {
+    const detectExecutable = vi.fn(() => Promise.resolve(undefined))
+    const { processes, service } = setup({ detectExecutable })
+
+    const result = await service.start({ profileId: 'acct-1' })
+
+    expect(result.ok).toBe(true)
+    const start = processes.starts[0]
+    expect(start?.command).toBe('codex')
+    expect(start?.args).toEqual(['login'])
+  })
+
+  it('falls back to the bare command when detection throws', async () => {
+    const detectExecutable = vi.fn(() => Promise.reject(new Error('where.exe exploded')))
+    const { processes, service } = setup({ detectExecutable })
+
+    const result = await service.start({ profileId: 'acct-1' })
+
+    expect(result.ok).toBe(true)
+    const start = processes.starts[0]
+    expect(start?.command).toBe('codex')
+    expect(start?.args).toEqual(['login'])
   })
 
   it('refuses a disabled profile with ACCOUNT_PROFILE_DISABLED before any side effect', async () => {

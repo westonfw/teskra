@@ -473,6 +473,15 @@ export async function composeTeskraRuntime(
     accountEvents: repositories.accountEvents,
     createRuntime: runtimeFor,
     commands,
+    // node-pty cannot resolve npm shims from PATH — resolve the login
+    // command through the same detector the Agent Run path uses (5-min TTL
+    // cache); any failure falls back to the adapter's bare command.
+    detectExecutable: async (agentId, runtime) => {
+      const detected = await agentDetector.detect({ agentId, runtime })
+      return detected.ok && detected.data.installed && detected.data.executable !== undefined
+        ? detected.data.executable
+        : undefined
+    },
   })
   const doctor = createDoctorService({
     paths,
