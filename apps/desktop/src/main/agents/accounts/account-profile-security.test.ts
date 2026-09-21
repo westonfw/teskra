@@ -18,6 +18,8 @@ import type { WorkspaceRuntime } from '../../workspace/runtime'
 import type { AgentDetector } from '../agent-detector'
 import { agentProcessId } from '../adapters/cli-agent-adapter'
 import { createClaudeAdapter } from '../adapters/claude-adapter'
+import { createProfileAliasManager } from '../profile-alias-manager'
+import { assertNoReservedEnvKeys } from './reserved-env-keys'
 
 /**
  * TASK-114 (design §58) — Account Profile Security Tests.
@@ -69,6 +71,14 @@ import { createClaudeAdapter } from '../adapters/claude-adapter'
  *     — profile env written LAST even when the rejection is bypassed:
  *       agents/agent-manager-account-profiles.test.ts (codex) and THIS FILE
  *       (claude, §13.1 slot order is shared in adapters/cli-agent-adapter.ts).
+ *     — P0-1 (code-review-2026-09-21 §2): all four lines compare keys
+ *       CASE-INSENSITIVELY — a lowercase `codex_home` smuggled past an
+ *       exact-case check wins the Windows env lookup (node-pty does not
+ *       dedupe; first case-insensitive match wins). THIS FILE covers the
+ *       shared rejection check, the workflow third line, and the adapter's
+ *       conflicting-key stripping; process/process-manager-env.test.ts covers
+ *       the ProcessManager spawn-env defense plus the real node-pty
+ *       [Windows 验证] reproduction.
  *  9. WSL env isolation (CODEX_HOME / CLAUDE_CONFIG_DIR enter WSLENV without
  *     /p; values never rewritten by resolveRuntimePath)
  *     — accounts/adapters/codex-account-profile-adapter.test.ts and
@@ -221,9 +231,9 @@ describe('renderer credential isolation (§58)', () => {
 // ---------------------------------------------------------------------------
 
 describe('profile env wins over smuggled env even when §13.2 is bypassed (§13.1, claude)', () => {
-  const runtime: WorkspaceRuntime = {
-    ref: { kind: 'wsl', distro: 'Ubuntu' },
-    hostNative: true,
+  const makeRuntime = (ref: WorkspaceRuntime['ref'], hostNative = true): WorkspaceRuntime => ({
+    ref,
+    hostNative,
     resolveCommand: (command, args = [], cwd) => ({ executable: command, args, cwd }),
     resolveTerminal: () => ({ ok: true, data: { command: 'bash', args: [] } }),
     resolveCwd: (path) => path,
@@ -234,8 +244,9 @@ describe('profile env wins over smuggled env even when §13.2 is bypassed (§13.
       ok: true,
       data: `/home/test/agent-profiles/${agentId}/${slug}`,
     }),
-    validate: () => ({ ok: true, data: { kind: 'wsl', hostNative: true } }),
-  }
+    validate: () => ({ ok: true, data: { kind: ref.kind, hostNative: true } }),
+  })
+  const runtime = makeRuntime({ kind: 'wsl', distro: 'Ubuntu' })
 
   const PROFILE_HOME = '/home/test/agent-profiles/claude/work'
 
@@ -314,5 +325,212 @@ describe('profile env wins over smuggled env even when §13.2 is bypassed (§13.
     const env = deps.starts[0]?.env
     expect(env?.CLAUDE_CONFIG_DIR).toBe(PROFILE_HOME)
     expect(env?.TESKRA_RUN_ID).toBe('run-claude-security')
+  })
+
+  // [Windows 验证] P0-1: before the fix this env object carried BOTH
+  // `claude_config_dir` (smuggled, first) and `CLAUDE_CONFIG_DIR` (profile),
+  // and the smuggled casing won the case-insensitive Windows lookup.
+  it('on a windows runtime, case-variant smuggled keys are stripped so the profile casing is the only one present', async () => {
+    const windowsRuntime = makeRuntime({ kind: 'windows' })
+    const deps = dependencies()
+    const claude = createClaudeAdapter({
+      processes: deps.processes,
+      detector: deps.detector,
+      resolveRuntime: () => ({ ok: true, data: windowsRuntime }),
+    })
+    const request: AgentStartRequest = {
+      runId: 'run-claude-security',
+      workspace: {
+        id: 'workspace-1',
+        name: 'Demo',
+        runtime: windowsRuntime.ref,
+        path: '/repo',
+        trustLevel: 'trusted',
+        createdAt: '2026-09-14T00:00:00.000Z',
+        updatedAt: '2026-09-14T00:00:00.000Z',
+        env: { claude_config_dir: '/attacker/workspace' },
+      },
+      environment: { Claude_Config_Dir: '/attacker/request', teskra_run_id: 'forged' },
+      profileEnvironment: { CLAUDE_CONFIG_DIR: PROFILE_HOME },
+      approvalMode: 'read-only',
+    }
+
+    const started = await claude.start(request)
+
+    expect(started.ok).toBe(true)
+    expect(deps.starts).toHaveLength(1)
+    const env = deps.starts[0]?.env ?? {}
+    expect(env['CLAUDE_CONFIG_DIR']).toBe(PROFILE_HOME)
+    expect(Object.keys(env).filter((key) => key.toUpperCase() === 'CLAUDE_CONFIG_DIR')).toEqual([
+      'CLAUDE_CONFIG_DIR',
+    ])
+    // The system-owned TESKRA_* keys get the same defense.
+    expect(env['TESKRA_RUN_ID']).toBe('run-claude-security')
+    expect(Object.keys(env).filter((key) => key.toUpperCase() === 'TESKRA_RUN_ID')).toEqual([
+      'TESKRA_RUN_ID',
+    ])
+  })
+
+  // WSL-on-Windows depth-in-depth (code-review-2026-09-21 §2 follow-up): the
+  // request env is first set on the wsl.exe WINDOWS process and only then
+  // forwarded into Linux by name via WSLENV. The wsl.exe layer resolves env
+  // names case-insensitively (first match wins), so on a Windows host a WSL
+  // runtime needs the same stripping as a windows runtime.
+  it('on a wsl runtime on a Windows host, case-variant smuggled keys are stripped like on windows', async () => {
+    const wslOnWindows = makeRuntime({ kind: 'wsl', distro: 'Ubuntu' }, /* hostNative */ false)
+    const deps = dependencies()
+    const claude = createClaudeAdapter({
+      processes: deps.processes,
+      detector: deps.detector,
+      resolveRuntime: () => ({ ok: true, data: wslOnWindows }),
+    })
+    const request: AgentStartRequest = {
+      runId: 'run-claude-security',
+      workspace: {
+        id: 'workspace-1',
+        name: 'Demo',
+        runtime: wslOnWindows.ref,
+        path: '/repo',
+        trustLevel: 'trusted',
+        createdAt: '2026-09-14T00:00:00.000Z',
+        updatedAt: '2026-09-14T00:00:00.000Z',
+        env: { claude_config_dir: '/attacker/workspace' },
+      },
+      environment: { Claude_Config_Dir: '/attacker/request', teskra_run_id: 'forged' },
+      profileEnvironment: { CLAUDE_CONFIG_DIR: PROFILE_HOME },
+      approvalMode: 'read-only',
+    }
+
+    const started = await claude.start(request)
+
+    expect(started.ok).toBe(true)
+    expect(deps.starts).toHaveLength(1)
+    const env = deps.starts[0]?.env ?? {}
+    expect(env['CLAUDE_CONFIG_DIR']).toBe(PROFILE_HOME)
+    expect(Object.keys(env).filter((key) => key.toUpperCase() === 'CLAUDE_CONFIG_DIR')).toEqual([
+      'CLAUDE_CONFIG_DIR',
+    ])
+    expect(env['TESKRA_RUN_ID']).toBe('run-claude-security')
+    expect(Object.keys(env).filter((key) => key.toUpperCase() === 'TESKRA_RUN_ID')).toEqual([
+      'TESKRA_RUN_ID',
+    ])
+  })
+
+  // A WSL workspace on a LINUX host is the native runtime (hostNative): the
+  // env is case-sensitive there, `teskra_run_id` and `TESKRA_RUN_ID` are two
+  // DISTINCT variables, so the adapter must NOT drop the base key — silently
+  // discarding a user variable would be wrong, and keeping it is harmless
+  // because nothing case-folds it over the system key.
+  it('on a wsl runtime on a Linux host, case-variant keys survive next to the profile/system keys', async () => {
+    const deps = dependencies()
+    const claude = createClaudeAdapter({
+      processes: deps.processes,
+      detector: deps.detector,
+      resolveRuntime: () => ({ ok: true, data: runtime }),
+    })
+    const request: AgentStartRequest = {
+      runId: 'run-claude-security',
+      workspace: {
+        id: 'workspace-1',
+        name: 'Demo',
+        runtime: runtime.ref,
+        path: '/repo',
+        trustLevel: 'trusted',
+        createdAt: '2026-09-14T00:00:00.000Z',
+        updatedAt: '2026-09-14T00:00:00.000Z',
+        env: { claude_config_dir: '/attacker/workspace' },
+      },
+      environment: { Claude_Config_Dir: '/attacker/request', teskra_run_id: 'forged' },
+      profileEnvironment: { CLAUDE_CONFIG_DIR: PROFILE_HOME },
+      approvalMode: 'read-only',
+    }
+
+    const started = await claude.start(request)
+
+    expect(started.ok).toBe(true)
+    expect(deps.starts).toHaveLength(1)
+    const env = deps.starts[0]?.env ?? {}
+    // The case variants are preserved as their own variables…
+    expect(env['claude_config_dir']).toBe('/attacker/workspace')
+    expect(env['Claude_Config_Dir']).toBe('/attacker/request')
+    expect(env['teskra_run_id']).toBe('forged')
+    // …while the profile/system keys still land with their own casing and value.
+    expect(env['CLAUDE_CONFIG_DIR']).toBe(PROFILE_HOME)
+    expect(env['TESKRA_RUN_ID']).toBe('run-claude-security')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// P0-1 (docs/code-review-2026-09-21.md §2): reserved-key checks fold case.
+// [Windows 验证] the underlying platform behavior was reproduced on
+// Windows 11 with the repo's node-pty (`cmd /c echo %CODEX_HOME%` with a
+// case-conflicting env block — the first case-insensitive match wins); the
+// live reproduction test lives in process/process-manager-env.test.ts.
+// ---------------------------------------------------------------------------
+
+describe('§13.2 reserved keys reject case variants on every runtime (P0-1)', () => {
+  const RESERVED = ['CODEX_HOME', 'CLAUDE_CONFIG_DIR']
+
+  it.each([
+    ['workspace.env', { codex_home: '/elsewhere' }],
+    ['workspace.env', { CLAUDE_config_DIR: '/elsewhere' }],
+    ['request.environment', { Codex_Home: '/elsewhere' }],
+    ['request.environment', { claude_config_dir: '/elsewhere' }],
+    ['workflow node "implement" env', { codex_home: '/elsewhere' }],
+  ])('rejects %s carrying %o', (source, env) => {
+    const result = assertNoReservedEnvKeys(env, source, RESERVED)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('VALIDATION_FAILED')
+    expect(result.error.message).toContain(source)
+  })
+
+  it('still passes env without reserved keys in any casing', () => {
+    expect(assertNoReservedEnvKeys(undefined, 'workspace.env', RESERVED)).toEqual({
+      ok: true,
+      data: undefined,
+    })
+    expect(
+      assertNoReservedEnvKeys({ PATH: '/bin', home: '/u', codex: 'cli' }, 'workspace.env', RESERVED)
+        .ok,
+    ).toBe(true)
+  })
+})
+
+describe('workflow node env case variants rejected at the §13.2 third line (P0-1)', () => {
+  function aliasManager() {
+    // The env screen runs before any repository call, so the repositories
+    // are never touched in these cases.
+    return createProfileAliasManager({
+      aliases: {} as never,
+      accountProfiles: {} as never,
+      executionProfiles: {} as never,
+      reservedEnvKeys: () => ['CODEX_HOME', 'CLAUDE_CONFIG_DIR'],
+    })
+  }
+
+  it.each(['codex_home', 'Codex_Home', 'claude_config_dir', 'CLAUDE_CONFIG_DIR'])(
+    'resolveAgentNodeProfiles rejects workflow env key %j',
+    (key) => {
+      const result = aliasManager().resolveAgentNodeProfiles({
+        agentId: 'codex',
+        env: { [key]: '/elsewhere' },
+        source: 'workflow node "implement"',
+      })
+      expect(result.ok).toBe(false)
+      if (result.ok) return
+      expect(result.error.code).toBe('VALIDATION_FAILED')
+      expect(result.error.message).toContain('workflow node "implement" env')
+    },
+  )
+
+  it('passes clean workflow env through untouched', () => {
+    expect(
+      aliasManager().resolveAgentNodeProfiles({
+        agentId: 'codex',
+        env: { EDITOR: 'vim' },
+        source: 'workflow node "implement"',
+      }),
+    ).toEqual({ ok: true, data: { env: { EDITOR: 'vim' } } })
   })
 })

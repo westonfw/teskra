@@ -123,7 +123,7 @@ export function resolveExecutableLookup(
  * agent process unchanged. On a Linux/WSL2 dev host a "wsl" workspace IS the
  * native filesystem (hostNative), so no translation applies.
  */
-function crossesWslBoundary(runtime: WorkspaceRuntime): boolean {
+export function crossesWslBoundary(runtime: WorkspaceRuntime): boolean {
   return runtime.ref.kind === 'wsl' && !runtime.hostNative
 }
 

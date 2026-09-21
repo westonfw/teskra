@@ -12,9 +12,15 @@ import { toPublicError } from '../../errors'
  * another account's CLI home while looking perfectly normal. Any occurrence
  * is REJECTED — never silently dropped — and the caller logs the rejection.
  *
- * Keys are compared case-sensitively: env vars on Linux/WSL are
- * case-sensitive, and on Windows node-pty passes the profile's own casing
- * last (§13.1), which wins regardless.
+ * Keys are compared case-insensitively (both sides folded to upper case). The
+ * §13.1 "profile writes its own casing last, so it wins" defense does NOT hold
+ * on Windows: node-pty serializes the env block in insertion order without
+ * deduplicating, and the Windows environment lookup is case-insensitive and
+ * returns the FIRST match — so a lowercase `codex_home` inserted before the
+ * profile's `CODEX_HOME` wins (reproduced on Windows 11, see
+ * docs/code-review-2026-09-21.md §2 P0-1). Case variants are therefore
+ * rejected on every runtime; on Linux/WSL, where env is case-sensitive,
+ * rejecting `codex_home` is harmless.
  */
 export function assertNoReservedEnvKeys(
   env: Readonly<Record<string, unknown>> | undefined,
@@ -24,8 +30,8 @@ export function assertNoReservedEnvKeys(
   if (env === undefined || reservedKeys.length === 0) {
     return { ok: true, data: undefined }
   }
-  const reserved = new Set(reservedKeys)
-  const offenders = Object.keys(env).filter((key) => reserved.has(key))
+  const reserved = new Set(reservedKeys.map((key) => key.toUpperCase()))
+  const offenders = Object.keys(env).filter((key) => reserved.has(key.toUpperCase()))
   if (offenders.length === 0) {
     return { ok: true, data: undefined }
   }

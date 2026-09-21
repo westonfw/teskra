@@ -24,6 +24,31 @@ import {
 const DEFAULT_COLS = 120
 const DEFAULT_ROWS = 30
 
+/**
+ * P0-1 (docs/code-review-2026-09-21.md §2): node-pty serializes the Windows
+ * env block in insertion order without deduplicating, and the Windows
+ * environment lookup is case-insensitive and returns the FIRST match — so a
+ * base key (e.g. `Path` from process.env, or a smuggled lowercase
+ * `codex_home`) inserted before the overlay's own casing would shadow it.
+ * Dropping every base key that case-insensitively collides with an overlay
+ * key guarantees the explicit overlay value is the only one present. Use only
+ * on Windows hosts: Linux/WSL env is case-sensitive, where `FOO` and `foo`
+ * are distinct variables that must both survive.
+ */
+export function dropCaseShadowedKeys<T>(
+  base: Readonly<Record<string, T>>,
+  overlay: Readonly<Record<string, unknown>>,
+): Record<string, T> {
+  const overlayKeys = new Set(Object.keys(overlay).map((key) => key.toUpperCase()))
+  const kept: Record<string, T> = {}
+  for (const [key, value] of Object.entries(base)) {
+    if (!overlayKeys.has(key.toUpperCase())) {
+      kept[key] = value
+    }
+  }
+  return kept
+}
+
 export interface ProcessStartRequest {
   readonly id: string
   readonly command: string
@@ -292,10 +317,24 @@ export function createProcessManager(deps: ProcessManagerDeps): ProcessManager {
             // host process; resolveSpawnEnv declares every key in WSLENV so the
             // values (TESKRA_HANDOFF_PATH, workspace env, secrets) actually
             // reach the Linux process. Host-native runtimes pass through.
-            env: {
-              ...process.env,
-              ...resolveSpawnEnv(request.runtime, request.env ?? {}, process.env['WSLENV']),
-            },
+            // On a Windows host the inherited env is also screened for keys
+            // that case-insensitively collide with the request env — node-pty
+            // does not dedupe and the first case-insensitive match wins, so an
+            // inherited `Codex_Home` would otherwise shadow the request's
+            // `CODEX_HOME` (dropCaseShadowedKeys).
+            env: (() => {
+              const spawnEnv = resolveSpawnEnv(
+                request.runtime,
+                request.env ?? {},
+                process.env['WSLENV'],
+              )
+              return {
+                ...(hostPlatform === 'win32'
+                  ? dropCaseShadowedKeys(process.env, spawnEnv)
+                  : process.env),
+                ...spawnEnv,
+              }
+            })(),
             useConpty: true,
           },
         )

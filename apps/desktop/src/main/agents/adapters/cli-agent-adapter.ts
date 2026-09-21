@@ -12,8 +12,16 @@ import { isWorkspaceSecretRef } from '@teskra/contracts'
 import path from 'node:path'
 
 import { getLogger } from '../../logger'
-import type { ProcessManager, ProcessStartRequest } from '../../process/process-manager'
-import { resolveRuntimePath, type WorkspaceRuntime } from '../../workspace/runtime'
+import {
+  dropCaseShadowedKeys,
+  type ProcessManager,
+  type ProcessStartRequest,
+} from '../../process/process-manager'
+import {
+  crossesWslBoundary,
+  resolveRuntimePath,
+  type WorkspaceRuntime,
+} from '../../workspace/runtime'
 import type { AgentDetector } from '../agent-detector'
 import type {
   AgentAdapterDetectionRequest,
@@ -84,18 +92,50 @@ function plainWorkspaceEnv(
 function processEnvironment(
   request: AgentStartRequest,
   launch: CliAgentLaunch,
+  runtime: WorkspaceRuntime,
 ): Readonly<Record<string, string>> {
-  return {
+  const base: Record<string, string> = {
     ...plainWorkspaceEnv(request.workspace.env, request.runId),
     ...request.environment,
     ...launch.env,
-    // Milestone 24 §13.1: the account-profile env occupies the launch slot —
-    // after request.environment, before the system-owned TESKRA_* keys — so
-    // the profile identity always wins over workspace/request env (§13.2).
-    ...request.profileEnvironment,
+  }
+  // Milestone 24 §13.1: the account-profile env occupies the launch slot —
+  // after request.environment, before the system-owned TESKRA_* keys — so
+  // the profile identity always wins over workspace/request env (§13.2).
+  const profileEnv = request.profileEnvironment ?? {}
+  const systemEnv: Record<string, string> = {
     ...(request.handoffPath !== undefined ? { TESKRA_HANDOFF_PATH: request.handoffPath } : {}),
     ...(request.artifactDir !== undefined ? { TESKRA_ARTIFACT_DIR: request.artifactDir } : {}),
     TESKRA_RUN_ID: request.runId,
+  }
+  // P0-1 (docs/code-review-2026-09-21.md §2): object spread only dedupes
+  // exact-case keys. The env block is looked up case-insensitively (first
+  // match wins) at two layers, so strip every base key that
+  // case-insensitively collides with a profile/system key whenever either
+  // layer is in play — the profile's and system's own casing is then the
+  // only one present:
+  //   1. Target-runtime semantics: a Windows runtime spawns a Windows
+  //      process, whose env lookup is case-insensitive (`codex_home`
+  //      inserted earlier survives next to `CODEX_HOME` and wins).
+  //   2. wsl.exe relay semantics: on a Windows host a WSL runtime's env is
+  //      first set on the wsl.exe WINDOWS process and only then forwarded
+  //      into Linux by name via WSLENV — the wsl.exe layer resolves names
+  //      case-insensitively too, so a smuggled `codex_home` can still shadow
+  //      the profile's `CODEX_HOME` before WSLENV ever runs
+  //      (crossesWslBoundary = wsl ref + non-hostNative, i.e. Windows host).
+  // A WSL workspace on a Linux host is the native runtime (hostNative):
+  // Linux env is case-sensitive, `teskra_run_id` and `TESKRA_RUN_ID` are two
+  // distinct variables there, so base keys pass through untouched (the
+  // exact-case system keys are still written last).
+  const privileged = { ...profileEnv, ...systemEnv }
+  const screened =
+    runtime.ref.kind === 'windows' || crossesWslBoundary(runtime)
+      ? dropCaseShadowedKeys(base, privileged)
+      : base
+  return {
+    ...screened,
+    ...profileEnv,
+    ...systemEnv,
   }
 }
 
@@ -162,7 +202,7 @@ export function createCliAgentAdapter(options: CliAgentAdapterOptions): CodingAg
         ...launch.args,
       ],
       cwd: scoped.worktreePath ?? scoped.workspace.path,
-      env: processEnvironment(scoped, launch),
+      env: processEnvironment(scoped, launch, runtime.data),
       workspaceId: request.workspace.id,
       agentRunId: request.runId,
       runtime: runtime.data,
