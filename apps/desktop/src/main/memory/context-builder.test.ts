@@ -37,8 +37,8 @@ function setup(options?: { files?: Record<string, string> }) {
   }
   connection
     .prepare(
-      `INSERT INTO workspaces (id, name, runtime_kind, path, created_at, updated_at)
-       VALUES ('ws-1', 'WS', 'windows', ?, '2026-09-09T00:00:00.000Z', '2026-09-09T00:00:00.000Z')`,
+      `INSERT INTO workspaces (id, name, runtime_kind, path, trust_level, created_at, updated_at)
+       VALUES ('ws-1', 'WS', 'windows', ?, 'trusted', '2026-09-09T00:00:00.000Z', '2026-09-09T00:00:00.000Z')`,
     )
     .run(REPO_ROOT)
   connection

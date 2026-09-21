@@ -20,6 +20,7 @@ import { type InternalAppError, toPublicError } from '../errors'
 import { getLogger } from '../logger'
 import type { TeskraPaths } from '../paths'
 import { containsSecretValue } from '../redact'
+import { trustedRepoRoot } from '../workspace/trust'
 
 /**
  * MemoryManager (TASK-067, plan §45/§46) — the Workspace Memory domain
@@ -37,7 +38,12 @@ import { containsSecretValue } from '../redact'
  *   plan §45 file-name convention (architecture.md, conventions.md,
  *   decisions.md, commands.md, known-issues.md, preferences.md), falling
  *   back to 'summary'. Files containing secret-shaped values are skipped
- *   with a warning rather than surfaced.
+ *   with a warning rather than surfaced. Repo-local memory is
+ *   repo-controlled content that lands in prompts, so — like workflows /
+ *   prompts / config — it only loads for trusted workspaces (TASK-118 trust
+ *   gate, workspace/trust.ts; code-review-2026-09-21 P2-6); a restricted
+ *   workspace gets the database rows only and the skip is security-logged
+ *   once per workspace per manager lifetime.
  */
 
 /** Ids/sources of repo-local records; also blocks `file:` ids from CRUD. */
@@ -144,6 +150,12 @@ export function createMemoryManager(deps: MemoryManagerDeps): MemoryManager {
   const listDir = deps.listDir ?? ((path: string) => readdirSync(path))
   const modifiedAt = deps.modifiedAt ?? ((path: string) => statSync(path).mtime.toISOString())
 
+  // P2-6 follow-up: the restricted-workspace security warn fires once per
+  // workspace per manager lifetime — `list` is called on every memory panel
+  // refresh / context build, and repeating the same warn each time would flood
+  // security.log without adding information.
+  const restrictedWarned = new Set<string>()
+
   const requireWorkspace = (workspaceId: string): IpcResult<Workspace> => {
     const workspace = deps.workspaces.getById(workspaceId)
     if (!workspace.ok) {
@@ -221,7 +233,19 @@ export function createMemoryManager(deps: MemoryManagerDeps): MemoryManager {
       if (!stored.ok) {
         return stored
       }
-      const repoLocal = listRepoLocal(workspaceId, workspace.data.path).filter(
+      // P2-6: repo-local memory is repo-controlled content injected into
+      // prompts (context-builder consumes this list), so it goes through the
+      // same TASK-118 trust gate as workflows / prompts / config — resolved
+      // at call time so the security log reaches the armed file logger.
+      const repoRoot = trustedRepoRoot(workspace.data)
+      if (repoRoot === undefined && !restrictedWarned.has(workspaceId)) {
+        restrictedWarned.add(workspaceId)
+        getLogger('security').warn(
+          { workspaceId },
+          'Workspace is restricted; repo-local memory files are not loaded.',
+        )
+      }
+      const repoLocal = (repoRoot === undefined ? [] : listRepoLocal(workspaceId, repoRoot)).filter(
         (record) => type === undefined || record.type === type,
       )
       return {

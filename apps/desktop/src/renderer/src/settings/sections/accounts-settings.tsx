@@ -194,6 +194,7 @@ function AccountCard({ profile, isDefault, onEdit, onRemove, onLogin }: AccountC
   const enableProfile = useAccountProfileStore((state) => state.enableProfile)
   const loadSettings = useSettingsStore((state) => state.load)
   const [busy, setBusy] = useState(false)
+  const [confirmingDisable, setConfirmingDisable] = useState(false)
   const status = accountStatusTag(profile, t)
 
   const run = async (operation: () => Promise<unknown>): Promise<void> => {
@@ -204,6 +205,11 @@ function AccountCard({ profile, isDefault, onEdit, onRemove, onLogin }: AccountC
 
   const useAsDefault = async (): Promise<void> => {
     if (await setDefaultProfile(profile.agentId, profile.id)) await loadSettings()
+  }
+
+  const disable = async (): Promise<void> => {
+    await disableProfile(profile.id)
+    await loadSettings()
   }
 
   return (
@@ -252,12 +258,11 @@ function AccountCard({ profile, isDefault, onEdit, onRemove, onLogin }: AccountC
               onClick: ({ key }) => {
                 if (key === 'edit') onEdit()
                 else if (key === 'detect') void run(() => detectProfile(profile.id))
-                else if (key === 'disable')
-                  void run(async () => {
-                    await disableProfile(profile.id)
-                    await loadSettings()
-                  })
-                else if (key === 'enable') void run(() => enableProfile(profile.id))
+                else if (key === 'disable') {
+                  // §47.2(1): disabling the default also clears it — confirm first.
+                  if (isDefault) setConfirmingDisable(true)
+                  else void run(disable)
+                } else if (key === 'enable') void run(() => enableProfile(profile.id))
                 else if (key === 'remove') onRemove()
               },
             }}
@@ -266,6 +271,22 @@ function AccountCard({ profile, isDefault, onEdit, onRemove, onLogin }: AccountC
           </Dropdown>
         </Space>
       </Space>
+      {/* §47.2(1): same confirmation as Remove — disabling the default profile
+          also clears the default account. */}
+      <Modal
+        title={t('accounts.disable.title')}
+        open={confirmingDisable}
+        onCancel={() => setConfirmingDisable(false)}
+        onOk={() => {
+          setConfirmingDisable(false)
+          void run(disable)
+        }}
+        okText={t('accounts.disable')}
+        okButtonProps={{ danger: true }}
+        destroyOnHidden
+      >
+        <Alert type="warning" showIcon message={t('accounts.disable.defaultWarning')} />
+      </Modal>
     </Card>
   )
 }
