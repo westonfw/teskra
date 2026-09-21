@@ -230,6 +230,9 @@ const SCHEMA: Record<string, TableSpec> = {
       ['execution_profile_id', 'TEXT', 0, null, 0],
       ['profile_snapshot_json', 'TEXT', 0, null, 0],
       ['failure_classification_json', 'TEXT', 0, null, 0],
+      // 017_agent_run_queue_and_retry (TASK-120/121): ALTER TABLE appends at the end.
+      ['queued_reason', 'TEXT', 0, null, 0],
+      ['retry_of_run_id', 'TEXT', 0, null, 0],
     ],
     foreignKeys: [
       { from: 'task_id', table: 'tasks', to: 'id', onDelete: 'SET NULL' },
@@ -243,6 +246,9 @@ const SCHEMA: Record<string, TableSpec> = {
         to: 'id',
         onDelete: 'RESTRICT',
       },
+      // 017: the retry chain is a self reference; deleting the source run
+      // must not delete the retries (SET NULL like task_id).
+      { from: 'retry_of_run_id', table: 'agent_runs', to: 'id', onDelete: 'SET NULL' },
     ],
     indexes: [
       {
@@ -257,6 +263,13 @@ const SCHEMA: Record<string, TableSpec> = {
         unique: false,
         partial: false,
         columns: ['workflow_run_id'],
+      },
+      // 017 (TASK-121): retry-chain lookups walk retry_of_run_id.
+      {
+        name: 'idx_agent_runs_retry_of',
+        unique: false,
+        partial: false,
+        columns: ['retry_of_run_id'],
       },
     ],
   },

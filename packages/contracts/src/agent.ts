@@ -36,6 +36,17 @@ export const AGENT_RUN_STATUSES = [
 export const agentRunStatusSchema = z.enum(AGENT_RUN_STATUSES)
 export type AgentRunStatus = z.infer<typeof agentRunStatusSchema>
 
+/**
+ * §139.1 `agent_runs.queued_reason` (migration 017, TASK-120) — why a
+ * `queued` run is waiting: behind earlier queued runs (`fifo`), out of
+ * concurrency capacity (`capacity`), blocked by an unisolated writer on the
+ * same directory (`directory_busy`), or by another live run on its worktree
+ * (`worktree_busy`). NULL once the run leaves `queued`.
+ */
+export const QUEUED_REASONS = ['capacity', 'directory_busy', 'worktree_busy', 'fifo'] as const
+export const queuedReasonSchema = z.enum(QUEUED_REASONS)
+export type QueuedReason = z.infer<typeof queuedReasonSchema>
+
 /** §139.1 `agent_runs.role` (line 5287). */
 export const AGENT_ROLES = ['planner', 'implementer', 'reviewer', 'tester', 'fixer'] as const
 export const agentRoleSchema = z.enum(AGENT_ROLES)
@@ -339,6 +350,8 @@ export const agentRunSchema = z.strictObject({
   mode: z.enum(['interactive', 'exec']).optional(),
   approvalMode: approvalModeSchema.optional(),
   status: agentRunStatusSchema,
+  /** TASK-120 (migration 017): why a `queued` run is waiting; absent otherwise. */
+  queuedReason: queuedReasonSchema.optional(),
   processId: z.string().optional(),
   pid: z.number().int().optional(),
   /**

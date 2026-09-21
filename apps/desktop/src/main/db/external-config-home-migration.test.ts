@@ -77,7 +77,7 @@ function configHomeOf(db: Database.Database, id: string): string {
   return row.config_home
 }
 
-/** Builds a v15 database with the given legacy rows, then upgrades to v16. */
+/** Builds a v15 database with the given legacy rows, then upgrades to v17. */
 function upgradedDb(seed: (db: Database.Database) => void): Database.Database {
   const db = memoryDb()
   const partial = runMigrations(
@@ -93,7 +93,7 @@ function upgradedDb(seed: (db: Database.Database) => void): Database.Database {
     throw new Error(upgraded.error.message)
   }
   expect(upgraded.data.fromVersion).toBe(15)
-  expect(upgraded.data.applied).toEqual([16])
+  expect(upgraded.data.applied).toEqual([16, 17])
   return db
 }
 
@@ -177,7 +177,7 @@ describe('migration 016 — external config_home normalization (P2-2 follow-up)'
     const db = memoryDb()
     expect(migrateDatabase(db).ok).toBe(true)
     const again = migrateDatabase(db)
-    expect(again).toEqual({ ok: true, data: { fromVersion: 16, toVersion: 16, applied: [] } })
+    expect(again).toEqual({ ok: true, data: { fromVersion: 17, toVersion: 17, applied: [] } })
   })
 
   it('normalizeExternalConfigHomes can be invoked directly against an up-to-date database', () => {

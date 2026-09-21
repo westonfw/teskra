@@ -78,7 +78,7 @@ describe('migration 014 (TASK-110)', () => {
     const upgraded = migrateDatabase(db)
     expect(upgraded).toEqual({
       ok: true,
-      data: { fromVersion: 13, toVersion: 16, applied: [14, 15, 16] },
+      data: { fromVersion: 13, toVersion: 17, applied: [14, 15, 16, 17] },
     })
     expect(
       db
@@ -95,7 +95,7 @@ describe('migration 014 (TASK-110)', () => {
     const db = migratedDb()
     expect(migrateDatabase(db)).toEqual({
       ok: true,
-      data: { fromVersion: 16, toVersion: 16, applied: [] },
+      data: { fromVersion: 17, toVersion: 17, applied: [] },
     })
   })
 

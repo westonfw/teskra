@@ -43,7 +43,7 @@ describe('migration 015 — workspace trust (TASK-118)', () => {
     const migrated = migrateDatabase(db)
     expect(migrated.ok).toBe(true)
     if (!migrated.ok) return
-    expect(migrated.data.toVersion).toBe(16)
+    expect(migrated.data.toVersion).toBe(17)
 
     db.prepare(
       `INSERT INTO workspaces (id, name, runtime_kind, path, created_at, updated_at)
@@ -74,7 +74,7 @@ describe('migration 015 — workspace trust (TASK-118)', () => {
     expect(upgraded.ok).toBe(true)
     if (!upgraded.ok) return
     expect(upgraded.data.fromVersion).toBe(14)
-    expect(upgraded.data.toVersion).toBe(16)
+    expect(upgraded.data.toVersion).toBe(17)
 
     const row = db
       .prepare('SELECT name, trust_level FROM workspaces WHERE id = ?')
@@ -103,6 +103,6 @@ describe('migration 015 — workspace trust (TASK-118)', () => {
     expect(again.ok).toBe(true)
     if (!again.ok) return
     expect(again.data.applied).toEqual([])
-    expect(again.data.toVersion).toBe(16)
+    expect(again.data.toVersion).toBe(17)
   })
 })

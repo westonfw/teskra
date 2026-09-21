@@ -1099,6 +1099,253 @@ describe('AgentManager (TASK-028)', () => {
   })
 })
 
+describe('AgentManager queued_reason (TASK-120)', () => {
+  const QUEUE_POLICY = { maxGlobalRuns: 1, maxRunsPerWorkspace: 3, maxRunsPerAgent: 2 }
+
+  it('writes capacity when the limits are full and fifo when queued runs already exist', async () => {
+    const context = setup(QUEUE_POLICY)
+    const first = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      approvalMode: 'read-only',
+    })
+    expect(first).toMatchObject({ ok: true, data: { status: 'running' } })
+
+    const second = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'claude',
+      approvalMode: 'read-only',
+    })
+    expect(second).toMatchObject({
+      ok: true,
+      data: { status: 'queued', queuedReason: 'capacity' },
+    })
+
+    // Capacity is still full, but the non-empty queue decides first: fifo.
+    const third = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      approvalMode: 'read-only',
+    })
+    expect(third).toMatchObject({ ok: true, data: { status: 'queued', queuedReason: 'fifo' } })
+  })
+
+  it('updates the skip reason to directory_busy and clears it when the run launches', async () => {
+    const context = setup(QUEUE_POLICY)
+    const secondWorkspace = context.workspaces.create({
+      id: 'workspace-2',
+      name: 'Second',
+      runtime: { kind: 'wsl', distro: 'Ubuntu' },
+      path: '/repo-2',
+    })
+    if (!secondWorkspace.ok) throw new Error(secondWorkspace.error.message)
+    // The blocker fills the only global slot from another workspace, so the
+    // two writable unisolated runs below can both enqueue (the attended write
+    // conflict only looks at non-queued runs).
+    const blocker = await context.manager.start({
+      workspaceId: 'workspace-2',
+      agentType: 'claude',
+      approvalMode: 'read-only',
+    })
+    expect(blocker).toMatchObject({ ok: true, data: { status: 'running' } })
+    const queuedFirst = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'claude',
+    })
+    const queuedSecond = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+    })
+    expect(queuedFirst).toMatchObject({ ok: true, data: { status: 'queued' } })
+    expect(queuedSecond).toMatchObject({
+      ok: true,
+      data: { status: 'queued', queuedReason: 'fifo' },
+    })
+
+    // Natural exit of the blocker: the process.exited path settles the row
+    // and advances the queue (adapter-bound cancel() never does).
+    context.events.emit('process.exited', {
+      processId: 'claude:run-1',
+      agentRunId: 'run-1',
+      exitCode: 0,
+    })
+
+    // run-2 launches first (FIFO): leaving queued clears the reason…
+    await vi.waitFor(() => {
+      expect(context.manager.get('run-2')).toMatchObject({
+        ok: true,
+        data: { status: 'running' },
+      })
+    })
+    expect(context.manager.get('run-2')).toMatchObject({
+      ok: true,
+      data: { queuedReason: undefined },
+    })
+    // …and run-3 is now skipped because run-2 writes the same directory.
+    await vi.waitFor(() => {
+      expect(context.manager.get('run-3')).toMatchObject({
+        ok: true,
+        data: { status: 'queued', queuedReason: 'directory_busy' },
+      })
+    })
+    expect(context.adapters.codex.start).not.toHaveBeenCalled()
+  })
+
+  it('updates the skip reason to worktree_busy while another run occupies the worktree', async () => {
+    const context = setup(QUEUE_POLICY)
+    const secondWorkspace = context.workspaces.create({
+      id: 'workspace-2',
+      name: 'Second',
+      runtime: { kind: 'wsl', distro: 'Ubuntu' },
+      path: '/repo-2',
+    })
+    if (!secondWorkspace.ok) throw new Error(secondWorkspace.error.message)
+    const worktree = context.worktrees.create({
+      id: 'worktree-1',
+      workspaceId: 'workspace-1',
+      branch: 'agent/queued',
+      baseBranch: 'main',
+      path: '/worktrees/queued',
+      state: 'ready',
+      isolation: 'worktree',
+    })
+    if (!worktree.ok) throw new Error(worktree.error.message)
+    await context.manager.start({
+      workspaceId: 'workspace-2',
+      agentType: 'codex',
+      approvalMode: 'read-only',
+    })
+    await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'claude',
+      executionMode: 'orchestrated',
+      worktreeId: 'worktree-1',
+    })
+    const queued = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'claude',
+      executionMode: 'orchestrated',
+      worktreeId: 'worktree-1',
+    })
+    expect(queued).toMatchObject({ ok: true, data: { status: 'queued', queuedReason: 'fifo' } })
+
+    context.events.emit('process.exited', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      exitCode: 0,
+    })
+
+    // run-2 takes the worktree; run-3 stays queued behind it.
+    await vi.waitFor(() => {
+      expect(context.manager.get('run-3')).toMatchObject({
+        ok: true,
+        data: { status: 'queued', queuedReason: 'worktree_busy' },
+      })
+    })
+  })
+
+  it('does not rewrite the row when the skip reason is unchanged', async () => {
+    const context = setup(QUEUE_POLICY)
+    const secondWorkspace = context.workspaces.create({
+      id: 'workspace-2',
+      name: 'Second',
+      runtime: { kind: 'wsl', distro: 'Ubuntu' },
+      path: '/repo-2',
+    })
+    if (!secondWorkspace.ok) throw new Error(secondWorkspace.error.message)
+    await context.manager.start({
+      workspaceId: 'workspace-2',
+      agentType: 'codex',
+      approvalMode: 'read-only',
+    })
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'claude' })
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    context.events.emit('process.exited', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      exitCode: 0,
+    })
+    // run-2 is running; run-3 waits on directory_busy.
+    await vi.waitFor(() => {
+      expect(context.manager.get('run-3')).toMatchObject({
+        ok: true,
+        data: { status: 'queued', queuedReason: 'directory_busy' },
+      })
+    })
+
+    const updateSpy = vi.spyOn(context.runs, 'update')
+    // A fresh enqueue triggers another advanceQueue pass over run-3; its
+    // reason is already directory_busy, so the pass must not rewrite the row.
+    const queued = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'claude',
+      approvalMode: 'read-only',
+    })
+    expect(queued).toMatchObject({ ok: true, data: { status: 'queued' } })
+    await vi.waitFor(() => {
+      expect(context.manager.get('run-4')).toMatchObject({
+        ok: true,
+        data: { queuedReason: 'capacity' },
+      })
+    })
+    const reasonWrites = updateSpy.mock.calls.filter(
+      ([id, patch]) => id === 'run-3' && 'queuedReason' in patch,
+    )
+    expect(reasonWrites).toEqual([])
+  })
+
+  it('clears queued_reason when a queued run is cancelled', async () => {
+    const context = setup(QUEUE_POLICY)
+    await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      approvalMode: 'read-only',
+    })
+    const queued = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'claude',
+      approvalMode: 'read-only',
+    })
+    expect(queued).toMatchObject({
+      ok: true,
+      data: { status: 'queued', queuedReason: 'capacity' },
+    })
+
+    const cancelled = await context.manager.cancel('run-2')
+    expect(cancelled).toMatchObject({
+      ok: true,
+      data: { status: 'cancelled', queuedReason: undefined },
+    })
+  })
+
+  it('still rejects an attended same-directory writable run at start instead of queueing it (TASK-084)', async () => {
+    // Hard limit, unchanged by TASK-120: with an EMPTY queue and free
+    // capacity, a second unisolated writable run is refused outright — the
+    // queued_reason mechanism only explains orchestrated/queue-path waits.
+    const context = setup()
+    const first = await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    expect(first).toMatchObject({ ok: true, data: { status: 'running' } })
+
+    const conflicting = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'claude',
+    })
+    expect(conflicting).toMatchObject({
+      ok: false,
+      error: {
+        code: 'VALIDATION_FAILED',
+        messageKey: 'errorMessage.attendedRunConflict',
+        params: { runId: 'run-1' },
+      },
+    })
+    // No row was created for the rejected run — nothing silently queued.
+    expect(context.manager.list({ activeOnly: true })).toMatchObject({
+      ok: true,
+      data: [{ id: 'run-1' }],
+    })
+  })
+})
+
 describe('AgentManager resume (TASK-042)', () => {
   const interrupt = (context: TestContext, runId: string) => {
     const updated = context.runs.update(

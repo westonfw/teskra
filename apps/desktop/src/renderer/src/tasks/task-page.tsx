@@ -31,7 +31,7 @@ import { RateLimitAlert } from '../agents/rate-limit-alert'
 import { AccountSelect } from '../accounts/account-select'
 import { useAccountProfileStore } from '../accounts/account-profile-store'
 import { AppErrorAlert } from '../components/app-error-alert'
-import { useTranslation } from '../i18n'
+import { useTranslation, type TranslationKey } from '../i18n'
 import { RunCommandsPanel } from '../permissions/run-commands-panel'
 import { agentRuntimeKey, useAgentStore } from '../stores/agent-store'
 import { useTaskStore } from '../stores/task-store'
@@ -55,6 +55,13 @@ const ACTIVE_RUN_STATUSES = new Set<AgentRunStatus>([
   'waiting_for_agent',
   'reviewing',
 ])
+
+/** TASK-120 (§5.5): a queued run shows its wait reason instead of bare "queued". */
+function runStatusLabel(run: AgentRun, t: (key: TranslationKey) => string): string {
+  return run.status === 'queued' && run.queuedReason !== undefined
+    ? t(`runs.queuedReason.${run.queuedReason}`)
+    : t(`runs.status.${run.status}`)
+}
 
 const taskStatusColor: Partial<Record<TaskStatus, string>> = {
   ready: 'blue',
@@ -402,7 +409,7 @@ export function TaskPage() {
                         title={
                           <Space>
                             <span>{run.agentType}</span>
-                            <Tag>{t(`runs.status.${run.status}`)}</Tag>
+                            <Tag>{runStatusLabel(run, t)}</Tag>
                           </Space>
                         }
                         description={`${run.model ?? t('tasks.runs.defaultModel')} · ${new Date(run.createdAt).toLocaleString()}`}
@@ -432,7 +439,7 @@ export function TaskPage() {
                       : run.status === 'completed'
                         ? 'green'
                         : 'gray',
-                    children: `${run.agentType} · ${t(`runs.status.${run.status}`)} · ${new Date(run.updatedAt).toLocaleString()}`,
+                    children: `${run.agentType} · ${runStatusLabel(run, t)} · ${new Date(run.updatedAt).toLocaleString()}`,
                   })),
                   {
                     color: 'gray',
@@ -484,7 +491,7 @@ export function TaskPage() {
         {openRun !== undefined && (
           <div className="run-detail">
             <Space>
-              <Tag>{t(`runs.status.${openRun.status}`)}</Tag>
+              <Tag>{runStatusLabel(openRun, t)}</Tag>
               <Typography.Text code>{openRun.id}</Typography.Text>
             </Space>
             <RateLimitAlert run={openRun} onOpenRun={(next) => void handleOpenRun(next)} />

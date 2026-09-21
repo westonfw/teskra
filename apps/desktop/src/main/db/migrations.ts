@@ -19,6 +19,7 @@ import agentRunAccountProfileSql from './migrations/013_agent_run_account_profil
 import agentExecutionProfilesSql from './migrations/014_agent_execution_profiles.sql?raw'
 import workspaceTrustSql from './migrations/015_workspace_trust.sql?raw'
 import { normalizeExternalConfigHomes } from './migrations/016_external_config_home_normalize'
+import agentRunQueueAndRetrySql from './migrations/017_agent_run_queue_and_retry.sql?raw'
 
 /**
  * The canonical migration chain (TASK-006). The .sql files under
@@ -68,6 +69,7 @@ export const MIGRATIONS: readonly Migration[] = [
     sql: '-- 016: data-only migration; the rewrite happens in the run hook',
     run: normalizeExternalConfigHomes,
   },
+  { version: 17, name: '017_agent_run_queue_and_retry', sql: agentRunQueueAndRetrySql },
 ]
 
 /** Brings the database schema up to the latest known version. */

@@ -10,6 +10,7 @@ import type {
   ApprovalMode,
   ExecutionMode,
   IpcResult,
+  QueuedReason,
 } from '@teskra/contracts'
 import {
   accountRateLimitStatsSchema,
@@ -79,6 +80,9 @@ interface AgentRunRow {
   execution_profile_id: string | null
   profile_snapshot_json: string | null
   failure_classification_json: string | null
+  // 017_agent_run_queue_and_retry (TASK-120/121): appended by ALTER TABLE.
+  queued_reason: string | null
+  retry_of_run_id: string | null
 }
 
 export interface CreateAgentRunInput {
@@ -97,6 +101,8 @@ export interface CreateAgentRunInput {
   readonly approvalMode?: ApprovalMode
   /** Defaults to 'created'. */
   readonly status?: AgentRunStatus
+  /** TASK-120 (migration 017): why the run entered the queue. */
+  readonly queuedReason?: QueuedReason
   readonly worktreeId?: string
   readonly criteriaSetId?: string
   readonly providerSession?: JsonRecord
@@ -119,6 +125,8 @@ export interface UpdateAgentRunInput {
   readonly model?: string | null
   readonly approvalMode?: ApprovalMode | null
   readonly status?: AgentRunStatus
+  /** TASK-120: updated as the skip reason changes; null when leaving `queued`. */
+  readonly queuedReason?: QueuedReason | null
   readonly processId?: string | null
   readonly pid?: number | null
   readonly pidIdentity?: string | null
@@ -212,6 +220,7 @@ function toDomain(row: AgentRunRow): IpcResult<AgentRun> {
     mode: row.mode === 'interactive' || row.mode === 'exec' ? row.mode : undefined,
     approvalMode: row.approval_mode ?? undefined,
     status: row.status,
+    queuedReason: row.queued_reason ?? undefined,
     processId: row.process_id ?? undefined,
     pid: row.pid ?? undefined,
     pidIdentity: row.pid_identity ?? undefined,
@@ -248,8 +257,8 @@ export function createAgentRunRepository(connection: Database.Database): AgentRu
       const inserted = execute(ENTITY, 'create', () => {
         connection
           .prepare(
-            `INSERT INTO agent_runs (id, task_id, workspace_id, workflow_run_id, workflow_step_id, agent_type, role, model, mode, approval_mode, status, worktree_id, execution_mode, criteria_set_id, provider_session_json, run_dir, prompt, started_at, account_profile_id, execution_profile_id, profile_snapshot_json, failure_classification_json, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO agent_runs (id, task_id, workspace_id, workflow_run_id, workflow_step_id, agent_type, role, model, mode, approval_mode, status, queued_reason, worktree_id, execution_mode, criteria_set_id, provider_session_json, run_dir, prompt, started_at, account_profile_id, execution_profile_id, profile_snapshot_json, failure_classification_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             input.id,
@@ -263,6 +272,7 @@ export function createAgentRunRepository(connection: Database.Database): AgentRu
             input.mode ?? null,
             input.approvalMode ?? null,
             input.status ?? 'created',
+            input.queuedReason ?? null,
             input.worktreeId ?? null,
             input.executionMode,
             input.criteriaSetId ?? null,
@@ -307,6 +317,7 @@ export function createAgentRunRepository(connection: Database.Database): AgentRu
         model: 'model',
         approvalMode: 'approval_mode',
         status: 'status',
+        queuedReason: 'queued_reason',
         processId: 'process_id',
         pid: 'pid',
         pidIdentity: 'pid_identity',

@@ -214,9 +214,9 @@ describe('runMigrations (TASK-006)', () => {
 })
 
 describe('MIGRATIONS registry (TASK-006)', () => {
-  it('is the ordered 001–016 chain', () => {
+  it('is the ordered 001–017 chain', () => {
     expect(MIGRATIONS.map((m) => m.version)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
     ])
     expect(MIGRATIONS.map((m) => m.name)).toEqual([
       '001_init',
@@ -235,6 +235,7 @@ describe('MIGRATIONS registry (TASK-006)', () => {
       '014_agent_execution_profiles',
       '015_workspace_trust',
       '016_external_config_home_normalize',
+      '017_agent_run_queue_and_retry',
     ])
   })
 
@@ -245,14 +246,14 @@ describe('MIGRATIONS registry (TASK-006)', () => {
       ok: true,
       data: {
         fromVersion: 0,
-        toVersion: 16,
-        applied: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+        toVersion: 17,
+        applied: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
       },
     })
-    expect(appliedVersions(db)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
+    expect(appliedVersions(db)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17])
 
     const second = migrateDatabase(db)
-    expect(second).toEqual({ ok: true, data: { fromVersion: 16, toVersion: 16, applied: [] } })
+    expect(second).toEqual({ ok: true, data: { fromVersion: 17, toVersion: 17, applied: [] } })
   })
 
   it('007/008 upgrade a populated v6 database without losing workflow runs or steps (TASK-056/062)', () => {
@@ -282,7 +283,7 @@ describe('MIGRATIONS registry (TASK-006)', () => {
     const upgraded = migrateDatabase(db)
     expect(upgraded).toEqual({
       ok: true,
-      data: { fromVersion: 6, toVersion: 16, applied: [7, 8, 9, 10, 11, 12, 13, 14, 15, 16] },
+      data: { fromVersion: 6, toVersion: 17, applied: [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17] },
     })
 
     // Rows survived the table rebuild (DROP TABLE would have cascaded with FK on).

@@ -20,6 +20,7 @@ import {
   type ListAgentRunsRequest,
   type ProviderSessionRef,
   type PublicAppError,
+  type QueuedReason,
   type ResizeAgentRunRequest,
   type ResumeAgentRunRequest,
   type SendAgentRunInputRequest,
@@ -248,6 +249,19 @@ function runningForLimits(runs: readonly AgentRun[]): AgentRun[] {
   return runs.filter((run) => run.status !== 'queued')
 }
 
+/**
+ * TASK-120 (§5.5): the reason a run ENTERS the queue — behind already queued
+ * runs (`fifo`, checked first: a nonempty queue serializes regardless of
+ * capacity) or out of concurrency capacity (`capacity`).
+ */
+function queueEntryReason(
+  runs: readonly AgentRun[],
+  capacityAvailable: boolean,
+): QueuedReason | undefined {
+  if (runs.some((run) => run.status === 'queued')) return 'fifo'
+  return capacityAvailable ? undefined : 'capacity'
+}
+
 function unisolatedWriteConflict(
   runs: readonly AgentRun[],
   workspaceId: string,
@@ -451,6 +465,22 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
   }
 
   /**
+   * TASK-120 (§5.5): advanceQueue re-evaluates skip reasons on every pass, so
+   * the row is only rewritten when the reason actually changed — a no-op pass
+   * must never touch the database.
+   */
+  const updateQueuedReason = (run: AgentRun, reason: QueuedReason): void => {
+    if (run.queuedReason === reason) return
+    const updated = deps.runs.update(run.id, { queuedReason: reason }, now())
+    if (!updated.ok) {
+      logger.error(
+        { runId: run.id, reason, error: updated.error },
+        'Failed to update the Agent queue reason.',
+      )
+    }
+  }
+
+  /**
    * P1-1: durability checkpoint for terminal lifecycle transitions — forces an
    * fsync of the run's throttle-deferred log writes (so a crash can never lose
    * a terminal status the DB already recorded) and releases the file handles
@@ -635,7 +665,14 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     appendEvent(run.id, 'agent.failed', { error, classification })
     const updated = deps.runs.update(
       run.id,
-      { status: 'failed', finishedAt, error: { ...error }, failureClassification: classification },
+      {
+        status: 'failed',
+        finishedAt,
+        error: { ...error },
+        failureClassification: classification,
+        // TASK-120: a queued run settled by failAndStop leaves the queue.
+        queuedReason: null,
+      },
       finishedAt,
     )
     activeAdapters.delete(run.id)
@@ -671,7 +708,12 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     if (current.data === null) return missing('Agent run', request.runId)
     if (current.data.status === 'queued') {
       const timestamp = now()
-      const preparing = deps.runs.update(request.runId, { status: 'preparing' }, timestamp)
+      // TASK-120: leaving `queued` clears the wait reason.
+      const preparing = deps.runs.update(
+        request.runId,
+        { status: 'preparing', queuedReason: null },
+        timestamp,
+      )
       if (!preparing.ok) return preparing
       if (preparing.data === null) return missing('Agent run', request.runId)
     }
@@ -808,17 +850,26 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
               )
               continue
             }
-            if (
-              unisolatedWriteConflict(active, run.workspaceId, run.worktreeId, run.approvalMode) ===
-                undefined &&
-              // TASK-107 (§19.3): one worktree hosts at most one non-terminal
-              // run; the queued candidate stays queued while it is occupied.
-              worktreeRunConflict(active, run.worktreeId, run.id) === undefined &&
-              hasCapacity(active, run, policy.data, profileLimit.data)
-            ) {
-              selected = { run, pending }
-              break
+            // TASK-120 (§5.5): a skipped candidate records WHY it was skipped
+            // (rewritten only when the reason changes — see updateQueuedReason).
+            const skipReason: QueuedReason | undefined =
+              unisolatedWriteConflict(active, run.workspaceId, run.worktreeId, run.approvalMode) !==
+              undefined
+                ? 'directory_busy'
+                : // TASK-107 (§19.3): one worktree hosts at most one
+                  // non-terminal run; the queued candidate stays queued while
+                  // it is occupied.
+                  worktreeRunConflict(active, run.worktreeId, run.id) !== undefined
+                  ? 'worktree_busy'
+                  : !hasCapacity(active, run, policy.data, profileLimit.data)
+                    ? 'capacity'
+                    : undefined
+            if (skipReason !== undefined) {
+              updateQueuedReason(run, skipReason)
+              continue
             }
+            selected = { run, pending }
+            break
           }
           if (selected === undefined) break
           pendingRuns.delete(selected.run.id)
@@ -1487,9 +1538,9 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           detail: `worktree=${request.worktreeId ?? ''} conflicting run=${worktreeConflict.id}`,
         })
       }
-      const shouldQueue =
-        listed.data.some((run) => run.status === 'queued') ||
-        !hasCapacity(
+      const queuedReason = queueEntryReason(
+        listed.data,
+        hasCapacity(
           active,
           {
             workspaceId: workspace.data.id,
@@ -1500,7 +1551,9 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           },
           policy.data,
           startProfile.data.maxConcurrentRuns,
-        )
+        ),
+      )
+      const shouldQueue = queuedReason !== undefined
       // TASK-052: services that pre-bind resources to the Run (ReviewerService
       // snapshot worktree) supply runId; direct IPC callers leave it to us.
       const runId = request.runId ?? createRunId()
@@ -1516,6 +1569,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           executionMode,
           runDir: runDirectory.data,
           status: shouldQueue ? 'queued' : 'preparing',
+          // TASK-120 (§5.5): the queue-entry reason rides the INSERT.
+          ...(queuedReason === undefined ? {} : { queuedReason }),
           // ADR-0007: persist the resolved launch mode so resume can reuse it.
           mode,
           ...(role === undefined ? {} : { role }),
@@ -1839,9 +1894,11 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           detail: `resume run=${run.id} worktree=${run.worktreeId ?? ''} conflict=${resumeWorktreeConflict.id}`,
         })
       }
-      const shouldQueue =
-        listed.data.some((candidate) => candidate.status === 'queued') ||
-        !hasCapacity(active, run, policy.data, resumeProfileMaxConcurrentRuns)
+      const resumeQueuedReason = queueEntryReason(
+        listed.data,
+        hasCapacity(active, run, policy.data, resumeProfileMaxConcurrentRuns),
+      )
+      const shouldQueue = resumeQueuedReason !== undefined
 
       const parsedSession = providerSessionRefSchema.safeParse(run.providerSession)
       const resumeSession =
@@ -1921,6 +1978,9 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         run.id,
         {
           status: shouldQueue ? 'queued' : 'preparing',
+          // TASK-120: a re-queued resume records the entry reason; a directly
+          // relaunched one clears whatever the interrupted row still carried.
+          queuedReason: resumeQueuedReason ?? null,
           processId: null,
           pid: null,
           pidIdentity: null,
@@ -2001,7 +2061,11 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         pendingRuns.delete(runId)
         const finishedAt = now()
         appendEvent(runId, 'agent.cancelled', {})
-        const updated = deps.runs.update(runId, { status: 'cancelled', finishedAt }, finishedAt)
+        const updated = deps.runs.update(
+          runId,
+          { status: 'cancelled', finishedAt, queuedReason: null },
+          finishedAt,
+        )
         if (updated.ok && updated.data !== null) persistRunManifest(updated.data)
         closeRunLogs(runId)
         deps.events.emit('agent.cancelled', { runId })

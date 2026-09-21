@@ -182,6 +182,46 @@ describe('AgentRunRepository', () => {
     expect(result.error.code).toBe('VALIDATION_FAILED')
   })
 
+  it('round-trips queued_reason and clears it with null (TASK-120)', () => {
+    setup()
+    const created = repo.create({
+      id: 'run-1',
+      workspaceId: 'ws-1',
+      agentType: 'codex',
+      executionMode: 'orchestrated',
+      runDir: 'runs/run-1',
+      status: 'queued',
+      queuedReason: 'capacity',
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    expect(created.data.queuedReason).toBe('capacity')
+    expect(repo.getById('run-1')).toEqual(created)
+
+    const updated = repo.update('run-1', { queuedReason: 'worktree_busy' })
+    expect(updated.ok).toBe(true)
+    if (!updated.ok) return
+    expect(updated.data?.queuedReason).toBe('worktree_busy')
+
+    const cleared = repo.update('run-1', { status: 'preparing', queuedReason: null })
+    expect(cleared.ok).toBe(true)
+    if (!cleared.ok) return
+    expect(cleared.data?.status).toBe('preparing')
+    expect(cleared.data?.queuedReason).toBeUndefined()
+
+    // Runs without a reason read back with the field absent.
+    const plain = repo.create({
+      id: 'run-2',
+      workspaceId: 'ws-1',
+      agentType: 'codex',
+      executionMode: 'attended',
+      runDir: 'runs/run-2',
+    })
+    expect(plain.ok).toBe(true)
+    if (!plain.ok) return
+    expect(plain.data.queuedReason).toBeUndefined()
+  })
+
   it('reads back the 013 profile identity columns (TASK-095)', () => {
     setup()
     repo.create({

@@ -429,7 +429,7 @@ function RunListItem({
         <div className="run-row-primary">
           <Space size={8} wrap>
             <Typography.Text strong>{agentName}</Typography.Text>
-            <Tag color={statusColor[run.status] ?? 'default'}>{statusLabel(run.status)}</Tag>
+            <Tag color={statusColor[run.status] ?? 'default'}>{statusLabel(run, t)}</Tag>
             {run.executionMode === 'attended' && run.worktreeId === undefined && (
               <Tag color="orange">{t('runs.item.unisolated')}</Tag>
             )}
@@ -529,7 +529,7 @@ function RunDetail({
       )}
       <Descriptions column={1} size="small" bordered>
         <Descriptions.Item label={t('runs.field.status')}>
-          <Tag color={statusColor[run.status] ?? 'default'}>{statusLabel(run.status)}</Tag>
+          <Tag color={statusColor[run.status] ?? 'default'}>{statusLabel(run, t)}</Tag>
         </Descriptions.Item>
         <Descriptions.Item label={t('runs.field.workspace')}>{workspaceName}</Descriptions.Item>
         <Descriptions.Item label={t('runs.field.model')}>
@@ -561,8 +561,15 @@ function RunDetail({
   )
 }
 
-function statusLabel(status: AgentRunStatus): string {
-  return status.replaceAll('_', ' ')
+/**
+ * TASK-120 (§5.5): a queued run shows its wait reason instead of the bare
+ * "queued" label.
+ */
+function statusLabel(run: AgentRun, t: Translate): string {
+  if (run.status === 'queued' && run.queuedReason !== undefined) {
+    return t(`runs.queuedReason.${run.queuedReason}`)
+  }
+  return run.status.replaceAll('_', ' ')
 }
 
 function defaultActivity(status: AgentRunStatus, t: Translate): string {

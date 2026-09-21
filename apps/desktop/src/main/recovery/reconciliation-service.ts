@@ -281,7 +281,8 @@ export function createReconciliationService(
         }
         const updated = deps.runs.update(
           run.id,
-          { status: 'interrupted', finishedAt: timestamp, error },
+          // TASK-120: a queued run interrupted on restart leaves the queue.
+          { status: 'interrupted', finishedAt: timestamp, error, queuedReason: null },
           timestamp,
         )
         if (!updated.ok) return updated
