@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import Database from 'better-sqlite3'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 
 import type {
   AgentAccountProfile,
@@ -37,6 +37,7 @@ import type { WorkspaceRuntime } from '../workspace/runtime'
 import { createFakeAgentAdapter } from './adapters/fake-agent-adapter'
 import { createCodexFailureClassifier } from './adapters/codex-failure-classifier'
 import { agentProcessId } from './adapters/cli-agent-adapter'
+import type { CodingAgentAdapter } from './adapters/coding-agent-adapter'
 import { createAgentManager, type AgentManager } from './agent-manager'
 import { createAgentRegistry } from './agent-registry'
 import { FAKE_AGENT } from './definitions/fake'
@@ -177,16 +178,28 @@ interface Fixture {
   readonly accountProfiles: AccountProfileManager
   readonly processes: CapturedProcesses
   readonly runs: ReturnType<typeof createAgentRunRepository>
+  readonly agentEvents: ReturnType<typeof createAgentEventRepository>
   readonly accountEvents: ReturnType<typeof createAccountEventRepository>
   readonly handoffs: ReturnType<typeof createHandoffRepository>
   readonly hostProcesses: {
-    identity: ReturnType<typeof vi.fn>
+    identity: Mock<(pid: number) => Promise<IpcResult<string | null>>>
     terminate: ReturnType<typeof vi.fn>
     probe: ReturnType<typeof vi.fn>
   }
 }
 
-function setup(options: { concurrency?: ConcurrencyConfig } = {}): Fixture {
+function setup(
+  options: {
+    concurrency?: ConcurrencyConfig
+    /** Test seam: wrap the fake adapter (e.g. to gate adapter.start). */
+    wrapAdapter?: (
+      adapter: CodingAgentAdapter,
+      events: EventBus<WorkbenchEvents>,
+    ) => CodingAgentAdapter
+    /** Test seam: the FIRST 'running'-status run update fails (simulated DB error). */
+    failRunningWrite?: boolean
+  } = {},
+): Fixture {
   const directory = mkdtempSync(join(tmpdir(), 'teskra-task107-'))
   directories.push(directory)
   const paths = createTeskraPaths({ TESKRA_HOME: join(directory, 'data') })
@@ -288,17 +301,40 @@ function setup(options: { concurrency?: ConcurrencyConfig } = {}): Fixture {
     scriptPath: FAKE_SCRIPT,
   })
   const hostProcesses = {
-    identity: vi.fn(async (): Promise<IpcResult<string | null>> => ({ ok: true, data: null })),
+    identity: vi.fn<(pid: number) => Promise<IpcResult<string | null>>>(() =>
+      Promise.resolve({ ok: true as const, data: null }),
+    ),
     terminate: vi.fn(async (): Promise<IpcResult<void>> => ({ ok: true, data: undefined })),
     probe: vi.fn(async (): Promise<IpcResult<boolean>> => ({ ok: true, data: false })),
   }
 
   let nextRun = 1
   const concurrency = options.concurrency
+  let runningWriteFailed = false
+  const managerRuns: ReturnType<typeof createAgentRunRepository> =
+    options.failRunningWrite === true
+      ? {
+          ...runs,
+          update: (id, patch, now) => {
+            if (!runningWriteFailed && patch.status === 'running') {
+              runningWriteFailed = true
+              return {
+                ok: false as const,
+                error: {
+                  code: 'UNKNOWN' as const,
+                  message: 'Simulated database write failure.',
+                  retryable: true,
+                },
+              }
+            }
+            return runs.update(id, patch, now)
+          },
+        }
+      : runs
   const manager = createAgentManager({
     registry,
-    adapters: [fakeAdapter],
-    runs,
+    adapters: [options.wrapAdapter?.(fakeAdapter, events) ?? fakeAdapter],
+    runs: managerRuns,
     agentEvents,
     accountEvents,
     handoffs,
@@ -328,6 +364,7 @@ function setup(options: { concurrency?: ConcurrencyConfig } = {}): Fixture {
     accountProfiles,
     processes,
     runs,
+    agentEvents,
     accountEvents,
     handoffs,
     hostProcesses,
@@ -681,6 +718,289 @@ describe('failAndStop (§19.3/§19.4/§19.5)', () => {
     expect(stopped.failureClassification).toEqual({ kind: 'unknown', retryable: true })
     expect(fixture.processes.stops).toHaveLength(0)
   })
+
+  it('P0-3: failAndStop during the preparing window (adapter.start in flight) returns a retryable CONFLICT and leaves the launch untouched', async () => {
+    let releaseStart!: () => void
+    const startGate = new Promise<void>((resolve) => {
+      releaseStart = resolve
+    })
+    const fixture = setup({
+      wrapAdapter: (adapter) => ({
+        ...adapter,
+        start: async (request) => {
+          await startGate
+          return adapter.start(request)
+        },
+      }),
+    })
+    const profile = await createProfile(fixture, 'Personal', PERSONAL_HOME)
+    const startPromise = fixture.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: FAKE_AGENT.id,
+      accountProfileId: profile.id,
+      taskId: 'task-1',
+      worktreeId: 'wt-1',
+      prompt: 'Implement TASK-218.',
+    })
+    // Wait until launch() is parked inside the gated adapter.start.
+    await vi.waitFor(() => {
+      expect(requireOk(fixture.runs.getById('run-1'))?.status).toBe('preparing')
+    })
+
+    const result = await fixture.manager.failAndStop('run-1', {
+      kind: 'rate-limited',
+      retryable: true,
+    })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('expected the preparing-window failAndStop to fail')
+    expect(result.error.code).toBe('CONFLICT')
+    expect(result.error.retryable).toBe(true)
+    // Nothing was settled and nothing was stopped.
+    expect(requireOk(fixture.runs.getById('run-1'))?.status).toBe('preparing')
+    expect(fixture.processes.stops).toHaveLength(0)
+
+    releaseStart()
+    const started = requireOk(await startPromise)
+    expect(started.status).toBe('running')
+
+    // Once running, the very same call goes through the normal stop path.
+    const stopped = requireOk(
+      await fixture.manager.failAndStop('run-1', { kind: 'rate-limited', retryable: true }),
+    )
+    expect(stopped.status).toBe('failed')
+    expect(fixture.processes.stops).toEqual([agentProcessId('run-1')])
+  })
+
+  it('P0-3: a run that turns terminal while adapter.start is in flight has its just-started process cancelled (no leaked process)', async () => {
+    let releaseStart!: () => void
+    const startGate = new Promise<void>((resolve) => {
+      releaseStart = resolve
+    })
+    const fixture = setup({
+      wrapAdapter: (adapter) => ({
+        ...adapter,
+        start: async (request) => {
+          await startGate
+          return adapter.start(request)
+        },
+      }),
+    })
+    const profile = await createProfile(fixture, 'Personal', PERSONAL_HOME)
+    const startPromise = fixture.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: FAKE_AGENT.id,
+      accountProfileId: profile.id,
+      taskId: 'task-1',
+      worktreeId: 'wt-1',
+      prompt: 'Implement TASK-218.',
+    })
+    await vi.waitFor(() => {
+      expect(requireOk(fixture.runs.getById('run-1'))?.status).toBe('preparing')
+    })
+    // The process exits — and its exit event settles the row — BEFORE
+    // adapter.start returns its handle.
+    fixture.events.emit('process.exited', {
+      processId: agentProcessId('run-1'),
+      agentRunId: 'run-1',
+      exitCode: 1,
+    })
+    expect(runOf(fixture, 'run-1').status).toBe('failed')
+
+    releaseStart()
+    const result = requireOk(await startPromise)
+
+    expect(result.status).toBe('failed')
+    // adapter.start DID launch a process when the gate released; launch()
+    // stopped it again instead of leaking it.
+    expect(fixture.processes.stops).toEqual([agentProcessId('run-1')])
+    expect(runOf(fixture, 'run-1').status).toBe('failed')
+  })
+
+  it('P1-1: concurrent failAndStop calls run ONE stop + settle — the second caller awaits the in-flight execution', async () => {
+    const fixture = setup()
+    const profile = await createProfile(fixture, 'Personal', PERSONAL_HOME)
+    const { runId } = await startSourceRun(fixture, profile.id)
+    // The survivor path (PROCESS_NOT_FOUND + identity probe) has two awaits
+    // between the early idempotency check and the settle — the window the
+    // in-flight claim closes.
+    requireOk(
+      fixture.runs.update(
+        runId,
+        { pid: 7777, pidIdentity: 'token-7777' },
+        '2026-09-12T00:00:03.000Z',
+      ),
+    )
+    fixture.processes.stopBehavior = { kind: 'not-found' }
+    fixture.hostProcesses.identity.mockResolvedValue({ ok: true, data: 'other-process' })
+
+    const [first, second] = await Promise.all([
+      fixture.manager.failAndStop(runId, { kind: 'rate-limited', retryable: true }),
+      fixture.manager.failAndStop(runId, { kind: 'rate-limited', retryable: true }),
+    ])
+
+    expect(first.ok).toBe(true)
+    expect(second.ok).toBe(true)
+    // launch() already consumed one identity call for the pidIdentity
+    // capture; the in-flight claim means only ONE additional survivor probe.
+    expect(fixture.hostProcesses.identity).toHaveBeenCalledTimes(2)
+    const failedEvents = requireOk(fixture.agentEvents.listByRun(runId)).filter(
+      (event) => event.eventType === 'agent.failed',
+    )
+    expect(failedEvents).toHaveLength(1)
+    expect(requireOk(fixture.accountEvents.listByType('agent.rate_limited'))).toHaveLength(1)
+    expect(runOf(fixture, runId).status).toBe('failed')
+  })
+})
+
+describe('launch leak guards: cancel after the row already settled', () => {
+  // The three launchInner guards stop the just-started process when the run
+  // row went terminal mid-launch. The adapter binding must be deleted BEFORE
+  // adapter.cancel: a cancel whose stop synchronously emits process.exited
+  // (the real ProcessManager contract, §19.4) would otherwise find the
+  // binding still present and settle the row a second time. The row is
+  // settled through the repository here — a settle path that does NOT touch
+  // this instance's adapter binding (unlike the process.exited handler,
+  // which deletes it as part of its own settle).
+  const syncExitOnCancel = (
+    adapter: CodingAgentAdapter,
+    events: EventBus<WorkbenchEvents>,
+  ): CodingAgentAdapter => ({
+    ...adapter,
+    cancel: async (runId) => {
+      events.emit('process.exited', {
+        processId: agentProcessId(runId),
+        agentRunId: runId,
+        exitCode: 1,
+      })
+      return adapter.cancel(runId)
+    },
+  })
+
+  const settleFailedExternally = (fixture: Fixture, runId: string): void => {
+    requireOk(
+      fixture.runs.update(
+        runId,
+        {
+          status: 'failed',
+          finishedAt: '2026-09-12T00:00:03.000Z',
+          error: { code: 'UNKNOWN', message: 'settled elsewhere.', retryable: true },
+        },
+        '2026-09-12T00:00:03.000Z',
+      ),
+    )
+  }
+
+  it('post-start guard: a synchronous exit from cancel does not settle the row twice', async () => {
+    let releaseStart!: () => void
+    const startGate = new Promise<void>((resolve) => {
+      releaseStart = resolve
+    })
+    const fixture = setup({
+      wrapAdapter: (adapter, events) => {
+        const wrapped = syncExitOnCancel(adapter, events)
+        return {
+          ...wrapped,
+          start: async (request) => {
+            await startGate
+            return adapter.start(request)
+          },
+        }
+      },
+    })
+    const profile = await createProfile(fixture, 'Personal', PERSONAL_HOME)
+    const startPromise = fixture.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: FAKE_AGENT.id,
+      accountProfileId: profile.id,
+      taskId: 'task-1',
+      worktreeId: 'wt-1',
+      prompt: 'Implement TASK-218.',
+    })
+    await vi.waitFor(() => {
+      expect(requireOk(fixture.runs.getById('run-1'))?.status).toBe('preparing')
+    })
+    // The row goes terminal BEFORE adapter.start returns its handle.
+    settleFailedExternally(fixture, 'run-1')
+
+    releaseStart()
+    const result = requireOk(await startPromise)
+
+    expect(result.status).toBe('failed')
+    // The just-started process was stopped again (no leak), but the cancel's
+    // synchronous exit found no adapter binding and settled NOTHING.
+    expect(fixture.processes.stops).toEqual([agentProcessId('run-1')])
+    const failedEvents = requireOk(fixture.agentEvents.listByRun('run-1')).filter(
+      (event) => event.eventType === 'agent.failed',
+    )
+    expect(failedEvents).toHaveLength(0)
+    const settled = runOf(fixture, 'run-1')
+    expect(settled.status).toBe('failed')
+    expect(settled.error?.message).toBe('settled elsewhere.')
+    expect(settled.finishedAt).toBe('2026-09-12T00:00:03.000Z')
+  })
+
+  it('post-identity guard: a synchronous exit from cancel does not settle the row twice', async () => {
+    const fixture = setup({ wrapAdapter: syncExitOnCancel })
+    let releaseIdentity!: (value: IpcResult<string | null>) => void
+    fixture.hostProcesses.identity.mockImplementationOnce(
+      () =>
+        new Promise<IpcResult<string | null>>((resolve) => {
+          releaseIdentity = resolve
+        }),
+    )
+    const profile = await createProfile(fixture, 'Personal', PERSONAL_HOME)
+    const startPromise = fixture.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: FAKE_AGENT.id,
+      accountProfileId: profile.id,
+      taskId: 'task-1',
+      worktreeId: 'wt-1',
+      prompt: 'Implement TASK-218.',
+    })
+    // The launch parks inside the gated pid-identity capture.
+    await vi.waitFor(() => {
+      expect(fixture.hostProcesses.identity).toHaveBeenCalled()
+    })
+    settleFailedExternally(fixture, 'run-1')
+
+    releaseIdentity({ ok: true, data: null })
+    const result = requireOk(await startPromise)
+
+    expect(result.status).toBe('failed')
+    expect(fixture.processes.stops).toEqual([agentProcessId('run-1')])
+    const failedEvents = requireOk(fixture.agentEvents.listByRun('run-1')).filter(
+      (event) => event.eventType === 'agent.failed',
+    )
+    expect(failedEvents).toHaveLength(0)
+    const settled = runOf(fixture, 'run-1')
+    expect(settled.error?.message).toBe('settled elsewhere.')
+    expect(settled.finishedAt).toBe('2026-09-12T00:00:03.000Z')
+  })
+
+  it('failed running write: a synchronous exit from cancel does not settle the row either', async () => {
+    const fixture = setup({ failRunningWrite: true, wrapAdapter: syncExitOnCancel })
+    const profile = await createProfile(fixture, 'Personal', PERSONAL_HOME)
+
+    const result = await fixture.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: FAKE_AGENT.id,
+      accountProfileId: profile.id,
+      taskId: 'task-1',
+      worktreeId: 'wt-1',
+      prompt: 'Implement TASK-218.',
+    })
+
+    expect(result.ok).toBe(false)
+    // The process was stopped (no leak) — and the cancel's synchronous exit
+    // did NOT get to write the terminal status the failed update could not.
+    expect(fixture.processes.stops).toEqual([agentProcessId('run-1')])
+    expect(runOf(fixture, 'run-1').status).toBe('preparing')
+    const terminalEvents = requireOk(fixture.agentEvents.listByRun('run-1')).filter(
+      (event) => event.eventType === 'agent.failed' || event.eventType === 'agent.completed',
+    )
+    expect(terminalEvents).toHaveLength(0)
+  })
 })
 
 describe('worktree reservation invariant (§19.3 step 3)', () => {
@@ -797,6 +1117,17 @@ describe('continueWithProfile (§19.2/§19.3, §56.4)', () => {
         (event) => event.runId === target.id && event.profileId === work.id,
       ),
     ).toBe(true)
+    // P1-11: the continuation link is ALSO a durable Run event on the target
+    // run — the best-effort account audit is not its only home (§41).
+    const continuedEvents = requireOk(fixture.agentEvents.listByRun(target.id)).filter(
+      (event) => event.eventType === 'agent.continued',
+    )
+    expect(continuedEvents).toHaveLength(1)
+    expect(continuedEvents[0]?.payload).toMatchObject({
+      sourceRunId: sourceId,
+      reason: 'rate-limit',
+      previousAccountProfileId: personal.id,
+    })
   })
 
   it('flow B: continuing a RUNNING source fails it first, then launches the target on the same worktree', async () => {
@@ -817,10 +1148,70 @@ describe('continueWithProfile (§19.2/§19.3, §56.4)', () => {
     expect(fixture.processes.stops).toEqual([agentProcessId(sourceId)])
     const source = runOf(fixture, sourceId)
     expect(source.status).toBe('failed')
-    expect(source.failureClassification).toBeDefined()
+    // P1-2: no declared reason → NO live-tail classification; the source gets
+    // the explicit unknown registration, so the §18 projection's default
+    // branch (no profile status change) applies.
+    expect(source.failureClassification).toEqual({ kind: 'unknown', retryable: true })
+    expect(requireOk(fixture.accountEvents.listByType('agent.rate_limited'))).toHaveLength(0)
     expect(target.worktreeId).toBe('wt-1')
     expect(target.accountProfileId).toBe(work.id)
     expect(target.status).toBe('running')
+  })
+
+  it('P1-2 flow B with reason rate-limit: the live output tail IS classified and records kind rate-limited', async () => {
+    const fixture = setup()
+    const personal = await createProfile(fixture, 'Personal', PERSONAL_HOME)
+    const work = await createProfile(fixture, 'Work', WORK_HOME)
+    const { runId: sourceId } = await startSourceRun(fixture, personal.id)
+    // The source streams quota-exhaustion output but is still running.
+    emitScenario(fixture, sourceId, loadScenario('rate-limit'), { exit: false })
+    fixture.manager.getOutput(sourceId) // flush the throttled batcher into terminal.log
+
+    const target = requireOk(
+      await fixture.manager.continueWithProfile({
+        sourceRunId: sourceId,
+        targetAgentId: FAKE_AGENT.id,
+        targetAccountProfileId: work.id,
+        reason: 'rate-limit',
+      }),
+    )
+
+    const source = runOf(fixture, sourceId)
+    expect(source.status).toBe('failed')
+    expect(source.failureClassification?.kind).toBe('rate-limited')
+    expect(target.status).toBe('running')
+    expect(requireOk(fixture.accountEvents.listByType('agent.rate_limited'))).toHaveLength(1)
+    const continuations = requireOk(fixture.accountEvents.listByType('agent.continuation_created'))
+    expect(continuations[0]?.payload).toMatchObject({ reason: 'rate-limit' })
+  })
+
+  it('P1-2 flow B with reason manual-switch: quota-looking output is NEVER classified — source records unknown, profile not marked limited', async () => {
+    const fixture = setup()
+    const personal = await createProfile(fixture, 'Personal', PERSONAL_HOME)
+    const work = await createProfile(fixture, 'Work', WORK_HOME)
+    const { runId: sourceId } = await startSourceRun(fixture, personal.id)
+    // The quota-mention case: the tail mentions a rate limit, but the user
+    // is simply switching accounts — the source profile must not be
+    // relabeled on the text classifier's say-so.
+    emitScenario(fixture, sourceId, loadScenario('rate-limit'), { exit: false })
+    fixture.manager.getOutput(sourceId)
+
+    const target = requireOk(
+      await fixture.manager.continueWithProfile({
+        sourceRunId: sourceId,
+        targetAgentId: FAKE_AGENT.id,
+        targetAccountProfileId: work.id,
+        reason: 'manual-switch',
+      }),
+    )
+
+    const source = runOf(fixture, sourceId)
+    expect(source.status).toBe('failed')
+    expect(source.failureClassification).toEqual({ kind: 'unknown', retryable: true })
+    expect(requireOk(fixture.accountEvents.listByType('agent.rate_limited'))).toHaveLength(0)
+    expect(target.status).toBe('running')
+    const continuations = requireOk(fixture.accountEvents.listByType('agent.continuation_created'))
+    expect(continuations[0]?.payload).toMatchObject({ reason: 'manual-switch' })
   })
 
   it('flow A: a completed source continues without failAndStop (reason manual-switch, no rate-limit write)', async () => {
@@ -846,16 +1237,75 @@ describe('continueWithProfile (§19.2/§19.3, §56.4)', () => {
     expect(continuations[0]?.payload).toMatchObject({ reason: 'manual-switch' })
   })
 
+  it('flow A ignores a stale caller-declared reason: the persisted terminal classification is the truth', async () => {
+    const fixture = setup()
+    const personal = await createProfile(fixture, 'Personal', PERSONAL_HOME)
+    const work = await createProfile(fixture, 'Work', WORK_HOME)
+    const { runId: sourceId } = await startSourceRun(fixture, personal.id)
+    // The continuation modal was opened while the source was still running
+    // (renderer-derived 'manual-switch'); by the time the request lands the
+    // source has finished rate-limited — the declared reason must NOT
+    // overwrite that terminal truth.
+    emitScenario(fixture, sourceId, loadScenario('rate-limit'))
+    expect(runOf(fixture, sourceId).failureClassification?.kind).toBe('rate-limited')
+
+    const target = requireOk(
+      await fixture.manager.continueWithProfile({
+        sourceRunId: sourceId,
+        targetAgentId: FAKE_AGENT.id,
+        targetAccountProfileId: work.id,
+        reason: 'manual-switch',
+      }),
+    )
+
+    expect(target.status).toBe('running')
+    const continuations = requireOk(fixture.accountEvents.listByType('agent.continuation_created'))
+    expect(continuations[0]?.payload).toMatchObject({ reason: 'rate-limit' })
+    const continuedEvents = requireOk(fixture.agentEvents.listByRun(target.id)).filter(
+      (event) => event.eventType === 'agent.continued',
+    )
+    expect(continuedEvents[0]?.payload).toMatchObject({ reason: 'rate-limit' })
+    // The target prompt carries the real reason too.
+    expect(target.prompt).toContain('rate-limit')
+  })
+
+  it('flow A on a completed source ignores a declared rate-limit reason (no classification backs it)', async () => {
+    const fixture = setup()
+    const personal = await createProfile(fixture, 'Personal', PERSONAL_HOME)
+    const work = await createProfile(fixture, 'Work', WORK_HOME)
+    const { runId: sourceId } = await startSourceRun(fixture, personal.id)
+    emitScenario(fixture, sourceId, loadScenario('success'))
+    expect(runOf(fixture, sourceId).status).toBe('completed')
+
+    const target = requireOk(
+      await fixture.manager.continueWithProfile({
+        sourceRunId: sourceId,
+        targetAgentId: FAKE_AGENT.id,
+        targetAccountProfileId: work.id,
+        reason: 'rate-limit',
+      }),
+    )
+
+    expect(target.status).toBe('running')
+    const continuations = requireOk(fixture.accountEvents.listByType('agent.continuation_created'))
+    expect(continuations[0]?.payload).toMatchObject({ reason: 'manual-switch' })
+    // No rate-limit audit was recorded for the source profile either.
+    expect(requireOk(fixture.accountEvents.listByType('agent.rate_limited'))).toHaveLength(0)
+  })
+
   it('flow A aborts when the terminal source still has an unkillable survivor process', async () => {
     const fixture = setup()
     const personal = await createProfile(fixture, 'Personal', PERSONAL_HOME)
     const work = await createProfile(fixture, 'Work', WORK_HOME)
     const { runId: sourceId } = await startSourceRun(fixture, personal.id)
     emitScenario(fixture, sourceId, loadScenario('rate-limit'))
+    // A settle path finalized the row WITHOUT an exit code while the process
+    // lived on (§19.3 flow A step 1) — with an identity token the probe is
+    // still warranted (P2-12 only skips exit-coded / token-less rows).
     requireOk(
       fixture.runs.update(
         sourceId,
-        { pid: 8888, pidIdentity: 'token-8888' },
+        { pid: 8888, pidIdentity: 'token-8888', exitCode: null },
         '2026-09-12T00:00:03.000Z',
       ),
     )
@@ -875,6 +1325,79 @@ describe('continueWithProfile (§19.2/§19.3, §56.4)', () => {
     if (result.ok) return
     expect(result.error.code).toBe('CONFLICT')
     expect(requireOk(fixture.accountEvents.listByType('agent.continuation_created'))).toEqual([])
+  })
+
+  it('P2-12 flow A: a terminal source WITH an exit code is never probed — the process demonstrably exited', async () => {
+    const fixture = setup()
+    const personal = await createProfile(fixture, 'Personal', PERSONAL_HOME)
+    const work = await createProfile(fixture, 'Work', WORK_HOME)
+    const { runId: sourceId } = await startSourceRun(fixture, personal.id)
+    emitScenario(fixture, sourceId, loadScenario('rate-limit'))
+    // The row carries an exit code AND a token; the recorded pid may name an
+    // unrelated process by now — flow A must not even look at it.
+    requireOk(
+      fixture.runs.update(
+        sourceId,
+        { pid: 8888, pidIdentity: 'token-8888' },
+        '2026-09-12T00:00:03.000Z',
+      ),
+    )
+    fixture.hostProcesses.identity.mockClear()
+    fixture.hostProcesses.probe.mockClear()
+    fixture.hostProcesses.identity.mockResolvedValue({ ok: true, data: 'token-8888' })
+    fixture.hostProcesses.terminate.mockResolvedValue({
+      ok: false,
+      error: { code: 'UNKNOWN', message: 'taskkill failed.', retryable: true },
+    })
+
+    const target = requireOk(
+      await fixture.manager.continueWithProfile({
+        sourceRunId: sourceId,
+        targetAgentId: FAKE_AGENT.id,
+        targetAccountProfileId: work.id,
+      }),
+    )
+
+    // The target run's own launch captures its pid identity (4242) — but the
+    // SOURCE pid (8888) must never be probed or terminated.
+    expect(fixture.hostProcesses.identity).not.toHaveBeenCalledWith(8888)
+    expect(fixture.hostProcesses.probe).not.toHaveBeenCalled()
+    expect(fixture.hostProcesses.terminate).not.toHaveBeenCalled()
+    expect(target.status).toBe('running')
+  })
+
+  it('P2-12 flow A: a legacy terminal source (no pidIdentity, no exit code) is never probed or killed', async () => {
+    const fixture = setup()
+    const personal = await createProfile(fixture, 'Personal', PERSONAL_HOME)
+    const work = await createProfile(fixture, 'Work', WORK_HOME)
+    const { runId: sourceId } = await startSourceRun(fixture, personal.id)
+    emitScenario(fixture, sourceId, loadScenario('rate-limit'))
+    // A pre-migration-011 row: pid recorded, no identity token — and a
+    // settle path cleared the exit code. Probing the pid would only find
+    // whatever process reused it.
+    requireOk(
+      fixture.runs.update(
+        sourceId,
+        { pid: 8888, pidIdentity: null, exitCode: null },
+        '2026-09-12T00:00:03.000Z',
+      ),
+    )
+    fixture.hostProcesses.identity.mockClear()
+    fixture.hostProcesses.probe.mockClear()
+    fixture.hostProcesses.probe.mockResolvedValue({ ok: true, data: true })
+
+    const target = requireOk(
+      await fixture.manager.continueWithProfile({
+        sourceRunId: sourceId,
+        targetAgentId: FAKE_AGENT.id,
+        targetAccountProfileId: work.id,
+      }),
+    )
+
+    expect(fixture.hostProcesses.identity).not.toHaveBeenCalledWith(8888)
+    expect(fixture.hostProcesses.probe).not.toHaveBeenCalled()
+    expect(fixture.hostProcesses.terminate).not.toHaveBeenCalled()
+    expect(target.status).toBe('running')
   })
 
   it('rejects a target profile belonging to another agent runtime via the §37 selector', async () => {
@@ -903,5 +1426,69 @@ describe('continueWithProfile (§19.2/§19.3, §56.4)', () => {
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.error.code).toBe('ACCOUNT_PROFILE_INCOMPATIBLE')
+  })
+})
+
+describe('resume resets the previous attempt’s failure classification', () => {
+  it('a rate-limited run that is resumed relaunches WITHOUT the stale classification', async () => {
+    const fixture = setup()
+    const personal = await createProfile(fixture, 'Personal', PERSONAL_HOME)
+    const { runId } = await startSourceRun(fixture, personal.id)
+    // Crash-loop shape: the row still carries the previous attempt's
+    // rate-limit classification when the run comes back interrupted. If the
+    // relaunch kept it, the rate-limit logic (§18 profile projection, the
+    // renderer RateLimitAlert) would fire for the fresh attempt.
+    requireOk(
+      fixture.runs.update(
+        runId,
+        {
+          status: 'interrupted',
+          finishedAt: '2026-09-12T00:00:03.000Z',
+          failureClassification: { kind: 'rate-limited', retryable: true },
+        },
+        '2026-09-12T00:00:03.000Z',
+      ),
+    )
+    expect(runOf(fixture, runId).failureClassification?.kind).toBe('rate-limited')
+
+    const resumed = requireOk(await fixture.manager.resume({ runId }))
+
+    expect(resumed.status).toBe('running')
+    expect(resumed.failureClassification).toBeUndefined()
+    const persisted = runOf(fixture, runId)
+    expect(persisted.failureClassification).toBeUndefined()
+    expect(persisted.status).toBe('running')
+  })
+
+  it('a QUEUED resume clears the classification too (before any relaunch happens)', async () => {
+    const fixture = setup({
+      concurrency: { maxGlobalRuns: 1, maxRunsPerWorkspace: 5, maxRunsPerAgent: 5 },
+    })
+    const personal = await createProfile(fixture, 'Personal', PERSONAL_HOME)
+    const { runId } = await startSourceRun(fixture, personal.id)
+    emitScenario(fixture, runId, loadScenario('rate-limit'))
+    // Occupy the single global slot so the resume below queues.
+    const blocker = requireOk(
+      await fixture.manager.start({
+        workspaceId: 'workspace-1',
+        agentType: FAKE_AGENT.id,
+        accountProfileId: personal.id,
+      }),
+    )
+    expect(blocker.status).toBe('running')
+    requireOk(
+      fixture.runs.update(
+        runId,
+        { status: 'interrupted', finishedAt: '2026-09-12T00:00:03.000Z' },
+        '2026-09-12T00:00:03.000Z',
+      ),
+    )
+    expect(runOf(fixture, runId).failureClassification?.kind).toBe('rate-limited')
+
+    const queued = requireOk(await fixture.manager.resume({ runId }))
+
+    expect(queued.status).toBe('queued')
+    expect(queued.failureClassification).toBeUndefined()
+    expect(runOf(fixture, runId).failureClassification).toBeUndefined()
   })
 })

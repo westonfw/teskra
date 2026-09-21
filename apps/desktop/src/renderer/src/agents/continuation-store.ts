@@ -1,5 +1,6 @@
 import type {
   AgentAccountProfile,
+  AgentContinuationReason,
   AgentRun,
   ContinueAgentRunRequest,
   IpcResult,
@@ -74,10 +75,25 @@ export function createContinuationStore(getBridge: () => ContinuationStoreBridge
       if (sourceRun === undefined) return undefined
       set({ submitting: true, error: undefined })
       try {
+        // P1-2: declare WHY the switch happens. Main honors this declaration
+        // only for a LIVE source run (flow B — a live run has no persisted
+        // classification to consult, and only runs the output-tail classifier
+        // for 'rate-limit', so anything else keeps the source profile's
+        // status untouched). For an already terminal source (flow A) Main
+        // ignores it and derives the reason from the persisted terminal
+        // classification, so a stale snapshot here can never overwrite the
+        // terminal truth.
+        const reason: AgentContinuationReason =
+          sourceRun.failureClassification?.kind === 'rate-limited'
+            ? 'rate-limit'
+            : sourceRun.status === 'failed'
+              ? 'agent-failure'
+              : 'manual-switch'
         const result = await getBridge().agent.continueWithProfile({
           sourceRunId: sourceRun.id,
           targetAgentId,
           targetAccountProfileId,
+          reason,
         })
         if (!result.ok) {
           set({ submitting: false, error: result.error })

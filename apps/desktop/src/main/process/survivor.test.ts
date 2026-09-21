@@ -92,4 +92,42 @@ describe('terminateSurvivorProcess (§19.5)', () => {
     expect(await terminateSurvivorProcess(probeFailed, legacy)).toBe('none')
     expect(probeFailed.terminate).not.toHaveBeenCalled()
   })
+
+  it('a NON-terminal legacy row keeps the probe-only fallback even with a status', async () => {
+    const control = hostProcesses({
+      probe: vi.fn(async () => ({ ok: true as const, data: true })),
+    })
+    const run = { id: 'run-legacy', pid: 4242, status: 'running' as const }
+    expect(await terminateSurvivorProcess(control, run)).toBe('terminated')
+    expect(control.probe).toHaveBeenCalledWith(4242)
+  })
+
+  it('P2-12: a terminal legacy row WITH an exit code is never probed or killed', async () => {
+    const control = hostProcesses({
+      probe: vi.fn(async () => ({ ok: true as const, data: true })),
+    })
+    const run = { id: 'run-legacy', pid: 4242, status: 'failed' as const, exitCode: 1 }
+    expect(await terminateSurvivorProcess(control, run)).toBe('none')
+    expect(control.probe).not.toHaveBeenCalled()
+    expect(control.terminate).not.toHaveBeenCalled()
+  })
+
+  it('P2-12: a terminal legacy row WITHOUT an exit code is never probed or killed either', async () => {
+    const control = hostProcesses({
+      probe: vi.fn(async () => ({ ok: true as const, data: true })),
+    })
+    const run = { id: 'run-legacy', pid: 4242, status: 'failed' as const }
+    expect(await terminateSurvivorProcess(control, run)).toBe('none')
+    expect(control.probe).not.toHaveBeenCalled()
+    expect(control.terminate).not.toHaveBeenCalled()
+  })
+
+  it('P2-12: a terminal row WITH a token is still identity-verified (no exit code recorded)', async () => {
+    const control = hostProcesses({
+      identity: vi.fn(async () => ({ ok: true as const, data: 'token-A' })),
+    })
+    const run = { id: 'run-1', pid: 4242, pidIdentity: 'token-A', status: 'failed' as const }
+    expect(await terminateSurvivorProcess(control, run)).toBe('terminated')
+    expect(control.terminate).toHaveBeenCalledWith(4242)
+  })
 })

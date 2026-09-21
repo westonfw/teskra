@@ -90,11 +90,30 @@ describe('continuation store (TASK-108)', () => {
       sourceRunId: 'run-1',
       targetAgentId: 'codex',
       targetAccountProfileId: 'acct-work',
+      reason: 'rate-limit',
     })
     expect(created?.id).toBe('run-2')
     expect(store.getState().open).toBe(false)
     expect(store.getState().sourceRun).toBeUndefined()
     expect(store.getState().error).toBeUndefined()
+  })
+
+  it('declares manual-switch when the source run is still live (P1-2)', async () => {
+    const continueWithProfile = vi.fn(async (): Promise<IpcResult<AgentRun>> => ({
+      ok: true,
+      data: continuedRun,
+    }))
+    const store = createContinuationStore(() => makeBridge({ continueWithProfile }))
+    store.getState().openFor({ ...sourceRun, status: 'running', failureClassification: undefined })
+
+    await store.getState().continueWith('codex', 'acct-work')
+
+    expect(continueWithProfile).toHaveBeenCalledWith({
+      sourceRunId: 'run-1',
+      targetAgentId: 'codex',
+      targetAccountProfileId: 'acct-work',
+      reason: 'manual-switch',
+    })
   })
 
   it('keeps the modal open and exposes the error when continuation fails', async () => {

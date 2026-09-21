@@ -9,6 +9,7 @@ import type {
 import { toPublicError } from '../../errors'
 import type { WorkspaceRuntime } from '../../workspace/runtime'
 import type { AgentAccountProfileAdapter } from './account-profile-adapter'
+import { isRuntimeCompatible } from './account-profile-runtime-resolver'
 
 /**
  * §38/§39 historical Runtime Identity (TASK-100/112).
@@ -17,10 +18,13 @@ import type { AgentAccountProfileAdapter } from './account-profile-adapter'
  * STARTED with — never with whatever the current agent default happens to be.
  * The run row is the source of truth: `accountProfileId` +
  * `profileSnapshot.configHome`. The profile row is read only to detect
- * identity drift (§10.5); a disabled or even deleted profile row does NOT
- * block restoration — the snapshot is the truth and projecting it is exactly
- * "restore with the historical identity". Only when neither the snapshot nor
- * the row can name a configHome is restoration impossible, and that is an
+ * identity drift (§10.5); a DELETED profile row does NOT block restoration —
+ * the snapshot is the truth and projecting it is exactly "restore with the
+ * historical identity". (A DISABLED row is refused one layer up: the
+ * AgentManager resume path rejects it with ACCOUNT_PROFILE_DISABLED per
+ * §65 scenario G / P1-4 — this projection stays row-agnostic so the
+ * deleted-row snapshot path keeps working.) Only when neither the snapshot
+ * nor the row can name a configHome is restoration impossible, and that is an
  * explicit error rather than a silent account switch.
  */
 
@@ -41,6 +45,23 @@ export interface ProjectHistoricalProfileIdentityOptions {
   readonly runtime: WorkspaceRuntime
   /** Fallback runtime ref when the snapshot predates the runtime field. */
   readonly workspaceRuntime: WorkspaceRuntimeRef
+}
+
+/**
+ * P1-4 (§65 scenario G): the §37 step-0 runtime judgment applied to a
+ * HISTORICAL runtime ref (the profile row's, else the run snapshot's) at
+ * resume time. `isRuntimeCompatible` is typed on a full profile but only
+ * reads `.runtime` — the cast adapts a bare ref without duplicating the
+ * kind/distro rule.
+ */
+export function isHistoricalRuntimeCompatible(
+  historicalRuntime: WorkspaceRuntimeRef,
+  workspaceRuntime: WorkspaceRuntimeRef,
+): boolean {
+  return isRuntimeCompatible(
+    { runtime: historicalRuntime } as AgentAccountProfile,
+    workspaceRuntime,
+  )
 }
 
 export function projectHistoricalProfileIdentity(

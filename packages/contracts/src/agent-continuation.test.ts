@@ -74,6 +74,23 @@ describe('continueAgentRunRequestSchema (§28)', () => {
     ).toBe(true)
   })
 
+  it('accepts an optional caller-declared reason and rejects unknown reasons (P1-2)', () => {
+    expect(
+      continueAgentRunRequestSchema.safeParse({
+        sourceRunId: 'run-1',
+        targetAgentId: 'codex',
+        reason: 'rate-limit',
+      }).success,
+    ).toBe(true)
+    expect(
+      continueAgentRunRequestSchema.safeParse({
+        sourceRunId: 'run-1',
+        targetAgentId: 'codex',
+        reason: 'user-bored',
+      }).success,
+    ).toBe(false)
+  })
+
   it('rejects a missing sourceRunId / targetAgentId', () => {
     expect(continueAgentRunRequestSchema.safeParse({ targetAgentId: 'codex' }).success).toBe(false)
     expect(continueAgentRunRequestSchema.safeParse({ sourceRunId: 'run-1' }).success).toBe(false)

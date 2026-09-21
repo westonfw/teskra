@@ -366,7 +366,7 @@ describe('Profile-aware Recovery (TASK-112, §38)', () => {
     expect(fixture.starts[1]?.env?.CODEX_HOME).toBe(WORK_HOME)
   })
 
-  it('profile disabled after the crash → recovery keeps the historical identity (no silent switch)', async () => {
+  it('profile disabled after the crash → user-driven resume is REFUSED (ACCOUNT_PROFILE_DISABLED, §65 G); use Continuation instead', async () => {
     const fixture = setup()
     const work = await startWorkRun(fixture)
     await fixture.reconcile()
@@ -375,8 +375,60 @@ describe('Profile-aware Recovery (TASK-112, §38)', () => {
 
     const resumed = await fixture.resumeViaRecovery('run-1')
 
-    expect(resumed).toMatchObject({ ok: true, data: { status: 'running' } })
-    expect(fixture.starts[1]?.env?.CODEX_HOME).toBe(WORK_HOME)
+    expect(resumed.ok).toBe(false)
+    if (resumed.ok) return
+    expect(resumed.error.code).toBe('ACCOUNT_PROFILE_DISABLED')
+    expect(resumed.error.message).toContain('Continuation')
+    // No relaunch happened and the run keeps its resumable status.
+    expect(fixture.starts).toHaveLength(1)
+    expect(requireOk(fixture.runs.getById('run-1'))?.status).toBe('interrupted')
+  })
+
+  it('workspace re-pointed at another runtime after the crash → resume is refused (ACCOUNT_PROFILE_INCOMPATIBLE)', async () => {
+    const fixture = setup()
+    await startWorkRun(fixture)
+    await fixture.reconcile()
+    // The workspace now runs natively on Windows while the run's historical
+    // identity is WSL — resuming would inject a WSL config home into a
+    // Windows process (or vice versa) and the CLI would silently fall back
+    // to its default home (P1-4).
+    requireOk(
+      fixture.workspaces.update(
+        'workspace-1',
+        { runtime: { kind: 'windows' } },
+        '2026-09-12T00:00:04.000Z',
+      ),
+    )
+
+    const resumed = await fixture.resumeViaRecovery('run-1')
+
+    expect(resumed.ok).toBe(false)
+    if (resumed.ok) return
+    expect(resumed.error.code).toBe('ACCOUNT_PROFILE_INCOMPATIBLE')
+    expect(fixture.starts).toHaveLength(1)
+    expect(requireOk(fixture.runs.getById('run-1'))?.status).toBe('interrupted')
+  })
+
+  it('workspace.env carrying a reserved account key after the crash → resume is rejected (§13.2, same as start)', async () => {
+    const fixture = setup()
+    await startWorkRun(fixture)
+    await fixture.reconcile()
+    requireOk(
+      fixture.workspaces.update(
+        'workspace-1',
+        { env: { CODEX_HOME: '/attacker-controlled' } },
+        '2026-09-12T00:00:04.000Z',
+      ),
+    )
+
+    const resumed = await fixture.resumeViaRecovery('run-1')
+
+    expect(resumed.ok).toBe(false)
+    if (resumed.ok) return
+    expect(resumed.error.code).toBe('VALIDATION_FAILED')
+    expect(resumed.error.message).toContain('CODEX_HOME')
+    expect(fixture.starts).toHaveLength(1)
+    expect(requireOk(fixture.runs.getById('run-1'))?.status).toBe('interrupted')
   })
 
   it('snapshot missing AND profile row gone → recovery errors instead of silently switching accounts', async () => {

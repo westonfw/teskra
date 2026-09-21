@@ -52,6 +52,17 @@ export const continueAgentRunRequestSchema = z.strictObject({
   targetAgentId: ipcIdSchema,
   targetAccountProfileId: ipcIdSchema.optional(),
   targetExecutionProfileId: ipcIdSchema.optional(),
+  /**
+   * P1-2 (docs/code-review-2026-09-21.md §3): the caller-declared reason for
+   * the switch. Flow B (live source run) only runs the output-tail text
+   * classifier when this is 'rate-limit' — a plain manual switch must never
+   * re-label the source profile as limited because its terminal output
+   * happened to mention a rate limit. Flow A (source already terminal)
+   * ignores this field entirely: the persisted terminal classification is the
+   * source of truth. When omitted in flow B, Main derives the reason from the
+   * classification registered by failAndStop.
+   */
+  reason: agentContinuationReasonSchema.optional(),
 })
 export type ContinueAgentRunRequest = z.infer<typeof continueAgentRunRequestSchema>
 

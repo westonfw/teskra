@@ -18,7 +18,9 @@ import type { HostProcessControl } from './host-processes'
  * identity read (PowerShell policy-blocked, ps timeout) is neither dead nor
  * verified: reported as 'alive' so the caller leaves the run alone instead
  * of risking a double-write or an arbitrary kill. Legacy rows without a
- * token keep the probe-only behavior.
+ * token keep the probe-only behavior — except TERMINAL legacy rows, which
+ * are never probed or killed (P2-12: the pid may name an unrelated process
+ * by now and a recorded exit code already proves the Agent exited).
  */
 export type SurvivorTermination =
   /** No survivor: no pid recorded, pid gone, or the pid now belongs to an unrelated process. */
@@ -28,13 +30,34 @@ export type SurvivorTermination =
   /** Still alive: identity unreadable, or termination failed — the caller must NOT proceed. */
   | 'alive'
 
+const TERMINAL_STATUSES: readonly AgentRun['status'][] = [
+  'completed',
+  'failed',
+  'cancelled',
+  'interrupted',
+]
+
 export async function terminateSurvivorProcess(
   hostProcesses: HostProcessControl | undefined,
-  run: Pick<AgentRun, 'id' | 'pid' | 'pidIdentity'>,
+  run: Pick<AgentRun, 'id' | 'pid' | 'pidIdentity'> &
+    Partial<Pick<AgentRun, 'status' | 'exitCode'>>,
 ): Promise<SurvivorTermination> {
   const logger = getLogger('runtime')
   if (hostProcesses === undefined || run.pid === undefined) return 'none'
   const pid = run.pid
+  // P2-12 (docs/code-review-2026-09-21.md §4): a TERMINAL legacy row (no
+  // identity token — every run recorded before migration 011) is never
+  // probed or killed. A recorded exit code already proves the process is
+  // gone, and for any other terminal row the pid may have been reused by an
+  // unrelated process since — probing it tells nothing about the Agent and
+  // killing it would be an arbitrary kill.
+  if (
+    run.pidIdentity === undefined &&
+    (run.exitCode !== undefined ||
+      (run.status !== undefined && TERMINAL_STATUSES.includes(run.status)))
+  ) {
+    return 'none'
+  }
   if (run.pidIdentity !== undefined) {
     const identity = await hostProcesses.identity(pid)
     if (!identity.ok) {
