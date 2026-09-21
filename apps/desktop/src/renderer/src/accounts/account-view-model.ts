@@ -140,3 +140,36 @@ export function profilesByAgent(
   }
   return groups
 }
+
+/**
+ * §4.2 — the "new account" entry points (creation wizard, external import)
+ * may only offer agents with a registered account profile adapter; creating
+ * a profile for an adapter-less agent fails Main-side with "no account
+ * profile adapter". `undefined` adapterAgentIds means the list has not loaded
+ * (or the query failed): fall back to the unfiltered definitions rather than
+ * blocking account creation. Only creation is filtered — existing profiles of
+ * an agent whose adapter was removed must stay visible everywhere else.
+ */
+export function adapterBackedDefinitions<T extends { readonly id: string }>(
+  definitions: readonly T[],
+  adapterAgentIds: readonly string[] | undefined,
+): readonly T[] {
+  if (adapterAgentIds === undefined) return definitions
+  const backed = new Set(adapterAgentIds)
+  return definitions.filter((definition) => backed.has(definition.id))
+}
+
+/**
+ * Selection companion of adapterBackedDefinitions: keeps the current agentId
+ * when it is adapter-backed (or the adapter list is unknown), otherwise falls
+ * back to the first adapter-backed definition.
+ */
+export function adapterBackedAgentId<T extends { readonly id: string }>(
+  current: string | undefined,
+  definitions: readonly T[],
+  adapterAgentIds: readonly string[] | undefined,
+): string | undefined {
+  if (adapterAgentIds === undefined) return current
+  if (current !== undefined && adapterAgentIds.includes(current)) return current
+  return adapterBackedDefinitions(definitions, adapterAgentIds)[0]?.id
+}

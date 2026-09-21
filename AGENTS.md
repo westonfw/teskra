@@ -80,7 +80,8 @@ docs/decisions/             = 已裁决的架构问题
    0008 = Criteria Set 可脱离 Task（migration 010）。引用时注意别沿用旧编号。
 8. **AccountProfile = 完整 CLI Home**（ADR-0009，Milestone 24 / TASK-094~118）。
    多订阅账号通过独立的 CLI 配置根隔离（Codex 用 `CODEX_HOME`，Claude 用
-   `CLAUDE_CONFIG_DIR`），「账号即环境」；`AgentExecutionProfile` 不引用
+   `CLAUDE_CONFIG_DIR`，Kimi 用 `KIMI_CODE_HOME`），「账号即环境」；
+   `AgentExecutionProfile` 不引用
    tool / skill / permission / env 四类 Profile ID（这些实体不存在）。
    另：限额是失败原因而非 Run 状态（ADR-0010，分类结果存
    `agent_runs.failure_classification_json`）；Workflow 里引用的是机器间可移植的

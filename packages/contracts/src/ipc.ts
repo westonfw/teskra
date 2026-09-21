@@ -7,6 +7,7 @@ import {
   cancelAccountLoginRequestSchema,
   createAccountProfileRequestSchema,
   listAccountProfilesRequestSchema,
+  listAdapterAgentsRequestSchema,
   removeAccountProfileRequestSchema,
   resizeAccountLoginRequestSchema,
   setDefaultAccountProfileRequestSchema,
@@ -19,6 +20,7 @@ import {
   type CancelAccountLoginRequest,
   type CreateAccountProfileRequest,
   type ListAccountProfilesRequest,
+  type ListAdapterAgentsRequest,
   type RemoveAccountProfileRequest,
   type ResizeAccountLoginRequest,
   type SetDefaultAccountProfileRequest,
@@ -453,6 +455,7 @@ export const IPC_CHANNELS = {
   agentRunResume: 'teskra:agent-run:resume',
   agentRunContinueWithProfile: 'teskra:agent:continue-with-profile',
   accountList: 'teskra:account:list',
+  accountListAdapterAgents: 'teskra:account:adapter-agents:list',
   accountGet: 'teskra:account:get',
   accountCreate: 'teskra:account:create',
   accountUpdate: 'teskra:account:update',
@@ -848,6 +851,13 @@ export const accountListChannel = channel(
   IPC_CHANNELS.accountList,
   listAccountProfilesRequestSchema,
   z.array(agentAccountProfileSchema),
+)
+// §4.2: the "new account" entry points filter to adapter-backed agents; the
+// response carries AgentDefinition.id strings, never adapter internals.
+export const accountListAdapterAgentsChannel = channel(
+  IPC_CHANNELS.accountListAdapterAgents,
+  listAdapterAgentsRequestSchema,
+  z.array(z.string().min(1)),
 )
 export const accountGetChannel = channel(
   IPC_CHANNELS.accountGet,
@@ -1347,6 +1357,7 @@ export const ipcChannelDefinitions = {
   agentRunResume: agentRunResumeChannel,
   agentRunContinueWithProfile: agentRunContinueWithProfileChannel,
   accountList: accountListChannel,
+  accountListAdapterAgents: accountListAdapterAgentsChannel,
   accountGet: accountGetChannel,
   accountCreate: accountCreateChannel,
   accountUpdate: accountUpdateChannel,
@@ -1538,6 +1549,12 @@ export interface TeskraBridge {
    */
   readonly account: {
     list(request?: ListAccountProfilesRequest): Promise<IpcResult<AgentAccountProfile[]>>
+    /**
+     * AgentDefinition.id values with a registered account profile adapter —
+     * the only agents the "new account" entry points may offer. Existing
+     * profiles of an agent whose adapter was removed still list via `list`.
+     */
+    listAdapterAgents(request?: ListAdapterAgentsRequest): Promise<IpcResult<string[]>>
     get(request: AccountProfileIdRequest): Promise<IpcResult<AgentAccountProfile | null>>
     create(request: CreateAccountProfileRequest): Promise<IpcResult<AgentAccountProfile>>
     update(request: UpdateAccountProfileRequest): Promise<IpcResult<AgentAccountProfile>>

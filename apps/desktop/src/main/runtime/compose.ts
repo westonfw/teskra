@@ -24,6 +24,7 @@ import { createProfileAliasManager } from '../agents/profile-alias-manager'
 import { createClaudeAccountProfileAdapter } from '../agents/accounts/adapters/claude-account-profile-adapter'
 import { registerCodexAccountProfileAdapter } from '../agents/accounts/adapters/codex-account-profile-adapter'
 import { createFakeAccountProfileAdapter } from '../agents/accounts/adapters/fake-account-profile-adapter'
+import { registerKimiAccountProfileAdapter } from '../agents/accounts/adapters/kimi-account-profile-adapter'
 import { createClaudeAdapter } from '../agents/adapters/claude-adapter'
 import { createClaudeFailureClassifier } from '../agents/adapters/claude-failure-classifier'
 import { createCodexAdapter } from '../agents/adapters/codex-adapter'
@@ -372,7 +373,7 @@ export async function composeTeskraRuntime(
     detector: agentDetector,
   })
   // Milestone 24 (TASK-100): the account-profile adapter registry (Codex /
-  // Claude) and the AccountProfileManager. resolveExecutable surfaces the
+  // Claude / Kimi) and the AccountProfileManager. resolveExecutable surfaces the
   // detector's per-runtime executable override for login commands; detection
   // itself is async and stays with the Login Terminal (TASK-102/104).
   const accountProfileAdapters = createAccountProfileAdapterRegistry()
@@ -411,6 +412,21 @@ export async function composeTeskraRuntime(
   if (!claudeAccountAdapter.ok) {
     database.close()
     return claudeAccountAdapter
+  }
+  const kimiAccountAdapter = registerKimiAccountProfileAdapter(accountProfileAdapters.data, {
+    commands,
+    createRuntime: runtimeFor,
+    resolveExecutable: (profile) => {
+      const override = agentDetector.getExecutableOverride({
+        agentId: profile.agentId,
+        runtime: profile.runtime,
+      })
+      return override.ok ? (override.data ?? undefined) : undefined
+    },
+  })
+  if (!kimiAccountAdapter.ok) {
+    database.close()
+    return kimiAccountAdapter
   }
   // TASK-115: the Fake Agent participates in the account profile lifecycle on
   // the same development/test boundary as its agent registration — a profile
@@ -1022,6 +1038,13 @@ export async function composeTeskraRuntime(
     },
     account: {
       list: (request = {}) => accountProfileManager.list(request),
+      // §4.2: adapter-backed agents — the wizard / external-import "new
+      // account" entry points filter to these; profile listing is unaffected.
+      listAdapterAgents: () =>
+        Promise.resolve({
+          ok: true as const,
+          data: accountProfileAdapters.data.list().map((adapter) => adapter.agentId),
+        }),
       get: ({ id }) => accountProfileManager.get(id),
       create: (request) => accountProfileManager.create(request),
       update: ({ id, patch }) => accountProfileManager.update(id, patch),

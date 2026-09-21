@@ -6,7 +6,8 @@ import { toPublicError } from '../../errors'
  * §13.2 reserved env keys (TASK-100) — the reusable rejection check.
  *
  * Every AgentAccountProfileAdapter declares the env keys it owns when
- * projecting a profile (Codex: CODEX_HOME, Claude: CLAUDE_CONFIG_DIR). Those
+ * projecting a profile (Codex: CODEX_HOME, Claude: CLAUDE_CONFIG_DIR, Kimi:
+ * KIMI_CODE_HOME). Those
  * keys are reserved: if a workspace config, a Run request, or (TASK-111) a
  * Workflow definition could set them, it would silently retarget the Run at
  * another account's CLI home while looking perfectly normal. Any occurrence

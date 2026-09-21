@@ -56,6 +56,7 @@ import type {
   HandoffRecord,
   IpcResult,
   ListAccountProfilesRequest,
+  ListAdapterAgentsRequest,
   ListExecutionProfilesRequest,
   ListRecoveryIssuesRequest,
   ListRecentWorkspacesRequest,
@@ -184,6 +185,12 @@ import type {
  */
 export interface AccountPort {
   list(request?: ListAccountProfilesRequest): Promise<IpcResult<readonly AgentAccountProfile[]>>
+  /**
+   * §4.2: agentIds with a registered account profile adapter — the "new
+   * account" entry points (wizard / external import) filter to these. Existing
+   * profiles of an agent whose adapter was removed are unaffected.
+   */
+  listAdapterAgents(request?: ListAdapterAgentsRequest): Promise<IpcResult<readonly string[]>>
   get(request: AccountProfileIdRequest): Promise<IpcResult<AgentAccountProfile | null>>
   create(request: CreateAccountProfileRequest): Promise<IpcResult<AgentAccountProfile>>
   update(request: UpdateAccountProfileRequest): Promise<IpcResult<AgentAccountProfile>>

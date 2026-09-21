@@ -203,6 +203,15 @@ export const listAccountProfilesRequestSchema = z.strictObject({
 })
 export type ListAccountProfilesRequest = z.infer<typeof listAccountProfilesRequestSchema>
 
+/**
+ * §4.2 / §10.4 — the agentIds with a registered AgentAccountProfileAdapter,
+ * i.e. the agents a NEW account profile can be created for. Response is a
+ * plain string array (AgentDefinition.id values); existing profiles of an
+ * agent whose adapter was removed still list through account.list.
+ */
+export const listAdapterAgentsRequestSchema = z.strictObject({})
+export type ListAdapterAgentsRequest = z.infer<typeof listAdapterAgentsRequestSchema>
+
 export const accountProfileIdRequestSchema = z.strictObject({
   id: ipcIdSchema,
 })

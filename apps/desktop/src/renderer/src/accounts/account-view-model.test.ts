@@ -9,6 +9,8 @@ import {
   accountLoginAvailable,
   accountRuntimeLabel,
   accountStatusTag,
+  adapterBackedAgentId,
+  adapterBackedDefinitions,
   defaultAccountProfileId,
   isValidAccountSlug,
   isValidConfigHomePath,
@@ -235,5 +237,32 @@ describe('§51 migration guidance copy (TASK-113)', () => {
     expect(zhCN['accounts.empty.guidance']).toBe(
       '你当前在用 CLI 的默认账号。要挂多个账号，请添加 Profile。',
     )
+  })
+})
+
+describe('adapterBackedDefinitions (§4.2 — "new account" entry filter)', () => {
+  const definitions = [
+    { id: 'codex', name: 'Codex' },
+    { id: 'claude', name: 'Claude Code' },
+    { id: 'kimi', name: 'Kimi Code' },
+    { id: 'fake', name: 'Fake Agent' },
+  ]
+
+  it('filters the creation options to agents with a registered adapter', () => {
+    expect(
+      adapterBackedDefinitions(definitions, ['codex', 'claude', 'kimi']).map(({ id }) => id),
+    ).toEqual(['codex', 'claude', 'kimi'])
+  })
+
+  it('keeps the unfiltered list while the adapter list is unknown (load failure fallback)', () => {
+    expect(adapterBackedDefinitions(definitions, undefined)).toBe(definitions)
+  })
+
+  it('adapterBackedAgentId keeps a backed selection and steers an unbacked one to the first backed agent', () => {
+    expect(adapterBackedAgentId('kimi', definitions, ['codex', 'kimi'])).toBe('kimi')
+    expect(adapterBackedAgentId('fake', definitions, ['codex', 'kimi'])).toBe('codex')
+    expect(adapterBackedAgentId(undefined, definitions, ['kimi'])).toBe('kimi')
+    expect(adapterBackedAgentId('fake', definitions, undefined)).toBe('fake')
+    expect(adapterBackedAgentId('fake', definitions, [])).toBeUndefined()
   })
 })

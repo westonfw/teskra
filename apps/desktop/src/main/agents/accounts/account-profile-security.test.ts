@@ -164,6 +164,7 @@ describe('renderer credential isolation (§58)', () => {
         'accountEnable',
         'accountGet',
         'accountList',
+        'accountListAdapterAgents',
         'accountLoginCancel',
         'accountLoginResize',
         'accountLoginStart',
@@ -469,14 +470,17 @@ describe('profile env wins over smuggled env even when §13.2 is bypassed (§13.
 // ---------------------------------------------------------------------------
 
 describe('§13.2 reserved keys reject case variants on every runtime (P0-1)', () => {
-  const RESERVED = ['CODEX_HOME', 'CLAUDE_CONFIG_DIR']
+  const RESERVED = ['CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'KIMI_CODE_HOME']
 
   it.each([
     ['workspace.env', { codex_home: '/elsewhere' }],
     ['workspace.env', { CLAUDE_config_DIR: '/elsewhere' }],
+    ['workspace.env', { kimi_code_home: '/elsewhere' }],
     ['request.environment', { Codex_Home: '/elsewhere' }],
     ['request.environment', { claude_config_dir: '/elsewhere' }],
+    ['request.environment', { Kimi_Code_Home: '/elsewhere' }],
     ['workflow node "implement" env', { codex_home: '/elsewhere' }],
+    ['workflow node "implement" env', { KIMI_CODE_HOME: '/elsewhere' }],
   ])('rejects %s carrying %o', (source, env) => {
     const result = assertNoReservedEnvKeys(env, source, RESERVED)
     expect(result.ok).toBe(false)
@@ -505,24 +509,28 @@ describe('workflow node env case variants rejected at the §13.2 third line (P0-
       aliases: {} as never,
       accountProfiles: {} as never,
       executionProfiles: {} as never,
-      reservedEnvKeys: () => ['CODEX_HOME', 'CLAUDE_CONFIG_DIR'],
+      reservedEnvKeys: () => ['CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'KIMI_CODE_HOME'],
     })
   }
 
-  it.each(['codex_home', 'Codex_Home', 'claude_config_dir', 'CLAUDE_CONFIG_DIR'])(
-    'resolveAgentNodeProfiles rejects workflow env key %j',
-    (key) => {
-      const result = aliasManager().resolveAgentNodeProfiles({
-        agentId: 'codex',
-        env: { [key]: '/elsewhere' },
-        source: 'workflow node "implement"',
-      })
-      expect(result.ok).toBe(false)
-      if (result.ok) return
-      expect(result.error.code).toBe('VALIDATION_FAILED')
-      expect(result.error.message).toContain('workflow node "implement" env')
-    },
-  )
+  it.each([
+    'codex_home',
+    'Codex_Home',
+    'claude_config_dir',
+    'CLAUDE_CONFIG_DIR',
+    'kimi_code_home',
+    'Kimi_Code_Home',
+  ])('resolveAgentNodeProfiles rejects workflow env key %j', (key) => {
+    const result = aliasManager().resolveAgentNodeProfiles({
+      agentId: 'codex',
+      env: { [key]: '/elsewhere' },
+      source: 'workflow node "implement"',
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('VALIDATION_FAILED')
+    expect(result.error.message).toContain('workflow node "implement" env')
+  })
 
   it('passes clean workflow env through untouched', () => {
     expect(

@@ -110,6 +110,7 @@ const bridge: TeskraBridge = {
   },
   account: {
     list: (request = {}) => invoke(IPC_CHANNELS.accountList, request),
+    listAdapterAgents: (request = {}) => invoke(IPC_CHANNELS.accountListAdapterAgents, request),
     get: (request) => invoke(IPC_CHANNELS.accountGet, request),
     create: (request) => invoke(IPC_CHANNELS.accountCreate, request),
     update: (request) => invoke(IPC_CHANNELS.accountUpdate, request),

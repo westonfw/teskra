@@ -342,6 +342,7 @@ function fakeRuntime(): TeskraRuntime {
     },
     account: {
       list: vi.fn(async () => ok([])),
+      listAdapterAgents: vi.fn(async () => ok(['codex', 'claude', 'kimi'])),
       get: vi.fn(async () => ok(null)),
       create: vi.fn(async () => ok(ACCOUNT_PROFILE)),
       update: vi.fn(async () => ok(ACCOUNT_PROFILE)),
@@ -915,6 +916,15 @@ describe('Typed IPC Router (TASK-020)', () => {
       data: [],
     })
     expect(runtime.account.list).toHaveBeenCalledWith({ agentId: 'codex' })
+
+    expect(await ipc.invoke(IPC_CHANNELS.accountListAdapterAgents, {})).toEqual({
+      ok: true,
+      data: ['codex', 'claude', 'kimi'],
+    })
+    expect(runtime.account.listAdapterAgents).toHaveBeenCalledWith({})
+    // The request schema is strict — extra keys are rejected before the facade.
+    const smuggled = await ipc.invoke(IPC_CHANNELS.accountListAdapterAgents, { agentId: 'kimi' })
+    expect(smuggled).toMatchObject({ ok: false })
 
     expect(await ipc.invoke(IPC_CHANNELS.accountGet, { id: 'acct-1' })).toEqual({
       ok: true,

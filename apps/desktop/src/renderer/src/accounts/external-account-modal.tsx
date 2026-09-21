@@ -6,7 +6,11 @@ import type { WslDistribution } from '@teskra/contracts'
 import { useTranslation } from '../i18n'
 import { useAgentStore } from '../stores/agent-store'
 import { useAccountProfileStore } from './account-profile-store'
-import { isValidConfigHomePath } from './account-view-model'
+import {
+  isValidConfigHomePath,
+  adapterBackedAgentId,
+  adapterBackedDefinitions,
+} from './account-view-model'
 
 interface ExternalAccountModalProps {
   readonly open: boolean
@@ -26,6 +30,7 @@ export function ExternalAccountModal({ open, onClose }: ExternalAccountModalProp
   const clearError = useAccountProfileStore((state) => state.clearError)
 
   const [agentId, setAgentId] = useState<string>()
+  const [adapterAgentIds, setAdapterAgentIds] = useState<readonly string[]>()
   const [name, setName] = useState('')
   const [runtimeKind, setRuntimeKind] = useState<'windows' | 'wsl'>('windows')
   const [distro, setDistro] = useState<string>()
@@ -36,8 +41,29 @@ export function ExternalAccountModal({ open, onClose }: ExternalAccountModalProp
   useEffect(() => {
     if (!open) return
     setAgentId((current) => current ?? definitions[0]?.id)
+    setAdapterAgentIds(undefined)
     clearError()
   }, [open])
+
+  // §4.2: only adapter-backed agents can create a profile — filter the
+  // "new account" entry to them (failure keeps the previous unfiltered list).
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    void window.teskra.account.listAdapterAgents().then((result) => {
+      if (active && result.ok) setAdapterAgentIds(result.data)
+    })
+    return () => {
+      active = false
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    setAgentId((current) => adapterBackedAgentId(current, definitions, adapterAgentIds))
+  }, [open, definitions, adapterAgentIds])
+
+  const creatableDefinitions = adapterBackedDefinitions(definitions, adapterAgentIds)
 
   useEffect(() => {
     if (!open || runtimeKind !== 'wsl') return
@@ -82,7 +108,7 @@ export function ExternalAccountModal({ open, onClose }: ExternalAccountModalProp
           <Select
             value={agentId}
             onChange={setAgentId}
-            options={definitions.map((definition) => ({
+            options={creatableDefinitions.map((definition) => ({
               value: definition.id,
               label: definition.name,
             }))}

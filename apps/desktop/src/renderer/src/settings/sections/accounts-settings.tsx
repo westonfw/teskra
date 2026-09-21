@@ -57,6 +57,7 @@ export function AccountsSettingsSection() {
 
   const [addingFor, setAddingFor] = useState<string>()
   const [addingExternal, setAddingExternal] = useState(false)
+  const [adapterAgentIds, setAdapterAgentIds] = useState<readonly string[]>()
   const [editing, setEditing] = useState<AgentAccountProfile>()
   const [removing, setRemoving] = useState<AgentAccountProfile>()
   const [loggingIn, setLoggingIn] = useState<AgentAccountProfile>()
@@ -69,6 +70,19 @@ export function AccountsSettingsSection() {
     if (useSettingsStore.getState().resolved === undefined) void loadSettings()
     return startSynchronization()
   }, [refresh, loadDefinitions, loadSettings, startSynchronization])
+
+  // §4.2: the per-agent "add" entry only makes sense for adapter-backed
+  // agents; profile cards themselves always render, whatever the adapter
+  // situation (an adapter removal must not hide existing profiles).
+  useEffect(() => {
+    let active = true
+    void window.teskra.account.listAdapterAgents().then((result) => {
+      if (active && result.ok) setAdapterAgentIds(result.data)
+    })
+    return () => {
+      active = false
+    }
+  }, [])
 
   const groups = useMemo(() => profilesByAgent(profiles), [profiles])
   // Agent order follows the registry definitions; profiles whose agent has no
@@ -124,13 +138,15 @@ export function AccountsSettingsSection() {
                         onLogin={() => setLoggingIn(profile)}
                       />
                     ))}
-                    <Button
-                      type="dashed"
-                      icon={<PlusOutlined />}
-                      onClick={() => setAddingFor(agentId)}
-                    >
-                      {t('accounts.add')}
-                    </Button>
+                    {(adapterAgentIds === undefined || adapterAgentIds.includes(agentId)) && (
+                      <Button
+                        type="dashed"
+                        icon={<PlusOutlined />}
+                        onClick={() => setAddingFor(agentId)}
+                      >
+                        {t('accounts.add')}
+                      </Button>
+                    )}
                   </Space>
                 </Card>
               )

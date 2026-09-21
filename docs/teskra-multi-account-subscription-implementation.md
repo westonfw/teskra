@@ -319,12 +319,12 @@ capabilities 为 `interactive` / `headless` / `resume` /
 | --- | --- | --- |
 | `codex` | `CODEX_HOME` | 支持（§10） |
 | `claude` | `CLAUDE_CONFIG_DIR` | 支持（§11） |
-| `kimi` | 待确认是否有等价的 config dir 环境变量 | **不支持多账号**，只走 legacy fallback（§50.1 / §52） |
+| `kimi` | `KIMI_CODE_HOME` | 支持（§11.2） |
 | `fake` | 无（仅 env / worktree 隔离） | 供测试用，见 §56.3 |
 
-`kimi` 在落地 TASK-098 之前必须先确认其 CLI 是否提供可隔离的配置目录；
-确认不了就保持「单账号 + legacy fallback」（即不建 Profile、不投射任何
-config dir 环境变量），不要猜一个环境变量。
+`kimi` 的 `KIMI_CODE_HOME` 已在官方文档与本机实测确认：它覆盖 CLI 数据根
+（默认 `~/.kimi-code`），config、OAuth 凭据、sessions 全部落在其下，
+与 `CODEX_HOME` 完全同构，因此按 §10 的同一套规则接入（见 §11.2）。
 
 ### 4.4 Profile 不是新的 AgentDefinition
 
@@ -1210,6 +1210,40 @@ AccountProfile
 ```text
 Workspace project config
 ```
+
+---
+
+### 11.2 Kimi Code Profile 实现
+
+Kimi Code 使用独立数据根环境变量（官方文档 + 本机实测确认）：
+
+```text
+KIMI_CODE_HOME        # 覆盖数据根，默认 ~/.kimi-code
+```
+
+config、OAuth 凭据、sessions 全部落在其下，与 `CODEX_HOME` 完全同构，
+因此投射规则沿用 §5.3 / §10.1（configHome 逐字进 env、WSLENV 不带 `/p`）：
+
+```text
+KIMI_CODE_HOME=<profile-home> kimi
+```
+
+凭据探测（§10.3：只查存在、绝不读内容）：
+
+```text
+<home>/credentials/kimi-code.json   # OAuth 凭据（目录 0700 / 文件 0600）
+```
+
+- 存在 → `ready`；缺失 → 再探测 `<home>/config.toml`：
+  config.toml 可独立存 API key 凭据，存在则报 `unknown`（存在不证明有效，
+  绝不猜 `ready`），两者都缺失 → `login-required`。
+- 探测本身跑不起来（无 runner / 命令失败 / fs 错误）→ `unknown`；
+  跑起来但 exit ≥ 2 → 与 Codex 对齐，按 `login-required` 处理。
+
+登录：Kimi Code 没有独立的非交互 login 子命令（与 Claude 相同）。全新
+Home 启动裸 `kimi`（交互 TUI）会跑官方首次引导（选账号/登录），过期
+Profile 在同一 TUI 里 `/login`——§24 的 Login Terminal 本来就是交互式的，
+所以登录命令就是裸命令本身。
 
 ---
 
@@ -2531,6 +2565,7 @@ Patch owned fields only
 | --- | --- |
 | `CODEX_HOME` | 用户配置（`config.toml`，含 MCP server 声明）、会话历史、认证 |
 | `CLAUDE_CONFIG_DIR` | settings、凭据、session、plugins、skills |
+| `KIMI_CODE_HOME` | 用户配置（`config.toml`）、OAuth 凭据（`credentials/`）、sessions |
 
 也就是说：**只要按 §10 / §11 隔离整个 Home，MCP、Skills 和用户配置
 就会连带被账号隔离**，这是官方 CLI 的加载行为决定的，不是设计选择。

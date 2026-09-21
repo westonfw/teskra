@@ -7,7 +7,12 @@ import type { AgentAccountProfile, WslDistribution } from '@teskra/contracts'
 import { useTranslation, type TranslationKey } from '../i18n'
 import { useAgentStore } from '../stores/agent-store'
 import { useAccountProfileStore } from './account-profile-store'
-import { isValidAccountSlug, slugifyAccountName } from './account-view-model'
+import {
+  isValidAccountSlug,
+  slugifyAccountName,
+  adapterBackedAgentId,
+  adapterBackedDefinitions,
+} from './account-view-model'
 import { LoginTerminalView } from './login-terminal-view'
 
 const STEP_KEYS: readonly TranslationKey[] = [
@@ -42,6 +47,7 @@ export function AddAccountWizard({ open, initialAgentId, onClose }: AddAccountWi
 
   const [step, setStep] = useState(0)
   const [agentId, setAgentId] = useState<string | undefined>(initialAgentId)
+  const [adapterAgentIds, setAdapterAgentIds] = useState<readonly string[]>()
   const [name, setName] = useState('')
   const [slug, setSlug] = useState('')
   const [slugTouched, setSlugTouched] = useState(false)
@@ -62,6 +68,7 @@ export function AddAccountWizard({ open, initialAgentId, onClose }: AddAccountWi
     if (!open) return
     setStep(0)
     setAgentId(initialAgentId ?? definitions[0]?.id)
+    setAdapterAgentIds(undefined)
     setName('')
     setSlug('')
     setSlugTouched(false)
@@ -84,6 +91,28 @@ export function AddAccountWizard({ open, initialAgentId, onClose }: AddAccountWi
       if (result.ok) setDistributions(result.data)
     })
   }, [open, runtimeKind])
+
+  // §4.2: only adapter-backed agents can create a profile — filter the
+  // "new account" entry to them (failure keeps the previous unfiltered list).
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    void window.teskra.account.listAdapterAgents().then((result) => {
+      if (active && result.ok) setAdapterAgentIds(result.data)
+    })
+    return () => {
+      active = false
+    }
+  }, [open])
+
+  // Once the adapter list is known, steer the selection away from agents
+  // without an adapter (e.g. an initialAgentId pinned by the caller).
+  useEffect(() => {
+    if (!open) return
+    setAgentId((current) => adapterBackedAgentId(current, definitions, adapterAgentIds))
+  }, [open, definitions, adapterAgentIds])
+
+  const creatableDefinitions = adapterBackedDefinitions(definitions, adapterAgentIds)
 
   const effectiveSlug = slugTouched ? slug : slugifyAccountName(name)
   const slugValid = isValidAccountSlug(effectiveSlug)
@@ -172,7 +201,7 @@ export function AddAccountWizard({ open, initialAgentId, onClose }: AddAccountWi
             className="account-wizard-agent-options"
             value={agentId}
             onChange={(event) => setAgentId(event.target.value as string)}
-            options={definitions.map((definition) => ({
+            options={creatableDefinitions.map((definition) => ({
               value: definition.id,
               label: definition.name,
             }))}
