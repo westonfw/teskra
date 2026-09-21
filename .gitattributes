@@ -2,3 +2,6 @@
 # Windows), so Prettier's endOfLine:lf and CI's format:check never fight
 # core.autocrlf. Binary files (screenshots, icons) are detected and untouched.
 * text=auto eol=lf
+
+# Structured-stream parser fixtures intentionally contain CRLF / mixed endings.
+apps/desktop/src/main/agents/observation/fixtures/*.jsonl -text
