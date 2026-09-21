@@ -47,6 +47,12 @@ export const ERROR_CODES = [
   'EXECUTION_PROFILE_NOT_FOUND',
   /** The execution profile belongs to a different agent than the Run requests. */
   'EXECUTION_PROFILE_MISMATCH',
+  /**
+   * The workspace directory is not (yet) a Git repository. Distinct from
+   * UNKNOWN so the Renderer can offer a guided "initialize Git" flow instead
+   * of a generic error alert.
+   */
+  'GIT_NOT_A_REPOSITORY',
   'UNKNOWN',
 ] as const
 

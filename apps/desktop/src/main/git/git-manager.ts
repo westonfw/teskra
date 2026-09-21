@@ -48,6 +48,8 @@ export interface GitNumstatEntry {
 export interface GitManager {
   status(workspaceId: string): Promise<IpcResult<GitStatus>>
   branch(workspaceId: string): Promise<IpcResult<GitBranch>>
+  /** `git init -b main` in the workspace cwd; emits git.changed on success. */
+  init(workspaceId: string): Promise<IpcResult<void>>
   diff(request: GitDiffRequest): Promise<IpcResult<GitRawDiff>>
   /** Main-internal (TASK-063): `git diff <baseRef>...<headRef>` raw patch. */
   diffRefs(request: GitDiffRefsRequest): Promise<IpcResult<GitRawDiff>>
@@ -81,6 +83,17 @@ function fail<T>(error: InternalAppError): IpcResult<T> {
 }
 
 function commandFailed<T>(operation: string, result: CommandResult): IpcResult<T> {
+  // A workspace opened before `git init` fails every read with exit 128 and
+  // this stderr; surface a dedicated code so the Renderer can offer the
+  // guided init flow instead of a generic retry hint.
+  if (result.exitCode === 128 && /not a git repository/iu.test(result.stderr)) {
+    return fail({
+      code: 'GIT_NOT_A_REPOSITORY',
+      message: 'This directory is not a Git repository yet.',
+      retryable: false,
+      detail: `operation=${operation} stderr=${result.stderr.trim()}`,
+    })
+  }
   return fail({
     code: 'UNKNOWN',
     message: `Git ${operation} failed.`,
@@ -270,6 +283,13 @@ export function createGitManager(deps: GitManagerDeps): GitManager {
       })
       statusInFlight.set(workspaceId, pending)
       return pending
+    },
+
+    async init(workspaceId) {
+      const result = await run(workspaceId, 'init', ['init', '-b', 'main'])
+      if (!result.ok) return result
+      deps.events.emit('git.changed', { workspaceId })
+      return { ok: true, data: undefined }
     },
 
     async branch(workspaceId) {

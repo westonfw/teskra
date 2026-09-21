@@ -994,6 +994,7 @@ export async function composeTeskraRuntime(
     git: {
       status: ({ workspaceId }) => gitManager.status(workspaceId),
       branch: ({ workspaceId }) => gitManager.branch(workspaceId),
+      init: ({ workspaceId }) => gitManager.init(workspaceId),
       diff: (request) => gitManager.diff(request),
       log: (request) => gitManager.log(request),
       commit: (request) => gitManager.commit(request),

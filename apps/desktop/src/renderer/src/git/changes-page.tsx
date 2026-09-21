@@ -2,7 +2,7 @@ import { FileOutlined, FolderOpenOutlined, ReloadOutlined } from '@ant-design/ic
 import { Button, Card, Empty, Space, Spin, Tag, Typography } from 'antd'
 import { useEffect, useMemo } from 'react'
 
-import type { DiffFileStatus, DiffFileSummary } from '@teskra/contracts'
+import type { DiffFileStatus, DiffFileSummary, PublicAppError } from '@teskra/contracts'
 
 import { AppErrorAlert } from '../components/app-error-alert'
 import { useTranslation } from '../i18n'
@@ -28,6 +28,14 @@ function patchForDisplay(patch: string): { text: string; truncated: boolean } {
 
 function filesForDisplay(files: readonly DiffFileSummary[]): readonly DiffFileSummary[] {
   return files.slice(0, MAX_VISIBLE_CHANGE_FILES)
+}
+
+/**
+ * A not-a-repository error swaps the whole changes workbench for the guided
+ * git-init empty state; every other error keeps the AppErrorAlert.
+ */
+function isNotARepositoryError(error: PublicAppError | undefined): boolean {
+  return error?.code === 'GIT_NOT_A_REPOSITORY'
 }
 
 function FileRow({
@@ -69,12 +77,14 @@ export function ChangesPage() {
   const patchLoading = useGitStore((state) => state.patchLoading)
   const selectedPath = useGitStore((state) => state.selectedPath)
   const loading = useGitStore((state) => state.loading)
+  const initializing = useGitStore((state) => state.initializing)
   const error = useGitStore((state) => state.error)
   const startSynchronization = useGitStore((state) => state.startSynchronization)
   const refresh = useGitStore((state) => state.refresh)
   const refreshOnFocus = useGitStore((state) => state.refreshOnFocus)
   const selectFile = useGitStore((state) => state.selectFile)
   const loadPatch = useGitStore((state) => state.loadPatch)
+  const initRepository = useGitStore((state) => state.initRepository)
   const openFile = useGitStore((state) => state.openFile)
   const clearError = useGitStore((state) => state.clearError)
 
@@ -136,6 +146,8 @@ export function ChangesPage() {
 
   if (workspace === undefined) return null
 
+  const notARepository = isNotARepositoryError(error)
+
   return (
     <div className="workbench-page changes-page">
       <div className="page-heading changes-heading">
@@ -164,86 +176,120 @@ export function ChangesPage() {
         </Button>
       </div>
 
-      {error !== undefined && (
-        <AppErrorAlert error={error} onClose={clearError} className="page-alert" />
-      )}
-
-      <Spin spinning={loading && status === undefined}>
-        {changes.files.length === 0 ? (
-          <Card className="changes-empty" variant="borderless">
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('git.empty')} />
-          </Card>
-        ) : (
-          <div className="changes-workbench">
-            <Card className="changes-file-card" title={t('git.filesTitle')} variant="borderless">
-              {changes.files.length > MAX_VISIBLE_CHANGE_FILES && (
-                <div className="large-file-list-notice">
-                  {t('git.largeFileListNotice', {
-                    visible: MAX_VISIBLE_CHANGE_FILES.toLocaleString(),
-                    total: changes.files.length.toLocaleString(),
-                  })}
-                </div>
-              )}
-              <div className="changes-file-list">
-                {visibleFiles.map((file) => (
-                  <FileRow
-                    key={file.path}
-                    file={file}
-                    selected={file.path === selectedPath}
-                    onSelect={() => selectFile(file.path)}
-                  />
-                ))}
-              </div>
-            </Card>
-
-            <Card
-              className="changes-diff-card"
-              title={selected?.path ?? t('git.diffTitle')}
-              extra={
-                selected !== undefined && selected.status !== 'deleted' ? (
-                  <Button
-                    size="small"
-                    icon={<FolderOpenOutlined />}
-                    onClick={() => void openFile(workspace.id, selected.path)}
-                  >
-                    {t('git.openFile')}
-                  </Button>
-                ) : undefined
-              }
-              variant="borderless"
+      {notARepository ? (
+        <Card className="changes-empty" variant="borderless">
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={
+              <Space direction="vertical" size={4}>
+                <Typography.Text>{t('git.notARepository.title')}</Typography.Text>
+                <Typography.Text type="secondary">{t('git.notARepository.body')}</Typography.Text>
+              </Space>
+            }
+          >
+            <Button
+              type="primary"
+              loading={initializing}
+              onClick={() => void initRepository(workspace.id)}
             >
-              {displayPatch.truncated && (
-                <div className="large-diff-notice">
-                  {t('git.largeDiffNotice', {
-                    count: MAX_RENDERED_PATCH_CHARS.toLocaleString(),
-                  })}
-                </div>
-              )}
-              <Spin
-                spinning={
-                  patchLoading &&
-                  selectedPatchKey !== undefined &&
-                  patches[selectedPatchKey] === undefined
-                }
-              >
-                <pre className="diff-patch" tabIndex={0}>
-                  {diffLines.map((line, index) => (
-                    <span
-                      key={`${index}:${line.text}`}
-                      className={`diff-line diff-line-${line.kind}`}
-                    >
-                      {line.text}
-                      {'\n'}
-                    </span>
-                  ))}
-                </pre>
-              </Spin>
-            </Card>
-          </div>
-        )}
-      </Spin>
+              {t('git.notARepository.action')}
+            </Button>
+          </Empty>
+        </Card>
+      ) : (
+        <>
+          {error !== undefined && (
+            <AppErrorAlert error={error} onClose={clearError} className="page-alert" />
+          )}
+
+          <Spin spinning={loading && status === undefined}>
+            {changes.files.length === 0 ? (
+              <Card className="changes-empty" variant="borderless">
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('git.empty')} />
+              </Card>
+            ) : (
+              <div className="changes-workbench">
+                <Card
+                  className="changes-file-card"
+                  title={t('git.filesTitle')}
+                  variant="borderless"
+                >
+                  {changes.files.length > MAX_VISIBLE_CHANGE_FILES && (
+                    <div className="large-file-list-notice">
+                      {t('git.largeFileListNotice', {
+                        visible: MAX_VISIBLE_CHANGE_FILES.toLocaleString(),
+                        total: changes.files.length.toLocaleString(),
+                      })}
+                    </div>
+                  )}
+                  <div className="changes-file-list">
+                    {visibleFiles.map((file) => (
+                      <FileRow
+                        key={file.path}
+                        file={file}
+                        selected={file.path === selectedPath}
+                        onSelect={() => selectFile(file.path)}
+                      />
+                    ))}
+                  </div>
+                </Card>
+
+                <Card
+                  className="changes-diff-card"
+                  title={selected?.path ?? t('git.diffTitle')}
+                  extra={
+                    selected !== undefined && selected.status !== 'deleted' ? (
+                      <Button
+                        size="small"
+                        icon={<FolderOpenOutlined />}
+                        onClick={() => void openFile(workspace.id, selected.path)}
+                      >
+                        {t('git.openFile')}
+                      </Button>
+                    ) : undefined
+                  }
+                  variant="borderless"
+                >
+                  {displayPatch.truncated && (
+                    <div className="large-diff-notice">
+                      {t('git.largeDiffNotice', {
+                        count: MAX_RENDERED_PATCH_CHARS.toLocaleString(),
+                      })}
+                    </div>
+                  )}
+                  <Spin
+                    spinning={
+                      patchLoading &&
+                      selectedPatchKey !== undefined &&
+                      patches[selectedPatchKey] === undefined
+                    }
+                  >
+                    <pre className="diff-patch" tabIndex={0}>
+                      {diffLines.map((line, index) => (
+                        <span
+                          key={`${index}:${line.text}`}
+                          className={`diff-line diff-line-${line.kind}`}
+                        >
+                          {line.text}
+                          {'\n'}
+                        </span>
+                      ))}
+                    </pre>
+                  </Spin>
+                </Card>
+              </div>
+            )}
+          </Spin>
+        </>
+      )}
     </div>
   )
 }
 
-export { MAX_RENDERED_PATCH_CHARS, MAX_VISIBLE_CHANGE_FILES, filesForDisplay, patchForDisplay }
+export {
+  MAX_RENDERED_PATCH_CHARS,
+  MAX_VISIBLE_CHANGE_FILES,
+  filesForDisplay,
+  isNotARepositoryError,
+  patchForDisplay,
+}

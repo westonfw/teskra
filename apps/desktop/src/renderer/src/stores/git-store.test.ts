@@ -37,6 +37,7 @@ function createBridge() {
         ok: true as const,
         data: { patch: '@@ -1 +1,2 @@\n-old\n+new\n+line' },
       })),
+      init: vi.fn(async () => ({ ok: true as const, data: undefined })),
       openFile: vi.fn(async () => ({ ok: true as const, data: undefined })),
     },
     events: {
@@ -263,6 +264,62 @@ describe('Git store (TASK-037)', () => {
     expect(store.getState().refreshCount).toBe(1)
     await store.getState().refresh('workspace-1')
     expect(store.getState().refreshCount).toBe(2)
+  })
+
+  it('initializes the repository and refreshes into the normal view', async () => {
+    const harness = createBridge()
+    const store = createGitStore(() => harness.bridge)
+    vi.mocked(harness.bridge.git.status).mockResolvedValueOnce({
+      ok: false,
+      error: {
+        code: 'GIT_NOT_A_REPOSITORY',
+        message: 'This directory is not a Git repository yet.',
+        retryable: false,
+      },
+    })
+    await store.getState().refresh('workspace-1')
+    expect(store.getState().error?.code).toBe('GIT_NOT_A_REPOSITORY')
+
+    expect(await store.getState().initRepository('workspace-1')).toBe(true)
+    expect(harness.bridge.git.init).toHaveBeenCalledWith({ workspaceId: 'workspace-1' })
+    // The post-init refresh replaced the error with the loaded status.
+    expect(store.getState().error).toBeUndefined()
+    expect(store.getState().status?.branch).toBe('main')
+    expect(store.getState().initializing).toBe(false)
+  })
+
+  it('surfaces a git.init failure as the store error without refreshing', async () => {
+    const harness = createBridge()
+    const store = createGitStore(() => harness.bridge)
+    vi.mocked(harness.bridge.git.init).mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'UNKNOWN', message: 'Git init failed.', retryable: true },
+    })
+
+    expect(await store.getState().initRepository('workspace-1')).toBe(false)
+    expect(store.getState().error?.message).toBe('Git init failed.')
+    expect(store.getState().initializing).toBe(false)
+    expect(harness.bridge.git.status).not.toHaveBeenCalled()
+  })
+
+  it('ignores a second git.init while one is already in flight', async () => {
+    const harness = createBridge()
+    const store = createGitStore(() => harness.bridge)
+    let releaseInit!: (value: { ok: true; data: undefined }) => void
+    vi.mocked(harness.bridge.git.init).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseInit = resolve
+        }),
+    )
+
+    const first = store.getState().initRepository('workspace-1')
+    expect(store.getState().initializing).toBe(true)
+    expect(await store.getState().initRepository('workspace-1')).toBe(false)
+    expect(harness.bridge.git.init).toHaveBeenCalledTimes(1)
+
+    releaseInit({ ok: true, data: undefined })
+    expect(await first).toBe(true)
   })
 
   it('debounces high-frequency Agent output into one refresh', async () => {

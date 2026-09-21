@@ -387,6 +387,7 @@ function fakeRuntime(): TeskraRuntime {
     git: {
       status: vi.fn(async () => ok({ ahead: 0, behind: 0, clean: true, entries: [] })),
       branch: vi.fn(async () => ok({ current: 'main', detached: false, branches: ['main'] })),
+      init: vi.fn(async () => ok(undefined)),
       diff: vi.fn(async () => ok({ patch: '' })),
       log: vi.fn(async () => ok([])),
       commit: vi.fn(async () => ok({ hash: 'abc', output: 'committed' })),
@@ -1270,6 +1271,22 @@ describe('Typed IPC Router (TASK-020)', () => {
     })
     expect(badKind).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
     expect(runtime.account.bindAlias).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes git.init through the runtime facade after validating the request', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    expect(await ipc.invoke(IPC_CHANNELS.gitInit, { workspaceId: 'ws1' })).toEqual({
+      ok: true,
+      data: undefined,
+    })
+    expect(runtime.git.init).toHaveBeenCalledWith({ workspaceId: 'ws1' })
+
+    const invalid = await ipc.invoke(IPC_CHANNELS.gitInit, {})
+    expect(invalid).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    expect(runtime.git.init).toHaveBeenCalledTimes(1)
   })
 
   it('returns a clone-safe capability signal instead of the live runtime port', async () => {

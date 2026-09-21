@@ -495,6 +495,7 @@ export const IPC_CHANNELS = {
   permissionResolveDecision: 'teskra:permission:decision:resolve',
   gitStatus: 'teskra:git:status',
   gitBranch: 'teskra:git:branch',
+  gitInit: 'teskra:git:init',
   gitDiff: 'teskra:git:diff',
   gitLog: 'teskra:git:log',
   gitCommit: 'teskra:git:commit',
@@ -1036,6 +1037,11 @@ export const gitBranchChannel = channel(
   gitWorkspaceRequestSchema,
   gitBranchSchema,
 )
+export const gitInitChannel = channel(
+  IPC_CHANNELS.gitInit,
+  gitWorkspaceRequestSchema,
+  voidResponseSchema,
+)
 export const gitDiffChannel = channel(IPC_CHANNELS.gitDiff, gitDiffRequestSchema, gitRawDiffSchema)
 export const gitLogChannel = channel(
   IPC_CHANNELS.gitLog,
@@ -1415,6 +1421,7 @@ export const ipcChannelDefinitions = {
   permissionResolveDecision: permissionResolveDecisionChannel,
   gitStatus: gitStatusChannel,
   gitBranch: gitBranchChannel,
+  gitInit: gitInitChannel,
   gitDiff: gitDiffChannel,
   gitLog: gitLogChannel,
   gitCommit: gitCommitChannel,
@@ -1652,6 +1659,8 @@ export interface TeskraBridge {
   readonly git: {
     status(request: GitWorkspaceRequest): Promise<IpcResult<GitStatus>>
     branch(request: GitWorkspaceRequest): Promise<IpcResult<GitBranch>>
+    /** `git init -b main` in the workspace cwd — the not-a-repository recovery path. */
+    init(request: GitWorkspaceRequest): Promise<IpcResult<void>>
     diff(request: GitDiffRequest): Promise<IpcResult<GitRawDiff>>
     log(request: GitLogRequest): Promise<IpcResult<GitCommit[]>>
     commit(request: GitCommitRequest): Promise<IpcResult<GitCommitResult>>

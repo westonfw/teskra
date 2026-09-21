@@ -239,6 +239,7 @@ export const zhCN: Record<TranslationKey, string> = {
     '该执行 Profile 已不存在。请选择其他 Profile，或在设置中新建。',
   'errorSuggestion.EXECUTION_PROFILE_MISMATCH':
     '所选执行 Profile 属于另一个 Agent。请选择属于当前 Agent 的 Profile。',
+  'errorSuggestion.GIT_NOT_A_REPOSITORY': '在该目录中初始化 Git，即可使用变更、分支与工作树功能。',
   'errorSuggestion.UNKNOWN': '重试该操作。如果问题持续存在，请从 设置 → 高级 打开日志。',
 
   // Main 进程 PublicAppError 的本地化文案（与 en-US 的 errorMessage.* 一一对应）。
@@ -475,6 +476,9 @@ export const zhCN: Record<TranslationKey, string> = {
   'git.filesChangedMany': '{count} 个文件已变更',
   'git.detachedHead': 'detached HEAD',
   'git.empty': '工作树是干净的',
+  'git.notARepository.title': '此目录还不是 Git 仓库',
+  'git.notARepository.body': '初始化后即可使用变更、分支与工作树功能。',
+  'git.notARepository.action': '初始化 Git',
   'git.filesTitle': '文件',
   'git.largeFileListNotice':
     '仅显示 {total} 个文件中的前 {visible} 个。请先缩小工作集，再审查其余文件。',

@@ -149,6 +149,7 @@ const bridge: TeskraBridge = {
   git: {
     status: (request) => invoke(IPC_CHANNELS.gitStatus, request),
     branch: (request) => invoke(IPC_CHANNELS.gitBranch, request),
+    init: (request) => invoke(IPC_CHANNELS.gitInit, request),
     diff: (request) => invoke(IPC_CHANNELS.gitDiff, request),
     log: (request) => invoke(IPC_CHANNELS.gitLog, request),
     commit: (request) => invoke(IPC_CHANNELS.gitCommit, request),

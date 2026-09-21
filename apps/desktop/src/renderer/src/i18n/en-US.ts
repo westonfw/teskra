@@ -256,6 +256,8 @@ export const enUS = {
     'The execution profile no longer exists. Choose another profile or create a new one in Settings.',
   'errorSuggestion.EXECUTION_PROFILE_MISMATCH':
     'The selected execution profile belongs to a different agent. Choose a profile for this agent.',
+  'errorSuggestion.GIT_NOT_A_REPOSITORY':
+    'Initialize Git in this folder to start tracking changes, branches, and worktrees.',
   'errorSuggestion.UNKNOWN':
     'Retry the operation. If it persists, open the logs from Settings → Advanced.',
 
@@ -504,6 +506,9 @@ export const enUS = {
   'git.filesChangedMany': '{count} files changed',
   'git.detachedHead': 'detached HEAD',
   'git.empty': 'Working tree is clean',
+  'git.notARepository.title': 'This folder is not a Git repository yet',
+  'git.notARepository.body': 'Initialize Git to start using changes, branches, and worktrees here.',
+  'git.notARepository.action': 'Initialize Git',
   'git.filesTitle': 'Files',
   'git.largeFileListNotice':
     'Showing {visible} of {total} files. Narrow the working set before reviewing the remainder.',

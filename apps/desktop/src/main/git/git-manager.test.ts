@@ -211,7 +211,11 @@ describe('GitManager (TASK-035)', () => {
     const commands: CommandRunner = {
       run: vi.fn(async () => ({
         ok: true as const,
-        data: { stdout: '', stderr: 'fatal: not a git repository', exitCode: 128 },
+        data: {
+          stdout: '',
+          stderr: "fatal: ambiguous argument 'HEAD': unknown revision",
+          exitCode: 128,
+        },
       })),
     }
     const manager = createGitManager({
@@ -230,6 +234,147 @@ describe('GitManager (TASK-035)', () => {
       error: { code: 'UNKNOWN', message: 'Git status failed.', retryable: true },
     })
     expect(result).not.toHaveProperty('error.detail')
+  })
+
+  it('maps exit 128 "not a git repository" to GIT_NOT_A_REPOSITORY across read operations', async () => {
+    const workspaces = repository()
+    workspaces.create({
+      id: 'workspace-1',
+      name: 'Not initialized',
+      runtime: { kind: 'wsl' },
+      path: '/not-a-repo',
+    })
+    const commands: CommandRunner = {
+      run: vi.fn(async () => ({
+        ok: true as const,
+        data: {
+          stdout: '',
+          stderr: 'fatal: not a git repository (or any of the parent directories): .git',
+          exitCode: 128,
+        },
+      })),
+    }
+    const manager = createGitManager({
+      commands,
+      workspaces,
+      events: createEventBus(),
+      resolveRuntime: (candidate) =>
+        createWorkspaceRuntime(candidate.runtime, { hostPlatform: 'linux' }),
+    })
+
+    const expected = {
+      ok: false,
+      error: {
+        code: 'GIT_NOT_A_REPOSITORY',
+        message: 'This directory is not a Git repository yet.',
+        retryable: false,
+      },
+    }
+    expect(await manager.status('workspace-1')).toEqual(expected)
+    expect(await manager.branch('workspace-1')).toEqual(expected)
+    const status = await manager.status('workspace-1')
+    expect(status).not.toHaveProperty('error.detail')
+  })
+
+  it('keeps other exit-128 failures on the original commandFailed path', async () => {
+    const workspaces = repository()
+    workspaces.create({
+      id: 'workspace-1',
+      name: 'Broken repo',
+      runtime: { kind: 'wsl' },
+      path: '/repo',
+    })
+    const commands: CommandRunner = {
+      run: vi.fn(async () => ({
+        ok: true as const,
+        data: { stdout: '', stderr: 'fatal: bad object HEAD', exitCode: 128 },
+      })),
+    }
+    const manager = createGitManager({
+      commands,
+      workspaces,
+      events: createEventBus(),
+      resolveRuntime: (candidate) =>
+        createWorkspaceRuntime(candidate.runtime, { hostPlatform: 'linux' }),
+    })
+
+    expect(await manager.status('workspace-1')).toEqual({
+      ok: false,
+      error: { code: 'UNKNOWN', message: 'Git status failed.', retryable: true },
+    })
+  })
+
+  it('runs git init -b main in the workspace cwd and emits git.changed', async () => {
+    const workspaces = repository()
+    workspaces.create({
+      id: 'workspace-1',
+      name: 'Fresh folder',
+      runtime: { kind: 'wsl' },
+      path: '/fresh',
+    })
+    const commands: CommandRunner = {
+      run: vi.fn(async () => ({
+        ok: true as const,
+        data: { stdout: 'Initialized empty Git repository', stderr: '', exitCode: 0 },
+      })),
+    }
+    const events = createEventBus<WorkbenchEvents>()
+    const changed = vi.fn()
+    events.subscribe('git.changed', changed)
+    const manager = createGitManager({
+      commands,
+      workspaces,
+      events,
+      resolveRuntime: (candidate) =>
+        createWorkspaceRuntime(candidate.runtime, { hostPlatform: 'linux' }),
+    })
+
+    expect(await manager.init('workspace-1')).toEqual({ ok: true, data: undefined })
+    expect(commands.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: 'git',
+        args: ['init', '-b', 'main'],
+        cwd: '/fresh',
+        runtime: expect.objectContaining({ ref: { kind: 'wsl' } }),
+      }),
+    )
+    expect(changed).toHaveBeenCalledWith({ workspaceId: 'workspace-1' })
+  })
+
+  it('returns a structured error when git init fails and emits nothing', async () => {
+    const workspaces = repository()
+    workspaces.create({
+      id: 'workspace-1',
+      name: 'Read-only folder',
+      runtime: { kind: 'wsl' },
+      path: '/readonly',
+    })
+    const commands: CommandRunner = {
+      run: vi.fn(async () => ({
+        ok: true as const,
+        data: {
+          stdout: '',
+          stderr: 'fatal: cannot mkdir /readonly/.git: Permission denied',
+          exitCode: 1,
+        },
+      })),
+    }
+    const events = createEventBus<WorkbenchEvents>()
+    const changed = vi.fn()
+    events.subscribe('git.changed', changed)
+    const manager = createGitManager({
+      commands,
+      workspaces,
+      events,
+      resolveRuntime: (candidate) =>
+        createWorkspaceRuntime(candidate.runtime, { hostPlatform: 'linux' }),
+    })
+
+    expect(await manager.init('workspace-1')).toEqual({
+      ok: false,
+      error: { code: 'UNKNOWN', message: 'Git init failed.', retryable: true },
+    })
+    expect(changed).not.toHaveBeenCalled()
   })
 
   it('rejects diff paths that can escape the workspace', async () => {

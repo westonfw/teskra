@@ -29,6 +29,7 @@ export interface GitStoreBridge {
     status(request: { workspaceId: string }): Promise<IpcResult<GitStatus>>
     changes(request: { workspaceId: string }): Promise<IpcResult<DiffResult>>
     filePatch(request: { workspaceId: string; path: string }): Promise<IpcResult<GitRawDiff>>
+    init(request: { workspaceId: string }): Promise<IpcResult<void>>
     openFile(request: { workspaceId: string; path: string }): Promise<IpcResult<void>>
   }
   readonly events: {
@@ -56,6 +57,8 @@ interface GitState {
   readonly patchLoading: boolean
   readonly selectedPath?: string | undefined
   readonly loading: boolean
+  /** True while a git.init request is in flight (button spinner). */
+  readonly initializing: boolean
   readonly error?: PublicAppError | undefined
   /**
    * Bumped by every completed refresh (the same set() that clears the patch
@@ -70,6 +73,12 @@ interface GitState {
   refreshOnFocus(workspaceId: string): void
   selectFile(path?: string): void
   loadPatch(workspaceId: string, path: string): Promise<void>
+  /**
+   * Recovery path for the GIT_NOT_A_REPOSITORY empty state: runs git.init and,
+   * on success, refreshes so the changes page loads its normal view. On
+   * failure the init error replaces `error` (shown via AppErrorAlert).
+   */
+  initRepository(workspaceId: string): Promise<boolean>
   openFile(workspaceId: string, path: string): Promise<boolean>
   clearError(): void
 }
@@ -89,6 +98,7 @@ export function createGitStore(getBridge: () => GitStoreBridge) {
     patchFailures: {},
     patchLoading: false,
     loading: false,
+    initializing: false,
     refreshCount: 0,
 
     startSynchronization(workspaceId) {
@@ -259,6 +269,24 @@ export function createGitStore(getBridge: () => GitStoreBridge) {
           patchRetried.add(key)
           void get().loadPatch(workspaceId, path)
         }
+      }
+    },
+
+    async initRepository(workspaceId) {
+      if (get().initializing) return false
+      set({ initializing: true })
+      try {
+        const result = await getBridge().git.init({ workspaceId })
+        if (!result.ok) {
+          set({ initializing: false, error: result.error })
+          return false
+        }
+        set({ initializing: false })
+        await get().refresh(workspaceId)
+        return true
+      } catch {
+        set({ initializing: false, error: transportError() })
+        return false
       }
     },
 

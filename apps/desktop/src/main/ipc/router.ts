@@ -445,6 +445,10 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.git.branch(request)),
   )
   register(
+    ipcChannelDefinitions.gitInit,
+    withRuntime((runtime, request) => runtime.git.init(request)),
+  )
+  register(
     ipcChannelDefinitions.gitDiff,
     withRuntime((runtime, request) => runtime.git.diff(request)),
   )

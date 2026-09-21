@@ -4,6 +4,7 @@ import {
   MAX_RENDERED_PATCH_CHARS,
   MAX_VISIBLE_CHANGE_FILES,
   filesForDisplay,
+  isNotARepositoryError,
   patchForDisplay,
 } from './changes-page'
 
@@ -27,5 +28,19 @@ describe('Changes page (TASK-037)', () => {
 
     expect(filesForDisplay(files)).toHaveLength(MAX_VISIBLE_CHANGE_FILES)
     expect(filesForDisplay(files).at(-1)?.path).toBe('generated/file-499.ts')
+  })
+
+  it('routes only GIT_NOT_A_REPOSITORY to the guided empty state', () => {
+    expect(
+      isNotARepositoryError({
+        code: 'GIT_NOT_A_REPOSITORY',
+        message: 'This directory is not a Git repository yet.',
+        retryable: false,
+      }),
+    ).toBe(true)
+    expect(
+      isNotARepositoryError({ code: 'UNKNOWN', message: 'Git status failed.', retryable: true }),
+    ).toBe(false)
+    expect(isNotARepositoryError(undefined)).toBe(false)
   })
 })

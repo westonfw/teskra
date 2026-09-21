@@ -387,6 +387,8 @@ export interface ReviewPort {
 export interface GitPort {
   status(request: GitWorkspaceRequest): Promise<IpcResult<GitStatus>>
   branch(request: GitWorkspaceRequest): Promise<IpcResult<GitBranch>>
+  /** `git init -b main` in the workspace cwd — the not-a-repository recovery path. */
+  init(request: GitWorkspaceRequest): Promise<IpcResult<void>>
   diff(request: GitDiffRequest): Promise<IpcResult<GitRawDiff>>
   log(request: GitLogRequest): Promise<IpcResult<readonly GitCommit[]>>
   commit(request: GitCommitRequest): Promise<IpcResult<GitCommitResult>>
