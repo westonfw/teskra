@@ -25,6 +25,16 @@ export const openSystemDirectoryRequestSchema = z.strictObject({
 })
 export type OpenSystemDirectoryRequest = z.infer<typeof openSystemDirectoryRequestSchema>
 
+/**
+ * Opens a URL in the system browser. Zod guarantees a parseable absolute URL;
+ * Main additionally restricts the scheme to https: before calling
+ * shell.openExternal (never file:, javascript:, or OS handler schemes).
+ */
+export const openExternalRequestSchema = z.strictObject({
+  url: z.string().url(),
+})
+export type OpenExternalRequest = z.infer<typeof openExternalRequestSchema>
+
 export const systemHealthSchema = z.strictObject({
   databaseAvailable: z.boolean(),
   wslAvailable: z.boolean(),

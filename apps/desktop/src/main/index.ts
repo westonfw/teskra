@@ -34,7 +34,9 @@ if (process.env['WSL_DISTRO_NAME'] !== undefined && process.env['TESKRA_GPU'] !=
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
-  const ipcRouter = registerIpcRouter(ipcMain, () => runtime)
+  const ipcRouter = registerIpcRouter(ipcMain, () => runtime, {
+    openExternal: (url) => shell.openExternal(url),
+  })
 
   app.on('second-instance', () => {
     rendererBridge?.focusOrCreateWindow()

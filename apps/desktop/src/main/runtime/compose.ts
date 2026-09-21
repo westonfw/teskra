@@ -1040,11 +1040,18 @@ export async function composeTeskraRuntime(
       list: (request = {}) => accountProfileManager.list(request),
       // §4.2: adapter-backed agents — the wizard / external-import "new
       // account" entry points filter to these; profile listing is unaffected.
+      // usageUrl is the vendor's static usage page (no live quota API exists).
       listAdapterAgents: () =>
         Promise.resolve({
           ok: true as const,
-          data: accountProfileAdapters.data.list().map((adapter) => adapter.agentId),
+          data: accountProfileAdapters.data.list().map((adapter) => ({
+            agentId: adapter.agentId,
+            ...(adapter.usageUrl === undefined ? {} : { usageUrl: adapter.usageUrl }),
+          })),
         }),
+      // ADR-0010 history aggregated from agent_runs failure classifications —
+      // Teskra's own data, not a provider quota query.
+      listRateLimitStats: () => accountProfileManager.listRateLimitStats(),
       get: ({ id }) => accountProfileManager.get(id),
       create: (request) => accountProfileManager.create(request),
       update: ({ id, patch }) => accountProfileManager.update(id, patch),

@@ -718,6 +718,8 @@ export const enUS = {
   'accounts.lastUsed.minutes': '{count} min ago',
   'accounts.lastUsed.hours': '{count} h ago',
   'accounts.lastUsed.days': '{count} d ago',
+  'accounts.rateLimitStats': 'Rate-limited {count}× in the last 7 days · last {time}',
+  'accounts.viewUsage': 'View usage',
   'accounts.configHome': 'Config home',
   'accounts.managedExternally': 'Managed externally',
   'accounts.useAsDefault': 'Use as Default',

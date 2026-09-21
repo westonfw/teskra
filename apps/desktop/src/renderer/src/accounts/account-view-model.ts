@@ -1,5 +1,7 @@
 import type {
   AccountProfileStatus,
+  AccountRateLimitStats,
+  AdapterAgentInfo,
   AgentAccountProfile,
   ResolvedConfig,
   WorkspaceRuntimeRef,
@@ -53,6 +55,17 @@ export function accountRuntimeLabel(runtime: WorkspaceRuntimeRef): string {
   return runtime.kind === 'wsl' ? `WSL · ${runtime.distro ?? ''}` : 'Windows'
 }
 
+/** Compact relative timestamp shared by "last used" and the rate-limit stats. */
+export function relativeTimeLabel(iso: string, now: number, t: Translate): string {
+  const seconds = Math.max(0, Math.floor((now - Date.parse(iso)) / 1_000))
+  if (seconds < 60) return t('accounts.lastUsed.justNow')
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return t('accounts.lastUsed.minutes', { count: minutes })
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return t('accounts.lastUsed.hours', { count: hours })
+  return t('accounts.lastUsed.days', { count: Math.floor(hours / 24) })
+}
+
 /**
  * Compact relative "last used" text. Returns undefined when the profile was
  * never used so the card can show a "never" placeholder instead.
@@ -63,13 +76,28 @@ export function accountLastUsedLabel(
   t: Translate,
 ): string {
   if (profile.lastUsedAt === undefined) return t('accounts.lastUsed.never')
-  const seconds = Math.max(0, Math.floor((now - Date.parse(profile.lastUsedAt)) / 1_000))
-  if (seconds < 60) return t('accounts.lastUsed.justNow')
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return t('accounts.lastUsed.minutes', { count: minutes })
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return t('accounts.lastUsed.hours', { count: hours })
-  return t('accounts.lastUsed.days', { count: Math.floor(hours / 24) })
+  return relativeTimeLabel(profile.lastUsedAt, now, t)
+}
+
+/**
+ * Rate-limit history line for the account card (Teskra's own ADR-0010
+ * classifications, trailing 7 days). Returns undefined when the profile had
+ * no rate-limited run in the window, so the card stays quiet — this is
+ * history, never a live quota reading.
+ */
+export function accountRateLimitStatsLabel(
+  stats: AccountRateLimitStats | undefined,
+  now: number,
+  t: Translate,
+): string | undefined {
+  if (stats === undefined || stats.rateLimitedCount === 0) return undefined
+  return t('accounts.rateLimitStats', {
+    count: stats.rateLimitedCount,
+    time:
+      stats.lastRateLimitedAt === undefined
+        ? t('accounts.lastUsed.never')
+        : relativeTimeLabel(stats.lastRateLimitedAt, now, t),
+  })
 }
 
 /** §15: the per-agent default profile id from the resolved config (global layer). */
@@ -145,17 +173,17 @@ export function profilesByAgent(
  * §4.2 — the "new account" entry points (creation wizard, external import)
  * may only offer agents with a registered account profile adapter; creating
  * a profile for an adapter-less agent fails Main-side with "no account
- * profile adapter". `undefined` adapterAgentIds means the list has not loaded
+ * profile adapter". `undefined` adapterAgents means the list has not loaded
  * (or the query failed): fall back to the unfiltered definitions rather than
  * blocking account creation. Only creation is filtered — existing profiles of
  * an agent whose adapter was removed must stay visible everywhere else.
  */
 export function adapterBackedDefinitions<T extends { readonly id: string }>(
   definitions: readonly T[],
-  adapterAgentIds: readonly string[] | undefined,
+  adapterAgents: readonly AdapterAgentInfo[] | undefined,
 ): readonly T[] {
-  if (adapterAgentIds === undefined) return definitions
-  const backed = new Set(adapterAgentIds)
+  if (adapterAgents === undefined) return definitions
+  const backed = new Set(adapterAgents.map((agent) => agent.agentId))
   return definitions.filter((definition) => backed.has(definition.id))
 }
 
@@ -167,9 +195,19 @@ export function adapterBackedDefinitions<T extends { readonly id: string }>(
 export function adapterBackedAgentId<T extends { readonly id: string }>(
   current: string | undefined,
   definitions: readonly T[],
-  adapterAgentIds: readonly string[] | undefined,
+  adapterAgents: readonly AdapterAgentInfo[] | undefined,
 ): string | undefined {
-  if (adapterAgentIds === undefined) return current
-  if (current !== undefined && adapterAgentIds.includes(current)) return current
-  return adapterBackedDefinitions(definitions, adapterAgentIds)[0]?.id
+  if (adapterAgents === undefined) return current
+  if (current !== undefined && adapterAgents.some((agent) => agent.agentId === current)) {
+    return current
+  }
+  return adapterBackedDefinitions(definitions, adapterAgents)[0]?.id
+}
+
+/** The vendor usage page registered for an agent, if its adapter declares one. */
+export function adapterUsageUrl(
+  adapterAgents: readonly AdapterAgentInfo[] | undefined,
+  agentId: string,
+): string | undefined {
+  return adapterAgents?.find((agent) => agent.agentId === agentId)?.usageUrl
 }

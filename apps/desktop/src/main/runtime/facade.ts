@@ -4,6 +4,8 @@ import type {
   AcceptanceCriterion,
   AccountLoginSession,
   AccountProfileIdRequest,
+  AccountRateLimitStats,
+  AdapterAgentInfo,
   AddCriterionRequest,
   AgentAccountProfile,
   AgentDefinition,
@@ -58,6 +60,7 @@ import type {
   ListAccountProfilesRequest,
   ListAdapterAgentsRequest,
   ListExecutionProfilesRequest,
+  ListRateLimitStatsRequest,
   ListRecoveryIssuesRequest,
   ListRecentWorkspacesRequest,
   ListAgentDetectionsRequest,
@@ -190,7 +193,16 @@ export interface AccountPort {
    * account" entry points (wizard / external import) filter to these. Existing
    * profiles of an agent whose adapter was removed are unaffected.
    */
-  listAdapterAgents(request?: ListAdapterAgentsRequest): Promise<IpcResult<readonly string[]>>
+  listAdapterAgents(
+    request?: ListAdapterAgentsRequest,
+  ): Promise<IpcResult<readonly AdapterAgentInfo[]>>
+  /**
+   * Per-profile rate-limit history from Teskra's own failure classifications
+   * (ADR-0010), trailing 7 days — never a live quota reading.
+   */
+  listRateLimitStats(
+    request?: ListRateLimitStatsRequest,
+  ): Promise<IpcResult<readonly AccountRateLimitStats[]>>
   get(request: AccountProfileIdRequest): Promise<IpcResult<AgentAccountProfile | null>>
   create(request: CreateAccountProfileRequest): Promise<IpcResult<AgentAccountProfile>>
   update(request: UpdateAccountProfileRequest): Promise<IpcResult<AgentAccountProfile>>

@@ -263,4 +263,133 @@ describe('AgentRunRepository', () => {
     })
     expect(repo.delete('run-1')).toEqual({ ok: true, data: true })
   })
+
+  describe('listRateLimitStats (ADR-0010 aggregation)', () => {
+    const NOW = '2026-09-12T00:00:00.000Z'
+
+    function insertRun(
+      id: string,
+      options: {
+        profileId?: string
+        classification?: string | null
+        finishedAt?: string
+        updatedAt: string
+      },
+    ) {
+      const created = repo.create(
+        {
+          id,
+          workspaceId: 'ws-1',
+          agentType: 'codex',
+          executionMode: 'attended',
+          runDir: `runs/${id}`,
+          ...(options.profileId === undefined ? {} : { accountProfileId: options.profileId }),
+        },
+        options.updatedAt,
+      )
+      expect(created.ok).toBe(true)
+      if (options.finishedAt !== undefined) {
+        connection
+          .prepare('UPDATE agent_runs SET finished_at = ? WHERE id = ?')
+          .run(options.finishedAt, id)
+      }
+      if (options.classification !== undefined) {
+        connection
+          .prepare('UPDATE agent_runs SET failure_classification_json = ? WHERE id = ?')
+          .run(options.classification, id)
+      }
+    }
+
+    it('aggregates per profile, ignoring other kinds, NULL classifications, and runs outside the window', () => {
+      setup()
+      const rateLimited = JSON.stringify({ kind: 'rate-limited', retryable: true })
+      const network = JSON.stringify({ kind: 'network', retryable: true })
+
+      // acct-1: two rate-limited runs inside the window — the MAX timestamp
+      // comes from the later one.
+      insertRun('run-1', {
+        profileId: 'acct-1',
+        classification: rateLimited,
+        finishedAt: '2026-09-08T10:00:00.000Z',
+        updatedAt: '2026-09-08T10:00:00.000Z',
+      })
+      insertRun('run-2', {
+        profileId: 'acct-1',
+        classification: rateLimited,
+        finishedAt: '2026-09-10T12:00:00.000Z',
+        updatedAt: '2026-09-10T12:00:00.000Z',
+      })
+      // acct-1: rate-limited but older than the 7-day window — excluded.
+      insertRun('run-3', {
+        profileId: 'acct-1',
+        classification: rateLimited,
+        finishedAt: '2026-09-01T00:00:00.000Z',
+        updatedAt: '2026-09-01T00:00:00.000Z',
+      })
+      // acct-1: inside the window but a different failure kind — excluded.
+      insertRun('run-4', {
+        profileId: 'acct-1',
+        classification: network,
+        finishedAt: '2026-09-11T00:00:00.000Z',
+        updatedAt: '2026-09-11T00:00:00.000Z',
+      })
+      // acct-2: one hit; no finished_at — falls back to updated_at.
+      insertRun('run-5', {
+        profileId: 'acct-2',
+        classification: rateLimited,
+        updatedAt: '2026-09-09T08:00:00.000Z',
+      })
+      // acct-3: failed run with no classification at all — excluded.
+      insertRun('run-6', {
+        profileId: 'acct-3',
+        classification: null,
+        finishedAt: '2026-09-11T00:00:00.000Z',
+        updatedAt: '2026-09-11T00:00:00.000Z',
+      })
+      // No profile (legacy run): never aggregated.
+      insertRun('run-7', {
+        classification: rateLimited,
+        finishedAt: '2026-09-11T00:00:00.000Z',
+        updatedAt: '2026-09-11T00:00:00.000Z',
+      })
+
+      const result = repo.listRateLimitStats(undefined, NOW)
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.data).toEqual([
+        {
+          profileId: 'acct-1',
+          rateLimitedCount: 2,
+          lastRateLimitedAt: '2026-09-10T12:00:00.000Z',
+        },
+        {
+          profileId: 'acct-2',
+          rateLimitedCount: 1,
+          lastRateLimitedAt: '2026-09-09T08:00:00.000Z',
+        },
+      ])
+    })
+
+    it('honors an explicit window parameter', () => {
+      setup()
+      const rateLimited = JSON.stringify({ kind: 'rate-limited', retryable: true })
+      insertRun('run-1', {
+        profileId: 'acct-1',
+        classification: rateLimited,
+        finishedAt: '2026-09-05T00:00:00.000Z',
+        updatedAt: '2026-09-05T00:00:00.000Z',
+      })
+
+      const wide = repo.listRateLimitStats(30 * 24 * 60 * 60 * 1000, NOW)
+      expect(wide.ok && wide.data).toEqual([
+        {
+          profileId: 'acct-1',
+          rateLimitedCount: 1,
+          lastRateLimitedAt: '2026-09-05T00:00:00.000Z',
+        },
+      ])
+      const narrow = repo.listRateLimitStats(24 * 60 * 60 * 1000, NOW)
+      expect(narrow.ok && narrow.data).toEqual([])
+    })
+  })
 })

@@ -7,10 +7,12 @@ import { accountLoginTransport, type AccountLoginBridge } from './account-login-
 import {
   accountLastUsedLabel,
   accountLoginAvailable,
+  accountRateLimitStatsLabel,
   accountRuntimeLabel,
   accountStatusTag,
   adapterBackedAgentId,
   adapterBackedDefinitions,
+  adapterUsageUrl,
   defaultAccountProfileId,
   isValidAccountSlug,
   isValidConfigHomePath,
@@ -247,10 +249,11 @@ describe('adapterBackedDefinitions (§4.2 — "new account" entry filter)', () =
     { id: 'kimi', name: 'Kimi Code' },
     { id: 'fake', name: 'Fake Agent' },
   ]
+  const backed = (...agentIds: string[]) => agentIds.map((agentId) => ({ agentId }))
 
   it('filters the creation options to agents with a registered adapter', () => {
     expect(
-      adapterBackedDefinitions(definitions, ['codex', 'claude', 'kimi']).map(({ id }) => id),
+      adapterBackedDefinitions(definitions, backed('codex', 'claude', 'kimi')).map(({ id }) => id),
     ).toEqual(['codex', 'claude', 'kimi'])
   })
 
@@ -259,10 +262,55 @@ describe('adapterBackedDefinitions (§4.2 — "new account" entry filter)', () =
   })
 
   it('adapterBackedAgentId keeps a backed selection and steers an unbacked one to the first backed agent', () => {
-    expect(adapterBackedAgentId('kimi', definitions, ['codex', 'kimi'])).toBe('kimi')
-    expect(adapterBackedAgentId('fake', definitions, ['codex', 'kimi'])).toBe('codex')
-    expect(adapterBackedAgentId(undefined, definitions, ['kimi'])).toBe('kimi')
+    expect(adapterBackedAgentId('kimi', definitions, backed('codex', 'kimi'))).toBe('kimi')
+    expect(adapterBackedAgentId('fake', definitions, backed('codex', 'kimi'))).toBe('codex')
+    expect(adapterBackedAgentId(undefined, definitions, backed('kimi'))).toBe('kimi')
     expect(adapterBackedAgentId('fake', definitions, undefined)).toBe('fake')
     expect(adapterBackedAgentId('fake', definitions, [])).toBeUndefined()
+  })
+})
+
+describe('accountRateLimitStatsLabel (ADR-0010 history on the account card)', () => {
+  const now = Date.parse('2026-09-12T12:00:00.000Z')
+
+  it('is quiet when the profile had no rate-limited run in the window', () => {
+    expect(accountRateLimitStatsLabel(undefined, now, translate)).toBeUndefined()
+    expect(
+      accountRateLimitStatsLabel({ profileId: 'acct-1', rateLimitedCount: 0 }, now, translate),
+    ).toBeUndefined()
+  })
+
+  it('formats the count and the relative "last" timestamp', () => {
+    const label = accountRateLimitStatsLabel(
+      {
+        profileId: 'acct-1',
+        rateLimitedCount: 2,
+        lastRateLimitedAt: '2026-09-12T09:00:00.000Z',
+      },
+      now,
+      translate,
+    )
+    expect(label).toBe('Rate-limited 2× in the last 7 days · last 3 h ago')
+  })
+
+  it('falls back to the "never" placeholder when no timestamp was recorded', () => {
+    const label = accountRateLimitStatsLabel(
+      { profileId: 'acct-1', rateLimitedCount: 1 },
+      now,
+      translate,
+    )
+    expect(label).toBe('Rate-limited 1× in the last 7 days · last Never used')
+  })
+})
+
+describe('adapterUsageUrl', () => {
+  it('returns the vendor usage page only when the adapter declares one', () => {
+    const agents = [
+      { agentId: 'codex', usageUrl: 'https://chatgpt.com/codex' },
+      { agentId: 'fake' },
+    ]
+    expect(adapterUsageUrl(agents, 'codex')).toBe('https://chatgpt.com/codex')
+    expect(adapterUsageUrl(agents, 'fake')).toBeUndefined()
+    expect(adapterUsageUrl(undefined, 'codex')).toBeUndefined()
   })
 })

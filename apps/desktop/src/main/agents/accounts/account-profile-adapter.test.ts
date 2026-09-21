@@ -6,6 +6,18 @@ import {
   createAccountProfileAdapterRegistry,
   type AgentAccountProfileAdapter,
 } from './account-profile-adapter'
+import {
+  CLAUDE_USAGE_URL,
+  createClaudeAccountProfileAdapter,
+} from './adapters/claude-account-profile-adapter'
+import {
+  CODEX_USAGE_URL,
+  createCodexAccountProfileAdapter,
+} from './adapters/codex-account-profile-adapter'
+import {
+  KIMI_USAGE_URL,
+  createKimiAccountProfileAdapter,
+} from './adapters/kimi-account-profile-adapter'
 
 function stubAdapter(
   agentId: string,
@@ -48,5 +60,16 @@ describe('AccountProfileAdapterRegistry (TASK-097, §10.4)', () => {
     expect(duplicate.ok).toBe(false)
     if (duplicate.ok) return
     expect(duplicate.error.code).toBe('VALIDATION_FAILED')
+  })
+})
+
+describe('vendor usage pages (static links — no non-interactive quota query exists)', () => {
+  it('each production adapter exposes its official usage page', () => {
+    expect(createCodexAccountProfileAdapter().usageUrl).toBe(CODEX_USAGE_URL)
+    expect(CODEX_USAGE_URL).toBe('https://chatgpt.com/codex')
+    expect(createClaudeAccountProfileAdapter().usageUrl).toBe(CLAUDE_USAGE_URL)
+    expect(CLAUDE_USAGE_URL).toBe('https://claude.ai/settings/usage')
+    expect(createKimiAccountProfileAdapter().usageUrl).toBe(KIMI_USAGE_URL)
+    expect(KIMI_USAGE_URL).toBe('https://www.kimi.com/code/console')
   })
 })

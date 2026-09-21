@@ -33,6 +33,9 @@ import { defaultRuntimeFactory, probeRuntimeFileExists } from './runtime-file-pr
 
 export const KIMI_CODE_HOME_ENV_KEY = 'KIMI_CODE_HOME'
 
+/** Moonshot's official Kimi Code console (static entry; no non-interactive quota API). */
+export const KIMI_USAGE_URL = 'https://www.kimi.com/code/console'
+
 /**
  * Kimi Code's OAuth credential file inside KIMI_CODE_HOME (directory 0700 /
  * file 0600) — existence is the only signal used. The probe joins in the
@@ -91,6 +94,7 @@ export function createKimiAccountProfileAdapter(
 
   return {
     agentId: KIMI_AGENT.id,
+    usageUrl: KIMI_USAGE_URL,
     reservedEnvKeys: [KIMI_CODE_HOME_ENV_KEY],
 
     buildRuntimeProjection(profile): IpcResult<AccountProfileRuntimeProjection> {

@@ -342,7 +342,22 @@ function fakeRuntime(): TeskraRuntime {
     },
     account: {
       list: vi.fn(async () => ok([])),
-      listAdapterAgents: vi.fn(async () => ok(['codex', 'claude', 'kimi'])),
+      listAdapterAgents: vi.fn(async () =>
+        ok([
+          { agentId: 'codex', usageUrl: 'https://chatgpt.com/codex' },
+          { agentId: 'claude', usageUrl: 'https://claude.ai/settings/usage' },
+          { agentId: 'kimi', usageUrl: 'https://www.kimi.com/code/console' },
+        ]),
+      ),
+      listRateLimitStats: vi.fn(async () =>
+        ok([
+          {
+            profileId: 'acct-1',
+            rateLimitedCount: 2,
+            lastRateLimitedAt: '2026-09-10T12:00:00.000Z',
+          },
+        ]),
+      ),
       get: vi.fn(async () => ok(null)),
       create: vi.fn(async () => ok(ACCOUNT_PROFILE)),
       update: vi.fn(async () => ok(ACCOUNT_PROFILE)),
@@ -919,12 +934,28 @@ describe('Typed IPC Router (TASK-020)', () => {
 
     expect(await ipc.invoke(IPC_CHANNELS.accountListAdapterAgents, {})).toEqual({
       ok: true,
-      data: ['codex', 'claude', 'kimi'],
+      data: [
+        { agentId: 'codex', usageUrl: 'https://chatgpt.com/codex' },
+        { agentId: 'claude', usageUrl: 'https://claude.ai/settings/usage' },
+        { agentId: 'kimi', usageUrl: 'https://www.kimi.com/code/console' },
+      ],
     })
     expect(runtime.account.listAdapterAgents).toHaveBeenCalledWith({})
     // The request schema is strict — extra keys are rejected before the facade.
     const smuggled = await ipc.invoke(IPC_CHANNELS.accountListAdapterAgents, { agentId: 'kimi' })
     expect(smuggled).toMatchObject({ ok: false })
+
+    expect(await ipc.invoke(IPC_CHANNELS.accountListRateLimitStats, {})).toEqual({
+      ok: true,
+      data: [
+        {
+          profileId: 'acct-1',
+          rateLimitedCount: 2,
+          lastRateLimitedAt: '2026-09-10T12:00:00.000Z',
+        },
+      ],
+    })
+    expect(runtime.account.listRateLimitStats).toHaveBeenCalledWith({})
 
     expect(await ipc.invoke(IPC_CHANNELS.accountGet, { id: 'acct-1' })).toEqual({
       ok: true,
@@ -983,6 +1014,49 @@ describe('Typed IPC Router (TASK-020)', () => {
       data: undefined,
     })
     expect(runtime.account.setDefault).toHaveBeenCalledWith(defaultRequest)
+  })
+
+  it('appOpenExternal only opens https: URLs through the injected shell adapter', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    const opened: string[] = []
+    registerIpcRouter(ipc, () => runtime, {
+      openExternal: (url) => {
+        opened.push(url)
+        return Promise.resolve()
+      },
+    })
+
+    expect(
+      await ipc.invoke(IPC_CHANNELS.appOpenExternal, { url: 'https://claude.ai/settings/usage' }),
+    ).toEqual({
+      ok: true,
+      data: undefined,
+    })
+    expect(opened).toEqual(['https://claude.ai/settings/usage'])
+
+    // Non-https schemes are rejected before the shell adapter is touched.
+    for (const url of ['http://example.com', 'file:///C:/Windows/win.ini', 'javascript:alert(1)']) {
+      const rejected = await ipc.invoke(IPC_CHANNELS.appOpenExternal, { url })
+      expect(rejected).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    }
+    expect(opened).toHaveLength(1)
+
+    // A non-URL payload never reaches the scheme check.
+    const malformed = await ipc.invoke(IPC_CHANNELS.appOpenExternal, { url: 'not a url' })
+    expect(malformed).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    expect(opened).toHaveLength(1)
+  })
+
+  it('appOpenExternal answers CAPABILITY_NOT_AVAILABLE without an injected shell adapter', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    const result = await ipc.invoke(IPC_CHANNELS.appOpenExternal, {
+      url: 'https://chatgpt.com/codex',
+    })
+    expect(result).toMatchObject({ ok: false, error: { code: 'CAPABILITY_NOT_AVAILABLE' } })
   })
 
   it('routes execution profile CRUD and set-default through the runtime facade (TASK-110)', async () => {

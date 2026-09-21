@@ -4,6 +4,7 @@ import {
   createWorkspaceRequestSchema,
   futureRuntimePortSchema,
   listRecentWorkspacesRequestSchema,
+  openExternalRequestSchema,
   openWorkspaceRequestSchema,
   systemHealthSchema,
   systemInfoSchema,
@@ -47,5 +48,17 @@ describe('Runtime Facade contracts (TASK-081)', () => {
     ).toBe(true)
     expect(futureRuntimePortSchema.safeParse('agent').success).toBe(true)
     expect(futureRuntimePortSchema.safeParse('terminal').success).toBe(false)
+  })
+
+  it('openExternalRequestSchema requires a parseable absolute URL (scheme check lives in Main)', () => {
+    expect(openExternalRequestSchema.safeParse({ url: 'https://chatgpt.com/codex' }).success).toBe(
+      true,
+    )
+    // Zod only guarantees URL-ness; the https:-only policy is enforced Main-side.
+    expect(openExternalRequestSchema.safeParse({ url: 'http://example.com' }).success).toBe(true)
+    expect(openExternalRequestSchema.safeParse({ url: 'not a url' }).success).toBe(false)
+    expect(openExternalRequestSchema.safeParse({ url: 'https://a.b/c', extra: 1 }).success).toBe(
+      false,
+    )
   })
 })

@@ -2,7 +2,7 @@ import { CheckCircleFilled, CloseCircleFilled } from '@ant-design/icons'
 import { Alert, Button, Input, Modal, Radio, Select, Space, Steps, Tag, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 
-import type { AgentAccountProfile, WslDistribution } from '@teskra/contracts'
+import type { AdapterAgentInfo, AgentAccountProfile, WslDistribution } from '@teskra/contracts'
 
 import { useTranslation, type TranslationKey } from '../i18n'
 import { useAgentStore } from '../stores/agent-store'
@@ -47,7 +47,7 @@ export function AddAccountWizard({ open, initialAgentId, onClose }: AddAccountWi
 
   const [step, setStep] = useState(0)
   const [agentId, setAgentId] = useState<string | undefined>(initialAgentId)
-  const [adapterAgentIds, setAdapterAgentIds] = useState<readonly string[]>()
+  const [adapterAgentIds, setAdapterAgentIds] = useState<readonly AdapterAgentInfo[]>()
   const [name, setName] = useState('')
   const [slug, setSlug] = useState('')
   const [slugTouched, setSlugTouched] = useState(false)

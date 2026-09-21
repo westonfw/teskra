@@ -36,6 +36,9 @@ import { defaultRuntimeFactory, probeRuntimeFileExists } from './runtime-file-pr
 
 export const CLAUDE_CONFIG_DIR_ENV = 'CLAUDE_CONFIG_DIR'
 
+/** Anthropic's official usage page (static entry; no non-interactive quota API). */
+export const CLAUDE_USAGE_URL = 'https://claude.ai/settings/usage'
+
 /**
  * Claude Code stores its OAuth credentials at `<config dir>/.credentials.json`
  * on Windows and Linux/WSL (macOS uses the Keychain, but account profiles only
@@ -82,6 +85,7 @@ export function createClaudeAccountProfileAdapter(
 
   return {
     agentId: CLAUDE_AGENT.id,
+    usageUrl: CLAUDE_USAGE_URL,
     reservedEnvKeys: [CLAUDE_CONFIG_DIR_ENV],
 
     buildRuntimeProjection(profile) {

@@ -27,10 +27,20 @@ function runtimeUnavailable<T>(): IpcResult<T> {
   })
 }
 
+export interface IpcRouterOptions {
+  /**
+   * Electron shell.openExternal, injected by main/index.ts — the router and
+   * the Runtime layer stay Electron-free. Absent in tests / non-Electron
+   * hosts, where the channel answers CAPABILITY_NOT_AVAILABLE.
+   */
+  readonly openExternal?: (url: string) => Promise<unknown>
+}
+
 /** Registers every channel from the shared registry exactly once (TASK-020). */
 export function registerIpcRouter(
   ipc: IpcMainPort,
   getRuntime: () => TeskraRuntime | undefined,
+  options: IpcRouterOptions = {},
 ): IpcRouter {
   const registered: string[] = []
 
@@ -285,6 +295,10 @@ export function registerIpcRouter(
   register(
     ipcChannelDefinitions.accountListAdapterAgents,
     withRuntime((runtime, request) => runtime.account.listAdapterAgents(request)),
+  )
+  register(
+    ipcChannelDefinitions.accountListRateLimitStats,
+    withRuntime((runtime, request) => runtime.account.listRateLimitStats(request)),
   )
   register(
     ipcChannelDefinitions.accountGet,
@@ -660,6 +674,39 @@ export function registerIpcRouter(
     ipcChannelDefinitions.systemOpenDirectory,
     withRuntime((runtime, request) => runtime.settings.openDirectory(request)),
   )
+  // shell.openExternal reaches the OS handler, so the scheme allow-list is
+  // enforced here even though the Zod schema already parsed the URL: https:
+  // only — never file:, javascript:, or vendor-specific OS handlers.
+  register(ipcChannelDefinitions.appOpenExternal, async (_runtime, request) => {
+    if (new URL(request.url).protocol !== 'https:') {
+      return fail({
+        code: 'VALIDATION_FAILED',
+        message: 'Only https: URLs can be opened externally.',
+        retryable: false,
+        detail: `appOpenExternal rejected scheme of ${request.url}`,
+      })
+    }
+    if (options.openExternal === undefined) {
+      return fail({
+        code: 'CAPABILITY_NOT_AVAILABLE',
+        message: 'Opening external URLs is unavailable in this environment.',
+        retryable: false,
+        detail: 'appOpenExternal without an injected Electron shell adapter',
+      })
+    }
+    try {
+      await options.openExternal(request.url)
+      return { ok: true, data: undefined }
+    } catch (cause) {
+      return fail({
+        code: 'UNKNOWN',
+        message: 'Failed to open the URL in the system browser.',
+        retryable: true,
+        detail: `shell.openExternal threw for ${request.url}`,
+        cause,
+      })
+    }
+  })
 
   return {
     dispose() {

@@ -4,6 +4,8 @@ import {
   ACCOUNT_AUTH_TYPES,
   ACCOUNT_PROFILE_STATUSES,
   accountLoginSessionSchema,
+  accountRateLimitStatsSchema,
+  adapterAgentInfoSchema,
   cancelAccountLoginRequestSchema,
   createAccountProfileRequestSchema,
   agentAccountProfileSchema,
@@ -11,6 +13,7 @@ import {
   agentRuntimeIdentitySchema,
   configHomeSchema,
   listAccountProfilesRequestSchema,
+  listRateLimitStatsRequestSchema,
   removeAccountProfileRequestSchema,
   resizeAccountLoginRequestSchema,
   setDefaultAccountProfileRequestSchema,
@@ -441,5 +444,50 @@ describe('account IPC request schemas (TASK-102 §28)', () => {
     expect(
       accountLoginSessionSchema.safeParse({ sessionId: 'sess_1', profileId: 'acct_1' }).success,
     ).toBe(false)
+  })
+})
+
+describe('adapter agent info + rate-limit stats (§4.2 / ADR-0010)', () => {
+  it('adapterAgentInfoSchema carries agentId and an optional https usage page', () => {
+    expect(adapterAgentInfoSchema.safeParse({ agentId: 'codex' }).success).toBe(true)
+    expect(
+      adapterAgentInfoSchema.safeParse({
+        agentId: 'claude',
+        usageUrl: 'https://claude.ai/settings/usage',
+      }).success,
+    ).toBe(true)
+    expect(
+      adapterAgentInfoSchema.safeParse({ agentId: 'codex', usageUrl: 'not a url' }).success,
+    ).toBe(false)
+    expect(adapterAgentInfoSchema.safeParse({ agentId: '' }).success).toBe(false)
+    expect(adapterAgentInfoSchema.safeParse({ agentId: 'codex', extra: 1 }).success).toBe(false)
+  })
+
+  it('accountRateLimitStatsSchema requires a non-negative count and ISO timestamp', () => {
+    expect(
+      accountRateLimitStatsSchema.safeParse({
+        profileId: 'acct_1',
+        rateLimitedCount: 2,
+        lastRateLimitedAt: NOW,
+      }).success,
+    ).toBe(true)
+    expect(
+      accountRateLimitStatsSchema.safeParse({ profileId: 'acct_1', rateLimitedCount: 0 }).success,
+    ).toBe(true)
+    expect(
+      accountRateLimitStatsSchema.safeParse({ profileId: 'acct_1', rateLimitedCount: -1 }).success,
+    ).toBe(false)
+    expect(
+      accountRateLimitStatsSchema.safeParse({
+        profileId: 'acct_1',
+        rateLimitedCount: 1,
+        lastRateLimitedAt: 'yesterday',
+      }).success,
+    ).toBe(false)
+  })
+
+  it('listRateLimitStatsRequestSchema takes no parameters', () => {
+    expect(listRateLimitStatsRequestSchema.safeParse({}).success).toBe(true)
+    expect(listRateLimitStatsRequestSchema.safeParse({ profileId: 'acct_1' }).success).toBe(false)
   })
 })

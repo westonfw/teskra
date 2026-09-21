@@ -17,7 +17,11 @@ import {
 } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 
-import type { AgentAccountProfile } from '@teskra/contracts'
+import type {
+  AccountRateLimitStats,
+  AdapterAgentInfo,
+  AgentAccountProfile,
+} from '@teskra/contracts'
 
 import { AddAccountWizard } from '../../accounts/add-account-wizard'
 import { AliasBindingsCard } from '../../accounts/alias-bindings'
@@ -25,8 +29,10 @@ import { useAccountProfileStore } from '../../accounts/account-profile-store'
 import {
   accountLastUsedLabel,
   accountLoginAvailable,
+  accountRateLimitStatsLabel,
   accountRuntimeLabel,
   accountStatusTag,
+  adapterUsageUrl,
   defaultAccountProfileId,
   profilesByAgent,
 } from '../../accounts/account-view-model'
@@ -57,15 +63,28 @@ export function AccountsSettingsSection() {
 
   const [addingFor, setAddingFor] = useState<string>()
   const [addingExternal, setAddingExternal] = useState(false)
-  const [adapterAgentIds, setAdapterAgentIds] = useState<readonly string[]>()
+  const [adapterAgents, setAdapterAgents] = useState<readonly AdapterAgentInfo[]>()
+  const [rateLimitStats, setRateLimitStats] = useState<ReadonlyMap<string, AccountRateLimitStats>>(
+    new Map(),
+  )
   const [editing, setEditing] = useState<AgentAccountProfile>()
   const [removing, setRemoving] = useState<AgentAccountProfile>()
   const [loggingIn, setLoggingIn] = useState<AgentAccountProfile>()
 
+  // Teskra's own rate-limit history (ADR-0010 classifications) — a failed
+  // query just leaves the cards without the stats line.
+  const loadRateLimitStats = (): void => {
+    void window.teskra.account.listRateLimitStats().then((result) => {
+      if (result.ok) {
+        setRateLimitStats(new Map(result.data.map((stats) => [stats.profileId, stats])))
+      }
+    })
+  }
+
   // §18.0: opening the page issues one account.list, which is also Main's
   // lazy limited-sweep trigger — no separate sweep call exists.
   useEffect(() => {
-    void refresh()
+    void refresh().then(loadRateLimitStats)
     void loadDefinitions()
     if (useSettingsStore.getState().resolved === undefined) void loadSettings()
     return startSynchronization()
@@ -73,11 +92,12 @@ export function AccountsSettingsSection() {
 
   // §4.2: the per-agent "add" entry only makes sense for adapter-backed
   // agents; profile cards themselves always render, whatever the adapter
-  // situation (an adapter removal must not hide existing profiles).
+  // situation (an adapter removal must not hide existing profiles). The same
+  // response carries each adapter's vendor usage page (static link).
   useEffect(() => {
     let active = true
     void window.teskra.account.listAdapterAgents().then((result) => {
-      if (active && result.ok) setAdapterAgentIds(result.data)
+      if (active && result.ok) setAdapterAgents(result.data)
     })
     return () => {
       active = false
@@ -133,12 +153,15 @@ export function AccountsSettingsSection() {
                         key={profile.id}
                         profile={profile}
                         isDefault={profile.id === defaultId}
+                        stats={rateLimitStats.get(profile.id)}
+                        usageUrl={adapterUsageUrl(adapterAgents, agentId)}
                         onEdit={() => setEditing(profile)}
                         onRemove={() => setRemoving(profile)}
                         onLogin={() => setLoggingIn(profile)}
                       />
                     ))}
-                    {(adapterAgentIds === undefined || adapterAgentIds.includes(agentId)) && (
+                    {(adapterAgents === undefined ||
+                      adapterAgents.some((agent) => agent.agentId === agentId)) && (
                       <Button
                         type="dashed"
                         icon={<PlusOutlined />}
@@ -197,12 +220,22 @@ export function AccountsSettingsSection() {
 interface AccountCardProps {
   readonly profile: AgentAccountProfile
   readonly isDefault: boolean
+  readonly stats?: AccountRateLimitStats | undefined
+  readonly usageUrl?: string | undefined
   readonly onEdit: () => void
   readonly onRemove: () => void
   readonly onLogin: () => void
 }
 
-function AccountCard({ profile, isDefault, onEdit, onRemove, onLogin }: AccountCardProps) {
+function AccountCard({
+  profile,
+  isDefault,
+  stats,
+  usageUrl,
+  onEdit,
+  onRemove,
+  onLogin,
+}: AccountCardProps) {
   const { t } = useTranslation()
   const setDefaultProfile = useAccountProfileStore((state) => state.setDefaultProfile)
   const detectProfile = useAccountProfileStore((state) => state.detectProfile)
@@ -212,6 +245,7 @@ function AccountCard({ profile, isDefault, onEdit, onRemove, onLogin }: AccountC
   const [busy, setBusy] = useState(false)
   const [confirmingDisable, setConfirmingDisable] = useState(false)
   const status = accountStatusTag(profile, t)
+  const statsLabel = accountRateLimitStatsLabel(stats, Date.now(), t)
 
   const run = async (operation: () => Promise<unknown>): Promise<void> => {
     setBusy(true)
@@ -243,6 +277,9 @@ function AccountCard({ profile, isDefault, onEdit, onRemove, onLogin }: AccountC
         <Typography.Text type="secondary">
           {t('accounts.lastUsed', { time: accountLastUsedLabel(profile, Date.now(), t) })}
         </Typography.Text>
+        {statsLabel !== undefined && (
+          <Typography.Text type="secondary">{statsLabel}</Typography.Text>
+        )}
         {profile.configHome !== undefined && (
           <Typography.Text type="secondary" ellipsis>
             {t('accounts.configHome')}: <Typography.Text code>{profile.configHome}</Typography.Text>
@@ -258,6 +295,22 @@ function AccountCard({ profile, isDefault, onEdit, onRemove, onLogin }: AccountC
           {accountLoginAvailable(profile) && (
             <Button size="small" onClick={onLogin}>
               {t('accounts.open')}
+            </Button>
+          )}
+          {/* Static vendor usage page — no live quota query exists. */}
+          {usageUrl !== undefined && (
+            <Button
+              size="small"
+              type="link"
+              href={usageUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(event) => {
+                event.preventDefault()
+                void window.teskra.openExternal({ url: usageUrl })
+              }}
+            >
+              {t('accounts.viewUsage')}
             </Button>
           )}
           <Dropdown

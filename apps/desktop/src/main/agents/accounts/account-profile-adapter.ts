@@ -39,6 +39,13 @@ export interface AgentAccountProfileAdapter {
   /** AgentDefinition.id — free-form string, never a hardcoded enum. */
   readonly agentId: string
   /**
+   * The vendor's official usage/quota page for this agent, surfaced as a
+   * static "View usage" link on the account card. Static because the vendors
+   * offer no non-interactive quota query — Teskra never shows live remaining
+   * quota.
+   */
+  readonly usageUrl?: string
+  /**
    * Env keys this adapter owns when projecting a profile (§13.2), e.g.
    * CODEX_HOME. User-supplied env may never set these — the reserved list
    * is what lets the Run-start path reject such overrides.

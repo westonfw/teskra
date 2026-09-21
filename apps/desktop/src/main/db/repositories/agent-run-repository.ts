@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3'
 
 import type {
+  AccountRateLimitStats,
   AgentFailureClassification,
   AgentRole,
   AgentRun,
@@ -11,6 +12,7 @@ import type {
   IpcResult,
 } from '@teskra/contracts'
 import {
+  accountRateLimitStatsSchema,
   agentFailureClassificationSchema,
   agentRunProfileSnapshotSchema,
   agentRunSchema,
@@ -137,6 +139,9 @@ export interface UpdateAgentRunInput {
   readonly failureClassification?: AgentFailureClassification | null
 }
 
+/** Default trailing window for the per-profile rate-limit history. */
+export const RATE_LIMIT_STATS_DEFAULT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+
 export interface AgentRunRepository {
   create(input: CreateAgentRunInput, now?: string): IpcResult<AgentRun>
   getById(id: string): IpcResult<AgentRun | null>
@@ -148,6 +153,12 @@ export interface AgentRunRepository {
   listByAccountProfile(accountProfileId: string): IpcResult<AgentRun[]>
   /** Statuses matching the idx_agent_runs_active partial index. */
   listActive(): IpcResult<AgentRun[]>
+  /**
+   * Per-profile count of runs whose failure classification kind is
+   * 'rate-limited' (ADR-0010) inside the trailing window, plus the most
+   * recent such run's timestamp. Profiles without a hit are absent.
+   */
+  listRateLimitStats(windowMs?: number, now?: string): IpcResult<AccountRateLimitStats[]>
   delete(id: string): IpcResult<boolean>
 }
 
@@ -398,6 +409,44 @@ export function createAgentRunRepository(connection: Database.Database): AgentRu
       return queryRows(
         'listActive',
         `SELECT * FROM agent_runs WHERE status IN ('running', 'preparing', 'queued') ORDER BY created_at ASC`,
+      )
+    },
+
+    listRateLimitStats(windowMs = RATE_LIMIT_STATS_DEFAULT_WINDOW_MS, now = nowIso()) {
+      interface StatsRow {
+        profile_id: string
+        rate_limited_count: number
+        last_rate_limited_at: string | null
+      }
+      // COALESCE: the classification is written post-hoc, so a legacy failed
+      // run without finished_at still counts via its update timestamp. All
+      // timestamp columns share the fixed ISO-8601 UTC text format, which
+      // compares correctly as text.
+      const cutoff = new Date(Date.parse(now) - windowMs).toISOString()
+      const rows = execute(ENTITY, 'listRateLimitStats', () => {
+        return connection
+          .prepare(
+            `SELECT account_profile_id AS profile_id,
+                    COUNT(*) AS rate_limited_count,
+                    MAX(COALESCE(finished_at, updated_at)) AS last_rate_limited_at
+             FROM agent_runs
+             WHERE account_profile_id IS NOT NULL
+               AND json_extract(failure_classification_json, '$.kind') = 'rate-limited'
+               AND COALESCE(finished_at, updated_at) >= ?
+             GROUP BY account_profile_id
+             ORDER BY account_profile_id ASC`,
+          )
+          .all(cutoff) as StatsRow[]
+      })
+      if (!rows.ok) {
+        return rows
+      }
+      return mapRows(rows.data, (row): IpcResult<AccountRateLimitStats> =>
+        validateRow(accountRateLimitStatsSchema, ENTITY, {
+          profileId: row.profile_id,
+          rateLimitedCount: row.rate_limited_count,
+          lastRateLimitedAt: row.last_rate_limited_at ?? undefined,
+        }),
       )
     },
 

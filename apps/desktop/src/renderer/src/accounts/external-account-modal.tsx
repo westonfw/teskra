@@ -1,7 +1,7 @@
 import { Alert, Input, Modal, Radio, Select, Space, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 
-import type { WslDistribution } from '@teskra/contracts'
+import type { AdapterAgentInfo, WslDistribution } from '@teskra/contracts'
 
 import { useTranslation } from '../i18n'
 import { useAgentStore } from '../stores/agent-store'
@@ -30,7 +30,7 @@ export function ExternalAccountModal({ open, onClose }: ExternalAccountModalProp
   const clearError = useAccountProfileStore((state) => state.clearError)
 
   const [agentId, setAgentId] = useState<string>()
-  const [adapterAgentIds, setAdapterAgentIds] = useState<readonly string[]>()
+  const [adapterAgentIds, setAdapterAgentIds] = useState<readonly AdapterAgentInfo[]>()
   const [name, setName] = useState('')
   const [runtimeKind, setRuntimeKind] = useState<'windows' | 'wsl'>('windows')
   const [distro, setDistro] = useState<string>()

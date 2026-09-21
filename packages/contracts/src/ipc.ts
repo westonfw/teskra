@@ -3,11 +3,14 @@ import { z } from 'zod'
 import {
   accountLoginSessionSchema,
   accountProfileIdRequestSchema,
+  accountRateLimitStatsSchema,
+  adapterAgentInfoSchema,
   agentAccountProfileSchema,
   cancelAccountLoginRequestSchema,
   createAccountProfileRequestSchema,
   listAccountProfilesRequestSchema,
   listAdapterAgentsRequestSchema,
+  listRateLimitStatsRequestSchema,
   removeAccountProfileRequestSchema,
   resizeAccountLoginRequestSchema,
   setDefaultAccountProfileRequestSchema,
@@ -16,11 +19,14 @@ import {
   writeAccountLoginRequestSchema,
   type AccountLoginSession,
   type AccountProfileIdRequest,
+  type AccountRateLimitStats,
+  type AdapterAgentInfo,
   type AgentAccountProfile,
   type CancelAccountLoginRequest,
   type CreateAccountProfileRequest,
   type ListAccountProfilesRequest,
   type ListAdapterAgentsRequest,
+  type ListRateLimitStatsRequest,
   type RemoveAccountProfileRequest,
   type ResizeAccountLoginRequest,
   type SetDefaultAccountProfileRequest,
@@ -299,12 +305,14 @@ import {
   type UpdateConfigRequest,
 } from './config'
 import {
+  openExternalRequestSchema,
   openSystemDirectoryRequestSchema,
   requireRuntimePortRequestSchema,
   setDefaultWslDistributionRequestSchema,
   systemHealthSchema,
   systemInfoSchema,
   systemPathsSchema,
+  type OpenExternalRequest,
   type OpenSystemDirectoryRequest,
   type RequireRuntimePortRequest,
   type SetDefaultWslDistributionRequest,
@@ -456,6 +464,7 @@ export const IPC_CHANNELS = {
   agentRunContinueWithProfile: 'teskra:agent:continue-with-profile',
   accountList: 'teskra:account:list',
   accountListAdapterAgents: 'teskra:account:adapter-agents:list',
+  accountListRateLimitStats: 'teskra:account:rate-limit-stats:list',
   accountGet: 'teskra:account:get',
   accountCreate: 'teskra:account:create',
   accountUpdate: 'teskra:account:update',
@@ -524,6 +533,7 @@ export const IPC_CHANNELS = {
   credentialDelete: 'teskra:credential:delete',
   credentialList: 'teskra:credential:list',
   systemOpenDirectory: 'teskra:system:directory:open',
+  appOpenExternal: 'teskra:app:open-external',
   doctorRun: 'teskra:doctor:run',
   recoveryList: 'teskra:recovery:list',
   promptListTemplates: 'teskra:prompt:list-templates',
@@ -853,11 +863,19 @@ export const accountListChannel = channel(
   z.array(agentAccountProfileSchema),
 )
 // §4.2: the "new account" entry points filter to adapter-backed agents; the
-// response carries AgentDefinition.id strings, never adapter internals.
+// response carries AdapterAgentInfo (agentId + optional vendor usage page),
+// never adapter internals.
 export const accountListAdapterAgentsChannel = channel(
   IPC_CHANNELS.accountListAdapterAgents,
   listAdapterAgentsRequestSchema,
-  z.array(z.string().min(1)),
+  z.array(adapterAgentInfoSchema),
+)
+// Teskra's own rate-limit history per profile (ADR-0010 classifications),
+// never a live quota reading.
+export const accountListRateLimitStatsChannel = channel(
+  IPC_CHANNELS.accountListRateLimitStats,
+  listRateLimitStatsRequestSchema,
+  z.array(accountRateLimitStatsSchema),
 )
 export const accountGetChannel = channel(
   IPC_CHANNELS.accountGet,
@@ -1208,6 +1226,14 @@ export const systemOpenDirectoryChannel = channel(
   openSystemDirectoryRequestSchema,
   voidResponseSchema,
 )
+// Registered directly in the IPC router (not the runtime facade): the handler
+// needs Electron's shell, injected from main/index.ts — the Runtime layer
+// stays Electron-free. Main re-checks the https: scheme before opening.
+export const appOpenExternalChannel = channel(
+  IPC_CHANNELS.appOpenExternal,
+  openExternalRequestSchema,
+  voidResponseSchema,
+)
 export const doctorRunChannel = channel(
   IPC_CHANNELS.doctorRun,
   runDoctorRequestSchema,
@@ -1358,6 +1384,7 @@ export const ipcChannelDefinitions = {
   agentRunContinueWithProfile: agentRunContinueWithProfileChannel,
   accountList: accountListChannel,
   accountListAdapterAgents: accountListAdapterAgentsChannel,
+  accountListRateLimitStats: accountListRateLimitStatsChannel,
   accountGet: accountGetChannel,
   accountCreate: accountCreateChannel,
   accountUpdate: accountUpdateChannel,
@@ -1426,6 +1453,7 @@ export const ipcChannelDefinitions = {
   credentialDelete: credentialDeleteChannel,
   credentialList: credentialListChannel,
   systemOpenDirectory: systemOpenDirectoryChannel,
+  appOpenExternal: appOpenExternalChannel,
   doctorRun: doctorRunChannel,
   recoveryList: recoveryListChannel,
   promptListTemplates: promptListTemplatesChannel,
@@ -1450,6 +1478,11 @@ export interface TeskraBridge {
   readonly appName: 'Teskra'
   readonly appVersion: string
   ping(): Promise<IpcResult<string>>
+  /**
+   * Opens an https: URL in the system browser (Electron shell, wired in Main).
+   * Other schemes are rejected with VALIDATION_FAILED.
+   */
+  openExternal(request: OpenExternalRequest): Promise<IpcResult<void>>
   readonly workspace: {
     create(request: CreateWorkspaceRequest): Promise<IpcResult<Workspace>>
     open(request: OpenWorkspaceRequest): Promise<IpcResult<Workspace>>
@@ -1550,11 +1583,20 @@ export interface TeskraBridge {
   readonly account: {
     list(request?: ListAccountProfilesRequest): Promise<IpcResult<AgentAccountProfile[]>>
     /**
-     * AgentDefinition.id values with a registered account profile adapter —
-     * the only agents the "new account" entry points may offer. Existing
-     * profiles of an agent whose adapter was removed still list via `list`.
+     * Agents with a registered account profile adapter — the only agents the
+     * "new account" entry points may offer. usageUrl is the vendor's official
+     * usage page (static link; no live quota query exists). Existing profiles
+     * of an agent whose adapter was removed still list via `list`.
      */
-    listAdapterAgents(request?: ListAdapterAgentsRequest): Promise<IpcResult<string[]>>
+    listAdapterAgents(request?: ListAdapterAgentsRequest): Promise<IpcResult<AdapterAgentInfo[]>>
+    /**
+     * Per-profile rate-limit history from Teskra's own failure classifications
+     * (ADR-0010), trailing 7 days. Profiles without a rate-limited run in the
+     * window are absent from the result.
+     */
+    listRateLimitStats(
+      request?: ListRateLimitStatsRequest,
+    ): Promise<IpcResult<AccountRateLimitStats[]>>
     get(request: AccountProfileIdRequest): Promise<IpcResult<AgentAccountProfile | null>>
     create(request: CreateAccountProfileRequest): Promise<IpcResult<AgentAccountProfile>>
     update(request: UpdateAccountProfileRequest): Promise<IpcResult<AgentAccountProfile>>

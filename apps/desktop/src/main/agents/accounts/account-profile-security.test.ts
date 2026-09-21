@@ -165,6 +165,7 @@ describe('renderer credential isolation (§58)', () => {
         'accountGet',
         'accountList',
         'accountListAdapterAgents',
+        'accountListRateLimitStats',
         'accountLoginCancel',
         'accountLoginResize',
         'accountLoginStart',

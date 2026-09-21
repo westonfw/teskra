@@ -32,6 +32,9 @@ import { defaultRuntimeFactory, probeRuntimeFileExists } from './runtime-file-pr
 
 export const CODEX_HOME_ENV_KEY = 'CODEX_HOME'
 
+/** OpenAI's official Codex usage page (static entry; no non-interactive quota API). */
+export const CODEX_USAGE_URL = 'https://chatgpt.com/codex'
+
 /** Codex CLI's auth state file inside CODEX_HOME — existence is the only signal used. */
 const CODEX_AUTH_FILE = 'auth.json'
 
@@ -78,6 +81,7 @@ export function createCodexAccountProfileAdapter(
 
   return {
     agentId: CODEX_AGENT.id,
+    usageUrl: CODEX_USAGE_URL,
     reservedEnvKeys: [CODEX_HOME_ENV_KEY],
 
     buildRuntimeProjection(profile): IpcResult<AccountProfileRuntimeProjection> {

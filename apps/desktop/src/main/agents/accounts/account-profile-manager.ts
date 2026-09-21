@@ -5,6 +5,7 @@ import { dirname, posix, win32 } from 'node:path'
 import type {
   AccountAuthType,
   AccountProfileStatus,
+  AccountRateLimitStats,
   AgentAccountProfile,
   AgentRunStatus,
   IpcResult,
@@ -121,6 +122,11 @@ export interface AccountProfileManager {
     workspaceRuntime: WorkspaceRuntimeRef,
     explicitProfileId?: string,
   ): Promise<IpcResult<AgentAccountProfile | undefined>>
+  /**
+   * Per-profile rate-limit history (ADR-0010 classifications, trailing 7
+   * days) for the account card. Aggregated by the Repository — no SQL here.
+   */
+  listRateLimitStats(): Promise<IpcResult<AccountRateLimitStats[]>>
   /** Pluggable per-agent adapters (§10.4); undefined when none registered. */
   adapterFor(agentId: string): ReturnType<AccountProfileAdapterRegistry['get']>
   /** §13.2: the union of every registered adapter's reserved env keys. */
@@ -129,7 +135,7 @@ export interface AccountProfileManager {
 
 export interface AccountProfileManagerDeps {
   readonly profiles: AccountProfileRepository
-  readonly runs: Pick<AgentRunRepository, 'listByAccountProfile'>
+  readonly runs: Pick<AgentRunRepository, 'listByAccountProfile' | 'listRateLimitStats'>
   readonly registry: Pick<AgentRegistry, 'has'>
   readonly paths: TeskraPaths
   readonly config: Pick<ConfigService, 'resolve' | 'updateGlobal'>
@@ -1031,6 +1037,10 @@ export function createAccountProfileManager(
 
     update(id, patch) {
       return Promise.resolve(updateProfile(id, patch))
+    },
+
+    listRateLimitStats() {
+      return Promise.resolve(deps.runs.listRateLimitStats())
     },
 
     async remove(id, options = {}) {

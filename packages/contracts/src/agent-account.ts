@@ -204,13 +204,38 @@ export const listAccountProfilesRequestSchema = z.strictObject({
 export type ListAccountProfilesRequest = z.infer<typeof listAccountProfilesRequestSchema>
 
 /**
- * §4.2 / §10.4 — the agentIds with a registered AgentAccountProfileAdapter,
- * i.e. the agents a NEW account profile can be created for. Response is a
- * plain string array (AgentDefinition.id values); existing profiles of an
- * agent whose adapter was removed still list through account.list.
+ * §4.2 / §10.4 — one entry per registered AgentAccountProfileAdapter. The
+ * agentId (AgentDefinition.id) filters the "new account" entry points;
+ * usageUrl is the vendor's official usage/quota page (a static link — the
+ * vendors offer no non-interactive quota query, so Teskra never shows live
+ * remaining quota). Existing profiles of an agent whose adapter was removed
+ * still list through account.list.
  */
+export const adapterAgentInfoSchema = z.strictObject({
+  agentId: z.string().min(1),
+  usageUrl: z.string().url().optional(),
+})
+export type AdapterAgentInfo = z.infer<typeof adapterAgentInfoSchema>
+
 export const listAdapterAgentsRequestSchema = z.strictObject({})
 export type ListAdapterAgentsRequest = z.infer<typeof listAdapterAgentsRequestSchema>
+
+/**
+ * Per-profile rate-limit history, aggregated in Main from
+ * `agent_runs.failure_classification_json` (ADR-0010, kind = 'rate-limited')
+ * over a trailing window (default 7 days). This is Teskra's own history —
+ * never a live quota reading.
+ */
+export const accountRateLimitStatsSchema = z.strictObject({
+  profileId: z.string().min(1),
+  rateLimitedCount: z.number().int().min(0),
+  /** ISO-8601 UTC; present whenever rateLimitedCount > 0. */
+  lastRateLimitedAt: z.string().datetime().optional(),
+})
+export type AccountRateLimitStats = z.infer<typeof accountRateLimitStatsSchema>
+
+export const listRateLimitStatsRequestSchema = z.strictObject({})
+export type ListRateLimitStatsRequest = z.infer<typeof listRateLimitStatsRequestSchema>
 
 export const accountProfileIdRequestSchema = z.strictObject({
   id: ipcIdSchema,

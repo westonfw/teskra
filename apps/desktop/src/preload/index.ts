@@ -27,6 +27,7 @@ const bridge: TeskraBridge = {
   appName: 'Teskra',
   appVersion: APP_VERSION,
   ping: () => invoke(IPC_CHANNELS.ping),
+  openExternal: (request) => invoke(IPC_CHANNELS.appOpenExternal, request),
   workspace: {
     create: (request) => invoke(IPC_CHANNELS.workspaceCreate, request),
     open: (request) => invoke(IPC_CHANNELS.workspaceOpen, request),
@@ -111,6 +112,7 @@ const bridge: TeskraBridge = {
   account: {
     list: (request = {}) => invoke(IPC_CHANNELS.accountList, request),
     listAdapterAgents: (request = {}) => invoke(IPC_CHANNELS.accountListAdapterAgents, request),
+    listRateLimitStats: (request = {}) => invoke(IPC_CHANNELS.accountListRateLimitStats, request),
     get: (request) => invoke(IPC_CHANNELS.accountGet, request),
     create: (request) => invoke(IPC_CHANNELS.accountCreate, request),
     update: (request) => invoke(IPC_CHANNELS.accountUpdate, request),

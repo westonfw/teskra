@@ -2049,6 +2049,41 @@ Codex Accounts
 [ + Add Account ]
 ```
 
+### 22.1 限额历史统计与厂商用量页
+
+账号卡片在状态行之外额外显示两类信息：
+
+```text
+┌────────────────────────────────────┐
+│ Personal                           │
+│ ● Ready                            │
+│ Runtime: WSL / Ubuntu-22.04        │
+│ Last used: 12 min ago              │
+│ 近 7 天限流 2 次 · 上次 3 小时前    │
+│                                    │
+│ [Use as Default] [Open] [查看用量]  │
+└────────────────────────────────────┘
+```
+
+- **限额历史统计**：来自 Teskra 自己的数据——`agent_runs.failure_classification_json`
+  中 kind 为 `rate-limited` 的 Run（ADR-0010），由 Repository 按
+  `account_profile_id` 聚合近 7 天（窗口参数化，默认 7 天）的次数与最近一次时间，
+  经 `teskra:account:rate-limit-stats:list` 下发。窗口内没有限流记录的 Profile
+  不显示该行。
+- **厂商用量页链接**：`AgentAccountProfileAdapter` 声明可选的静态
+  `usageUrl`（Codex → `https://chatgpt.com/codex`，
+  Claude → `https://claude.ai/settings/usage`，
+  Kimi → `https://www.kimi.com/code/console`），随
+  `teskra:account:adapter-agents:list` 响应下发；卡片上的「查看用量」经
+  `teskra:app:open-external` 调 `shell.openExternal` 打开
+  （Main 侧强制 https: allow-list）。
+
+**边界：不显示实时余量。** 配额数据只存在于厂商服务端，而（a）§10.3 规定
+Teskra 只探测凭据文件的存在性、绝不读取其内容，（b）三家厂商均不提供
+非交互式的配额查询接口（已实测确认）。因此卡片能给的只有「Teskra 观察到的
+历史」加「跳转到官方用量页」，任何实时剩余额度的展示都是做不到的，不要尝试
+解析 CLI 输出或凭据来凑这个数。
+
 ---
 
 ## 23. Add Account Wizard

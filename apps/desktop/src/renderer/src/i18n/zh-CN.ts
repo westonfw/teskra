@@ -679,6 +679,8 @@ export const zhCN: Record<TranslationKey, string> = {
   'accounts.lastUsed.minutes': '{count} 分钟前',
   'accounts.lastUsed.hours': '{count} 小时前',
   'accounts.lastUsed.days': '{count} 天前',
+  'accounts.rateLimitStats': '近 7 天限流 {count} 次 · 上次 {time}',
+  'accounts.viewUsage': '查看用量',
   'accounts.configHome': 'Config Home',
   'accounts.managedExternally': '外部管理',
   'accounts.useAsDefault': '设为默认',
