@@ -14,6 +14,7 @@ import { createArtifactStore } from '../artifacts/artifact-store'
 import { createAgentDetector } from '../agents/agent-detector'
 import { createAgentHealthManager } from '../agents/agent-health-manager'
 import { createAgentManager } from '../agents/agent-manager'
+import { createRunWatchdogService } from '../agents/run-watchdog-service'
 import { createDefaultAgentRegistry } from '../agents/agent-registry'
 import { createAccountProfileAdapterRegistry } from '../agents/accounts/account-profile-adapter'
 import { createAccountProfileManager } from '../agents/accounts/account-profile-manager'
@@ -584,6 +585,18 @@ export async function composeTeskraRuntime(
     resolveConcurrency: (workspaceId) => {
       const resolved = config.resolve({ workspaceId })
       return resolved.ok ? { ok: true, data: resolved.data.config.concurrency } : resolved
+    },
+  })
+  // TASK-119 (Milestone 25 §5): the single periodic task in the Main process —
+  // preparing-timeout and idle watchdog over the active runs. All stop actions
+  // go through AgentManager.failAndStop; the watchdog never touches processes.
+  const runWatchdog = createRunWatchdogService({
+    runs: repositories.agentRuns,
+    agents: agentManager,
+    events,
+    resolveConfig: (workspaceId) => {
+      const resolved = config.resolve({ workspaceId })
+      return resolved.ok ? { ok: true, data: resolved.data.config.watchdog } : resolved
     },
   })
   // TASK-106 (§18): project terminal Run outcomes onto account profiles.
@@ -1252,6 +1265,9 @@ export async function composeTeskraRuntime(
       // database closes — Agent runs first (their exit path settles terminal
       // status and collects handoffs), then terminals, then the backstop for
       // anything still registered with the ProcessManager.
+      // TASK-119: stop the watchdog's periodic timer first so no tick can
+      // issue a failAndStop against runs that are being shut down below.
+      runWatchdog.dispose()
       await agentManager.dispose()
       // Belt and braces: compose owns the shared RunLogStore — make sure its
       // throttled writes are fsynced and handles released even if the Agent

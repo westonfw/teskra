@@ -108,6 +108,11 @@ export const enUS = {
   'runs.status.failed': 'failed',
   'runs.status.cancelled': 'cancelled',
   'runs.status.interrupted': 'interrupted',
+  // TASK-120 (§5.5): a queued run explains WHY it is waiting.
+  'runs.queuedReason.capacity': 'queued — concurrency limit reached',
+  'runs.queuedReason.directory_busy': 'queued — workspace directory in use',
+  'runs.queuedReason.worktree_busy': 'queued — worktree in use',
+  'runs.queuedReason.fifo': 'queued — behind earlier runs',
 
   'permissions.decision.title': 'Approval decisions',
   'permissions.decision.description':
@@ -278,7 +283,6 @@ export const enUS = {
   'errorMessage.workspaceRequiredForRunHistory':
     'A workspace is required when listing historical Agent runs.',
   'errorMessage.taskNotFound': 'Task "{id}" was not found.',
-  'errorMessage.taskWorkspaceMismatch': 'The task belongs to a different workspace.',
   'errorMessage.workflowRunNotFound': 'Workflow run "{id}" was not found.',
   'errorMessage.fullWorkflowOverrideInvalid':
     'Workflow definition "{id}" is invalid and cannot drive the default full workflow.',
@@ -608,6 +612,17 @@ export const enUS = {
   'settings.general.watchdog.stalledThreshold.label': 'Stalled threshold',
   'settings.general.watchdog.stalledThreshold.description':
     'Milliseconds without output before a run is marked as possibly stalled.',
+  'settings.general.watchdog.preparingTimeout.label': 'Preparing timeout',
+  'settings.general.watchdog.preparingTimeout.description':
+    'Milliseconds a run may stay in preparing before the watchdog stops it as a launch failure.',
+  'settings.general.watchdog.idleTimeout.label': 'Idle timeout',
+  'settings.general.watchdog.idleTimeout.description':
+    'Milliseconds without output before the watchdog treats an active run as stalled. 0 disables the idle watchdog.',
+  'settings.general.watchdog.idleAction.label': 'Idle action',
+  'settings.general.watchdog.idleAction.description':
+    'What the watchdog does when a run stays silent past the idle timeout.',
+  'settings.general.watchdog.idleAction.ask': 'Ask me',
+  'settings.general.watchdog.idleAction.stop': 'Stop the run',
 
   'settings.environment.subtitle':
     'Choose the default WSL distribution used when a workspace does not specify one.',

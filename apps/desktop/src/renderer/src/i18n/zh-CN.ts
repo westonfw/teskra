@@ -103,6 +103,11 @@ export const zhCN: Record<TranslationKey, string> = {
   'runs.status.failed': '失败',
   'runs.status.cancelled': '已取消',
   'runs.status.interrupted': '已中断',
+  // TASK-120（§5.5）：排队的运行说明它在等什么。
+  'runs.queuedReason.capacity': '排队中 — 已达并发上限',
+  'runs.queuedReason.directory_busy': '排队中 — 工作目录正被占用',
+  'runs.queuedReason.worktree_busy': '排队中 — Worktree 正被占用',
+  'runs.queuedReason.fifo': '排队中 — 等待更早排队的运行',
 
   'permissions.decision.title': '审批决策',
   'permissions.decision.description':
@@ -255,7 +260,6 @@ export const zhCN: Record<TranslationKey, string> = {
   'errorMessage.onlyInterruptedResumable': '只有已中断的 Agent 运行可以恢复。',
   'errorMessage.workspaceRequiredForRunHistory': '列出历史 Agent 运行时必须指定工作区。',
   'errorMessage.taskNotFound': '找不到任务“{id}”。',
-  'errorMessage.taskWorkspaceMismatch': '该任务属于另一个工作区。',
   'errorMessage.workflowRunNotFound': '找不到 Workflow 运行“{id}”。',
   'errorMessage.fullWorkflowOverrideInvalid': 'Workflow 定义“{id}”无效，无法驱动默认完整流程。',
   'errorMessage.fullWorkflowNoConfirmedCriteria':
@@ -570,6 +574,16 @@ export const zhCN: Record<TranslationKey, string> = {
   'settings.general.watchdog.stalledThreshold.label': '卡住阈值',
   'settings.general.watchdog.stalledThreshold.description':
     '运行被标记为可能卡住前，无输出的毫秒数。',
+  'settings.general.watchdog.preparingTimeout.label': '准备超时',
+  'settings.general.watchdog.preparingTimeout.description':
+    '运行停留在 preparing 状态超过该毫秒数后，看门狗将其作为启动失败停止。',
+  'settings.general.watchdog.idleTimeout.label': '静默超时',
+  'settings.general.watchdog.idleTimeout.description':
+    '活动运行无输出超过该毫秒数后，看门狗判定其卡住。填 0 关闭静默看门狗。',
+  'settings.general.watchdog.idleAction.label': '静默处理方式',
+  'settings.general.watchdog.idleAction.description': '运行静默超过超时时间后看门狗的处理方式。',
+  'settings.general.watchdog.idleAction.ask': '询问我',
+  'settings.general.watchdog.idleAction.stop': '停止运行',
 
   'settings.environment.subtitle': '选择当工作区未指定时使用的默认 WSL 发行版。',
   'settings.environment.wslDetectFailed': 'WSL 检测失败。',

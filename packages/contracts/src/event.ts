@@ -86,6 +86,27 @@ export interface WorkbenchEvents {
     runId: string
     reason: 'process_dead' | 'workspace_missing' | 'worktree_broken'
   }
+  /**
+   * TASK-119 (Milestone 25 §5): a RunWatchdogService check fired on this run —
+   * 'preparing_timeout' (§5.2) or 'idle' (§5.3). Emitted once per stall
+   * episode for the idle check, once per stop attempt for preparing.
+   */
+  'agent.watchdog': {
+    runId: string
+    check: 'preparing_timeout' | 'idle'
+    silentForMs: number
+  }
+  /**
+   * TASK-119 (Milestone 25 §5.2/§5.3): a run was judged stalled. `action`
+   * mirrors watchdog.idleAction for the idle check; a preparing run whose
+   * failAndStop kept conflicting escalates to 'ask'. Opening a Decision for
+   * the 'ask' action is TASK-130's job.
+   */
+  'agent.stalled': {
+    runId: string
+    silentForMs: number
+    action: 'ask' | 'stop'
+  }
 
   'task.created': {
     taskId: string
@@ -223,6 +244,8 @@ export const WORKBENCH_EVENT_NAMES = [
   'agent.failed',
   'agent.cancelled',
   'agent.interrupted',
+  'agent.watchdog',
+  'agent.stalled',
   'task.created',
   'task.updated',
   'git.changed',

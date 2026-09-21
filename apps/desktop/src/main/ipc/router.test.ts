@@ -469,7 +469,12 @@ function fakeRuntime(): TeskraRuntime {
           config: {
             logging: { level: 'info' as const },
             concurrency: { maxGlobalRuns: 4, maxRunsPerWorkspace: 3, maxRunsPerAgent: 2 },
-            watchdog: { stalledThresholdMs: 600_000 },
+            watchdog: {
+              stalledThresholdMs: 600_000,
+              preparingTimeoutMs: 300_000,
+              idleTimeoutMs: 7_200_000,
+              idleAction: 'ask' as const,
+            },
             environment: { defaultDistro: null },
             agents: {
               executableOverrides: {},
@@ -496,7 +501,12 @@ function fakeRuntime(): TeskraRuntime {
           config: {
             logging: { level: 'warn' as const },
             concurrency: { maxGlobalRuns: 4, maxRunsPerWorkspace: 3, maxRunsPerAgent: 2 },
-            watchdog: { stalledThresholdMs: 600_000 },
+            watchdog: {
+              stalledThresholdMs: 600_000,
+              preparingTimeoutMs: 300_000,
+              idleTimeoutMs: 7_200_000,
+              idleAction: 'ask' as const,
+            },
             environment: { defaultDistro: null },
             agents: {
               executableOverrides: {},

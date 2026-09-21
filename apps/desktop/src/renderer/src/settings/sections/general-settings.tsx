@@ -1,6 +1,6 @@
 import { Card, InputNumber, Select, Space, Typography } from 'antd'
 
-import { LOG_LEVELS, type LogLevel } from '@teskra/contracts'
+import { LOG_LEVELS, type LogLevel, type WatchdogConfig } from '@teskra/contracts'
 
 import { useTranslation } from '../../i18n'
 import { ConfigField } from '../config-field'
@@ -104,6 +104,53 @@ export function GeneralSettingsSection() {
             onChange={(value) => {
               if (value !== null) void save({ watchdog: { stalledThresholdMs: value } })
             }}
+          />
+        </ConfigField>
+        <ConfigField
+          path="watchdog.preparingTimeoutMs"
+          label={t('settings.general.watchdog.preparingTimeout.label')}
+          description={t('settings.general.watchdog.preparingTimeout.description')}
+        >
+          <InputNumber
+            min={1000}
+            step={30_000}
+            precision={0}
+            value={config.watchdog.preparingTimeoutMs}
+            disabled={saving}
+            onChange={(value) => {
+              if (value !== null) void save({ watchdog: { preparingTimeoutMs: value } })
+            }}
+          />
+        </ConfigField>
+        <ConfigField
+          path="watchdog.idleTimeoutMs"
+          label={t('settings.general.watchdog.idleTimeout.label')}
+          description={t('settings.general.watchdog.idleTimeout.description')}
+        >
+          <InputNumber
+            min={0}
+            step={60_000}
+            precision={0}
+            value={config.watchdog.idleTimeoutMs}
+            disabled={saving}
+            onChange={(value) => {
+              if (value !== null) void save({ watchdog: { idleTimeoutMs: value } })
+            }}
+          />
+        </ConfigField>
+        <ConfigField
+          path="watchdog.idleAction"
+          label={t('settings.general.watchdog.idleAction.label')}
+          description={t('settings.general.watchdog.idleAction.description')}
+        >
+          <Select<WatchdogConfig['idleAction']>
+            value={config.watchdog.idleAction}
+            loading={saving}
+            options={(['ask', 'stop'] as const).map((value) => ({
+              value,
+              label: t(`settings.general.watchdog.idleAction.${value}`),
+            }))}
+            onChange={(idleAction) => void save({ watchdog: { idleAction } })}
           />
         </ConfigField>
       </Card>

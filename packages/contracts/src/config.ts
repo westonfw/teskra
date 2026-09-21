@@ -44,9 +44,25 @@ export const concurrencyConfigSchema = z.strictObject({
 })
 export type ConcurrencyConfig = z.infer<typeof concurrencyConfigSchema>
 
-/** plan §148 / TASK-085: "possibly stalled" after this long without output. */
+/**
+ * plan §148 / TASK-085: `stalledThresholdMs` is the UI hint threshold
+ * ("possibly stalled"). TASK-119 (Milestone 25 §5) adds the action thresholds
+ * the RunWatchdogService enforces: `preparingTimeoutMs` for runs stuck in
+ * `preparing`, `idleTimeoutMs` for silent active runs (0 = disabled; the
+ * shared inspectRunWatchdog judgement needs a threshold of at least 1s), and
+ * `idleAction` choosing between asking the user and stopping the run.
+ */
 export const watchdogConfigSchema = z.strictObject({
   stalledThresholdMs: z.number().int().min(1000),
+  preparingTimeoutMs: z.number().int().min(1000),
+  idleTimeoutMs: z
+    .number()
+    .int()
+    .min(0)
+    .refine((value) => value === 0 || value >= 1000, {
+      message: 'idleTimeoutMs is either 0 (disabled) or at least 1000',
+    }),
+  idleAction: z.enum(['ask', 'stop']),
 })
 export type WatchdogConfig = z.infer<typeof watchdogConfigSchema>
 
@@ -129,11 +145,16 @@ export const teskraConfigLayerSchema = z.strictObject({
 })
 export type TeskraConfigLayer = z.infer<typeof teskraConfigLayerSchema>
 
-/** plan §147 defaults 4/3/2; TASK-085 stalled threshold 10 minutes. */
+/** plan §147 defaults 4/3/2; TASK-085 stalled threshold 10 minutes; TASK-119 §5.2/§5.3. */
 export const DEFAULT_CONFIG: TeskraConfig = {
   logging: { level: 'info' },
   concurrency: { maxGlobalRuns: 4, maxRunsPerWorkspace: 3, maxRunsPerAgent: 2 },
-  watchdog: { stalledThresholdMs: 10 * 60 * 1000 },
+  watchdog: {
+    stalledThresholdMs: 10 * 60 * 1000,
+    preparingTimeoutMs: 5 * 60 * 1000,
+    idleTimeoutMs: 2 * 60 * 60 * 1000,
+    idleAction: 'ask',
+  },
   environment: { defaultDistro: null },
   agents: { executableOverrides: {}, defaultAccountProfiles: {}, defaultExecutionProfiles: {} },
   review: { mediumBlockThreshold: 0 },

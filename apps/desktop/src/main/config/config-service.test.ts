@@ -137,7 +137,12 @@ describe('ConfigService.resolve — layer order', () => {
         maxRunsPerWorkspace: 3, // default untouched
         maxRunsPerAgent: 2,
       },
-      watchdog: { stalledThresholdMs: 60_000 }, // run override beats all
+      watchdog: {
+        stalledThresholdMs: 60_000, // run override beats all
+        preparingTimeoutMs: 300_000, // default untouched
+        idleTimeoutMs: 7_200_000,
+        idleAction: 'ask',
+      },
       environment: { defaultDistro: null },
       agents: { executableOverrides: {}, defaultAccountProfiles: {}, defaultExecutionProfiles: {} },
       review: { mediumBlockThreshold: 0 }, // default untouched
@@ -149,6 +154,9 @@ describe('ConfigService.resolve — layer order', () => {
       'concurrency.maxRunsPerWorkspace': 'default',
       'concurrency.maxRunsPerAgent': 'default',
       'watchdog.stalledThresholdMs': 'override',
+      'watchdog.preparingTimeoutMs': 'default',
+      'watchdog.idleTimeoutMs': 'default',
+      'watchdog.idleAction': 'default',
       'environment.defaultDistro': 'default',
       'review.mediumBlockThreshold': 'default',
       'retention.mergedWorktreeDays': 'default',
