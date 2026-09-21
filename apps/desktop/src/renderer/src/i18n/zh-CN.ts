@@ -233,6 +233,8 @@ export const zhCN: Record<TranslationKey, string> = {
     '请在 设置 → 账号 中启用该账号 Profile，或选择其他 Profile。',
   'errorSuggestion.ACCOUNT_PROFILE_INCOMPATIBLE':
     '该账号 Profile 属于另一个运行时。请选择与当前工作区运行时匹配的 Profile。',
+  'errorSuggestion.ACCOUNT_PROFILE_NOT_READY':
+    '该账号 Profile 需要重新登录。请在 设置 → 账号 中重新登录，或选择其他 Profile。',
   'errorSuggestion.EXECUTION_PROFILE_NOT_FOUND':
     '该执行 Profile 已不存在。请选择其他 Profile，或在设置中新建。',
   'errorSuggestion.EXECUTION_PROFILE_MISMATCH':
@@ -695,6 +697,8 @@ export const zhCN: Record<TranslationKey, string> = {
   'accounts.remove.defaultWarning': '该 Profile 是此 Agent 的默认账号——移除将同时清除默认账号。',
   'accounts.remove.deleteHome': '同时删除本地 CLI Profile 数据',
   'accounts.remove.deleteHomeExternal': '外部管理——Teskra 不会删除该目录。',
+  'accounts.disable.title': '停用 Profile',
+  'accounts.disable.defaultWarning': '该 Profile 是此 Agent 的默认账号——停用将同时清除默认账号。',
   'accounts.login.title': '登录：{name}',
 
   'accounts.wizard.title': '添加账号',
@@ -742,6 +746,8 @@ export const zhCN: Record<TranslationKey, string> = {
 
   'accounts.select.label': '账号',
   'accounts.select.auto': '自动（默认账号）',
+  'accounts.select.autoDefault': '自动 · {name}',
+  'accounts.select.autoHost': '宿主 CLI 账号（无 Profile）',
 
   'aliases.title': 'Aliases（别名绑定）',
   'aliases.subtitle':

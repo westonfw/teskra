@@ -1,16 +1,14 @@
-import { existsSync } from 'node:fs'
-import { join, posix } from 'node:path'
-
 import type { AgentAccountProfile, IpcResult, WorkspaceRuntimeRef } from '@teskra/contracts'
 
 import { toPublicError } from '../../../errors'
 import type { CommandRunner } from '../../../process/command-runner'
-import { createWorkspaceRuntime, type WorkspaceRuntime } from '../../../workspace/runtime'
+import type { WorkspaceRuntime } from '../../../workspace/runtime'
 import { CLAUDE_AGENT } from '../../definitions/claude'
 import type {
   AccountProfileStatusDetection,
   AgentAccountProfileAdapter,
 } from '../account-profile-adapter'
+import { defaultRuntimeFactory, probeRuntimeFileExists } from './runtime-file-probe'
 
 /**
  * Claude account profile adapter (TASK-099; Milestone 24 §11).
@@ -62,13 +60,15 @@ export interface ClaudeAccountProfileAdapterDeps {
   readonly commands?: CommandRunner
   /** Runtime resolution seam for tests; defaults to createWorkspaceRuntime. */
   readonly createRuntime?: (ref: WorkspaceRuntimeRef) => IpcResult<WorkspaceRuntime>
+  /** Host-native existence probe seam (tests inject; production = node:fs). */
+  readonly hostFileExists?: (path: string) => boolean
   /**
-   * Host-native credentials-existence seam for tests. Receives the profile's
-   * configHome VERBATIM and owns the credentials-file join itself (the host
-   * path module only matches the runtime when the runtime is host-native,
-   * which is exactly the branch this seam serves); defaults to node:fs.
+   * Executable resolution seam mirroring the Codex adapter (detection cache /
+   * user override), wired by compose. Receives the profile so the lookup can
+   * key on the profile's runtime; without it the definition's bare command is
+   * used.
    */
-  readonly fs?: { credentialsExist(configHome: string): boolean }
+  readonly resolveExecutable?: (profile: AgentAccountProfile) => string | undefined
 }
 
 function ok<T>(data: T): IpcResult<T> {
@@ -78,55 +78,7 @@ function ok<T>(data: T): IpcResult<T> {
 export function createClaudeAccountProfileAdapter(
   deps: ClaudeAccountProfileAdapterDeps = {},
 ): AgentAccountProfileAdapter {
-  const createRuntime =
-    deps.createRuntime ?? ((ref: WorkspaceRuntimeRef) => createWorkspaceRuntime(ref))
-  const fs = deps.fs ?? {
-    credentialsExist: (configHome: string) => existsSync(join(configHome, CLAUDE_CREDENTIALS_FILE)),
-  }
-
-  const detectCredentials = async (
-    profile: AgentAccountProfile,
-    configHome: string,
-  ): Promise<IpcResult<AccountProfileStatusDetection>> => {
-    const runtimeResult = createRuntime(profile.runtime)
-    if (!runtimeResult.ok) {
-      // Cannot even describe the runtime — the probe is inconclusive.
-      return ok({ status: 'unknown' })
-    }
-    const runtime = runtimeResult.data
-
-    if (runtime.hostNative) {
-      // Host-native runtime: node:fs IS the runtime's filesystem.
-      let present: boolean
-      try {
-        present = fs.credentialsExist(configHome)
-      } catch {
-        return ok({ status: 'unknown' })
-      }
-      return ok({ status: present ? 'ready' : 'login-required' })
-    }
-
-    // WSL-on-Windows: probe inside the distro with a runtime-native path.
-    if (deps.commands === undefined) {
-      return ok({ status: 'unknown' })
-    }
-    const probe = await deps.commands.run({
-      command: 'test',
-      args: ['-e', posix.join(configHome, CLAUDE_CREDENTIALS_FILE)],
-      runtime,
-      timeoutMs: DETECT_PROBE_TIMEOUT_MS,
-    })
-    if (!probe.ok) {
-      return ok({ status: 'unknown' })
-    }
-    if (probe.data.exitCode === 0) {
-      return ok({ status: 'ready' })
-    }
-    if (probe.data.exitCode === 1) {
-      return ok({ status: 'login-required' })
-    }
-    return ok({ status: 'unknown' })
-  }
+  const createRuntime = deps.createRuntime ?? defaultRuntimeFactory
 
   return {
     agentId: CLAUDE_AGENT.id,
@@ -158,10 +110,28 @@ export function createClaudeAccountProfileAdapter(
         // state is out of scope for this adapter.
         return ok({ status: 'unknown' })
       }
-      return detectCredentials(profile, profile.configHome)
+      const runtimeResult = createRuntime(profile.runtime)
+      if (!runtimeResult.ok) {
+        // Cannot even describe the runtime — the probe is inconclusive.
+        return ok({ status: 'unknown' })
+      }
+      // §10.3: existence only, never the contents — the probe itself lives in
+      // runtime-file-probe so both account adapters share one implementation.
+      const probe = await probeRuntimeFileExists({
+        runtime: runtimeResult.data,
+        directory: profile.configHome,
+        fileName: CLAUDE_CREDENTIALS_FILE,
+        testFlag: '-e',
+        timeoutMs: DETECT_PROBE_TIMEOUT_MS,
+        ...(deps.commands !== undefined ? { commands: deps.commands } : {}),
+        ...(deps.hostFileExists !== undefined ? { hostFileExists: deps.hostFileExists } : {}),
+      })
+      const status: AccountProfileStatusDetection['status'] =
+        probe === 'exists' ? 'ready' : probe === 'missing' ? 'login-required' : 'unknown'
+      return ok({ status })
     },
 
-    buildLoginCommand() {
+    buildLoginCommand(profile) {
       // Claude Code has no repo-confirmed non-interactive login subcommand:
       // the definition declares only `claude` (interactiveArgs []) and login
       // is the in-TUI flow — a FRESH CLAUDE_CONFIG_DIR makes the CLI run its
@@ -170,7 +140,10 @@ export function createClaudeAccountProfileAdapter(
       // §24's Login Terminal is interactive by design, so launching the CLI
       // bare is the version-independent invocation; argv array, never a
       // shell string. The profile env comes from buildRuntimeProjection.
-      return ok({ command: CLAUDE_AGENT.executable.command, args: [] })
+      return ok({
+        command: deps.resolveExecutable?.(profile) ?? CLAUDE_AGENT.executable.command,
+        args: [...(CLAUDE_AGENT.executable.defaultArgs ?? [])],
+      })
     },
   }
 }

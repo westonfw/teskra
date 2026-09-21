@@ -1,11 +1,8 @@
-import { existsSync } from 'node:fs'
-import { posix, win32 } from 'node:path'
-
 import type { AgentAccountProfile, IpcResult, WorkspaceRuntimeRef } from '@teskra/contracts'
 
 import { type InternalAppError, toPublicError } from '../../../errors'
 import type { CommandRunner } from '../../../process/command-runner'
-import { createWorkspaceRuntime, type WorkspaceRuntime } from '../../../workspace/runtime'
+import type { WorkspaceRuntime } from '../../../workspace/runtime'
 import { CODEX_AGENT } from '../../definitions/codex'
 import type {
   AccountProfileAdapterRegistry,
@@ -14,6 +11,7 @@ import type {
   AccountProfileStatusDetection,
   AgentAccountProfileAdapter,
 } from '../account-profile-adapter'
+import { defaultRuntimeFactory, probeRuntimeFileExists } from './runtime-file-probe'
 
 /**
  * CodexAccountProfileAdapter (TASK-098, Milestone 24 §10) — the Codex side of
@@ -59,12 +57,6 @@ function fail<T>(error: InternalAppError): IpcResult<T> {
   return { ok: false, error: toPublicError(error) }
 }
 
-function authFilePath(profile: AgentAccountProfile, configHome: string): string {
-  return profile.runtime.kind === 'windows'
-    ? win32.join(configHome, CODEX_AUTH_FILE)
-    : posix.join(configHome, CODEX_AUTH_FILE)
-}
-
 function missingConfigHome(operation: string): IpcResult<never> {
   return fail({
     code: 'VALIDATION_FAILED',
@@ -77,10 +69,7 @@ function missingConfigHome(operation: string): IpcResult<never> {
 export function createCodexAccountProfileAdapter(
   deps: CodexAccountProfileAdapterDeps = {},
 ): AgentAccountProfileAdapter {
-  const createRuntime =
-    deps.createRuntime ??
-    ((ref: WorkspaceRuntimeRef): IpcResult<WorkspaceRuntime> => createWorkspaceRuntime(ref))
-  const hostFileExists = deps.hostFileExists ?? existsSync
+  const createRuntime = deps.createRuntime ?? defaultRuntimeFactory
 
   const unknown = (): IpcResult<AccountProfileStatusDetection> => ({
     ok: true,
@@ -111,35 +100,27 @@ export function createCodexAccountProfileAdapter(
       if (profile.configHome === undefined) {
         return unknown()
       }
-      const authPath = authFilePath(profile, profile.configHome)
       const runtime = createRuntime(profile.runtime)
       if (!runtime.ok) {
         return unknown()
       }
-      if (runtime.data.hostNative) {
-        let exists: boolean
-        try {
-          exists = hostFileExists(authPath)
-        } catch {
-          return unknown()
-        }
-        return { ok: true, data: { status: exists ? 'ready' : 'login-required' } }
-      }
-      // WSL-on-Windows: the auth file lives inside the distro filesystem —
-      // probe with an argv command, never a shell string, never the contents.
-      if (deps.commands === undefined) {
-        return unknown()
-      }
-      const probed = await deps.commands.run({
-        command: 'test',
-        args: ['-f', authPath],
+      // §10.3: existence only, never the contents — the probe itself lives in
+      // runtime-file-probe so both account adapters share one implementation.
+      const probe = await probeRuntimeFileExists({
         runtime: runtime.data,
+        directory: profile.configHome,
+        fileName: CODEX_AUTH_FILE,
+        testFlag: '-f',
         timeoutMs: DETECT_TIMEOUT_MS,
+        ...(deps.commands !== undefined ? { commands: deps.commands } : {}),
+        ...(deps.hostFileExists !== undefined ? { hostFileExists: deps.hostFileExists } : {}),
       })
-      if (!probed.ok) {
+      // A probe that RAN and did not find the file means "log in"; only a
+      // probe that could not run at all is inconclusive.
+      if (probe === 'unknown') {
         return unknown()
       }
-      return { ok: true, data: { status: probed.data.exitCode === 0 ? 'ready' : 'login-required' } }
+      return { ok: true, data: { status: probe === 'exists' ? 'ready' : 'login-required' } }
     },
 
     buildLoginCommand(profile): IpcResult<AccountProfileLoginCommand> {

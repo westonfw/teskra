@@ -69,8 +69,27 @@ describe('isContinuationCandidate (TASK-108)', () => {
     expect(isContinuationCandidate(expiredLimit, WINDOWS, NOW)).toBe(true)
   })
 
-  it('does not re-admit a limited profile without a limitedUntil', () => {
-    expect(isContinuationCandidate(makeProfile({ status: 'limited' }), WINDOWS, NOW)).toBe(false)
+  it('re-admits a limited profile without limitedUntil once lastFailureAt passes the default window (§18.0, P1-3)', () => {
+    const stale = makeProfile({ status: 'limited', lastFailureAt: '2026-09-12T10:00:00.000Z' })
+    expect(isContinuationCandidate(stale, WINDOWS, NOW)).toBe(true)
+  })
+
+  it('re-admits a limited profile with neither limitedUntil nor lastFailureAt immediately', () => {
+    expect(isContinuationCandidate(makeProfile({ status: 'limited' }), WINDOWS, NOW)).toBe(true)
+  })
+
+  it('excludes a limited profile without limitedUntil while lastFailureAt is inside the default window', () => {
+    const recent = makeProfile({ status: 'limited', lastFailureAt: '2026-09-12T11:30:00.000Z' })
+    expect(isContinuationCandidate(recent, WINDOWS, NOW)).toBe(false)
+  })
+
+  it('prefers an explicit limitedUntil over the lastFailureAt fallback window', () => {
+    const explicit = makeProfile({
+      status: 'limited',
+      limitedUntil: '2026-09-12T13:00:00.000Z',
+      lastFailureAt: '2026-09-12T10:00:00.000Z',
+    })
+    expect(isContinuationCandidate(explicit, WINDOWS, NOW)).toBe(false)
   })
 })
 
@@ -79,7 +98,13 @@ describe('groupContinuationCandidates (§26)', () => {
     makeProfile({ id: 'codex-personal', name: 'Personal' }),
     makeProfile({ id: 'codex-work', name: 'Work' }),
     makeProfile({ id: 'claude-work', agentId: 'claude', name: 'Claude Work' }),
-    makeProfile({ id: 'claude-limited', agentId: 'claude', status: 'limited' }),
+    // Still inside the §18.0 default window (NOW - 30min), so not a candidate.
+    makeProfile({
+      id: 'claude-limited',
+      agentId: 'claude',
+      status: 'limited',
+      lastFailureAt: '2026-09-12T11:30:00.000Z',
+    }),
   ]
 
   it('splits same-Agent and cross-Agent candidates and drops the source account', () => {

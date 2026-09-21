@@ -304,6 +304,72 @@ describe('AccountProfileManager create (TASK-097)', () => {
     if (result.ok) return
     expect(result.error.code).toBe('VALIDATION_FAILED')
   })
+
+  it('normalizes an external windows configHome so case / trailing-slash variants cannot bypass the unique index (P2-2)', async () => {
+    const fixture = setup()
+    const first = requireOk(
+      await fixture.manager.create({
+        agentId: 'codex',
+        name: 'Windows Codex',
+        authType: 'external',
+        runtime: { kind: 'windows' },
+        configHome: 'C:\\Users\\Weston\\.codex\\',
+      }),
+    )
+    expect(first.configHome).toBe('c:\\users\\weston\\.codex')
+
+    const duplicate = await fixture.manager.create({
+      agentId: 'codex',
+      name: 'Same Home Again',
+      authType: 'external',
+      runtime: { kind: 'windows' },
+      configHome: 'c:/users/weston/.codex',
+    })
+    expect(duplicate.ok).toBe(false)
+    if (duplicate.ok) return
+    expect(duplicate.error.code).toBe('CONFLICT')
+    expect(requireOk(await fixture.manager.list()).length).toBe(1)
+  })
+
+  it('normalizes an external wsl configHome (POSIX form, trailing slash collapsed)', async () => {
+    const fixture = setup()
+    const created = requireOk(
+      await fixture.manager.create({
+        agentId: 'codex',
+        name: 'Default Codex',
+        authType: 'external',
+        runtime: UBUNTU,
+        configHome: '/home/weston/.codex/',
+      }),
+    )
+    expect(created.configHome).toBe('/home/weston/.codex')
+  })
+
+  it('rejects an external configHome shaped for the other runtime kind (P2-2)', async () => {
+    const fixture = setup()
+    const posixForWindows = await fixture.manager.create({
+      agentId: 'codex',
+      name: 'X',
+      authType: 'external',
+      runtime: { kind: 'windows' },
+      configHome: '/home/weston/.codex',
+    })
+    expect(posixForWindows.ok).toBe(false)
+    if (posixForWindows.ok) return
+    expect(posixForWindows.error.code).toBe('VALIDATION_FAILED')
+
+    const windowsForWsl = await fixture.manager.create({
+      agentId: 'codex',
+      name: 'Y',
+      authType: 'external',
+      runtime: UBUNTU,
+      configHome: String.raw`C:\Users\weston\.codex`,
+    })
+    expect(windowsForWsl.ok).toBe(false)
+    if (windowsForWsl.ok) return
+    expect(windowsForWsl.error.code).toBe('VALIDATION_FAILED')
+    expect(requireOk(await fixture.manager.list()).length).toBe(0)
+  })
 })
 
 describe('AccountProfileManager update (TASK-097)', () => {
@@ -356,9 +422,30 @@ describe('AccountProfileManager update (TASK-097)', () => {
     if (result.ok) return
     expect(result.error.code).toBe('VALIDATION_FAILED')
   })
+
+  it('returns ACCOUNT_PROFILE_NOT_FOUND for a missing profile (P2-10)', async () => {
+    const fixture = setup()
+    const result = await fixture.manager.update('missing', { name: 'x' })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('ACCOUNT_PROFILE_NOT_FOUND')
+  })
 })
 
 describe('AccountProfileManager remove / enable (TASK-097, §47)', () => {
+  it('remove / enable return ACCOUNT_PROFILE_NOT_FOUND for a missing profile (P2-10)', async () => {
+    const fixture = setup()
+    const removed = await fixture.manager.remove('missing')
+    expect(removed.ok).toBe(false)
+    if (removed.ok) return
+    expect(removed.error.code).toBe('ACCOUNT_PROFILE_NOT_FOUND')
+
+    const enabled = await fixture.manager.enable('missing')
+    expect(enabled.ok).toBe(false)
+    if (enabled.ok) return
+    expect(enabled.error.code).toBe('ACCOUNT_PROFILE_NOT_FOUND')
+  })
+
   it('remove is a soft disable — the row stays, no DELETE (§47.1)', async () => {
     const fixture = setup()
     const created = requireOk(await createManaged(fixture))
@@ -456,7 +543,10 @@ describe('AccountProfileManager remove / enable (TASK-097, §47)', () => {
   it('deleteHome on an external profile leaves a real on-disk home and the profile untouched (TASK-114, §58)', async () => {
     const fixture = setup()
     // An external home that really exists on disk, with credential material in it.
+    // P2-2: the configHome shape must match its runtime, so the host-native
+    // temp path pairs with a windows runtime on win32 hosts.
     const externalHome = join(fixture.dataRoot, 'external-codex')
+    const runtime: WorkspaceRuntimeRef = process.platform === 'win32' ? { kind: 'windows' } : UBUNTU
     mkdirSync(externalHome, { recursive: true })
     writeFileSync(join(externalHome, 'auth.json'), '{"token":"secret"}')
     const created = requireOk(
@@ -464,7 +554,7 @@ describe('AccountProfileManager remove / enable (TASK-097, §47)', () => {
         agentId: 'codex',
         name: 'Default Codex',
         authType: 'external',
-        runtime: UBUNTU,
+        runtime,
         configHome: externalHome,
       }),
     )
@@ -561,9 +651,62 @@ describe('AccountProfileManager ownership guard (TASK-097, §48.2)', () => {
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.error.code).toBe('VALIDATION_FAILED')
-    // The symlink target survives untouched and the profile stays enabled.
+    // The symlink target survives untouched. P2-3: deleting the home is the
+    // last, irreversible step — the refusal happens AFTER the disable, so the
+    // profile is left disabled (recoverable) rather than enabled + home-less.
     expect(readFileSync(join(outside, 'keep.txt'), 'utf8')).toBe('do not delete')
-    expect((await requireProfile(fixture, created.id)).enabled).toBe(true)
+    expect((await requireProfile(fixture, created.id)).enabled).toBe(false)
+  })
+
+  it('refuses deleteHome when the stored configHome is the trusted root itself (P2-1)', async () => {
+    const fixture = setup()
+    const root = fixture.paths.agentProfilesRoot()
+    mkdirSync(root, { recursive: true })
+    writeFileSync(join(root, 'credentials.json'), '{}')
+    // Simulate a corrupted row pointing at the root (DB edit / future bug).
+    const seeded = requireOk(
+      fixture.profiles.create({
+        id: 'acct-root',
+        agentId: 'codex',
+        name: 'Corrupted',
+        authType: 'subscription',
+        runtime: UBUNTU,
+        configHome: root,
+      }),
+    )
+
+    const result = await fixture.manager.remove(seeded.id, { deleteHome: true })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('VALIDATION_FAILED')
+    // The whole root (every account's credentials) survives.
+    expect(readFileSync(join(root, 'credentials.json'), 'utf8')).toBe('{}')
+  })
+
+  it('refuses deleteHome when the stored configHome lacks the <root>/<agentId>/<slug> depth (P2-1)', async () => {
+    const fixture = setup()
+    const root = fixture.paths.agentProfilesRoot()
+    const shallow = join(root, 'codex')
+    mkdirSync(shallow, { recursive: true })
+    writeFileSync(join(shallow, 'auth.json'), '{}')
+    const seeded = requireOk(
+      fixture.profiles.create({
+        id: 'acct-shallow',
+        agentId: 'codex',
+        name: 'Corrupted',
+        authType: 'subscription',
+        runtime: UBUNTU,
+        configHome: shallow,
+      }),
+    )
+
+    const result = await fixture.manager.remove(seeded.id, { deleteHome: true })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('VALIDATION_FAILED')
+    expect(readFileSync(join(shallow, 'auth.json'), 'utf8')).toBe('{}')
   })
 })
 
@@ -602,6 +745,10 @@ describe('AccountProfileManager defaults (TASK-097, §15)', () => {
     const claudeWork = requireOk(
       await createManaged(fixture, { agentId: 'claude', name: 'Claude Work', slug: 'claude-work' }),
     )
+    // P2-9: a login-required profile is not launch-ready, so resolution
+    // candidates below are made ready first.
+    requireOk(await fixture.manager.update(codexWork.id, { status: 'ready' }))
+    requireOk(await fixture.manager.update(claudeWork.id, { status: 'ready' }))
 
     requireOk(await fixture.manager.setDefault('codex', codexWork.id))
     // Setting one agent's default must not leak onto the other.
@@ -634,6 +781,7 @@ describe('AccountProfileManager resolve (TASK-097, §37 selector)', () => {
   it('returns the runtime-compatible default profile', async () => {
     const fixture = setup()
     const created = requireOk(await createManaged(fixture))
+    requireOk(await fixture.manager.update(created.id, { status: 'ready' }))
     requireOk(await fixture.manager.setDefault('codex', created.id))
 
     const resolved = requireOk(await fixture.manager.resolve('codex', UBUNTU))
@@ -643,6 +791,7 @@ describe('AccountProfileManager resolve (TASK-097, §37 selector)', () => {
   it('filters out a default from another distro or kind (§37 step 0)', async () => {
     const fixture = setup()
     const created = requireOk(await createManaged(fixture))
+    requireOk(await fixture.manager.update(created.id, { status: 'ready' }))
     requireOk(await fixture.manager.setDefault('codex', created.id))
 
     expect(
@@ -657,6 +806,8 @@ describe('AccountProfileManager resolve (TASK-097, §37 selector)', () => {
     const fixture = setup()
     const work = requireOk(await createManaged(fixture))
     const personal = requireOk(await createManaged(fixture, { name: 'Personal', slug: 'personal' }))
+    requireOk(await fixture.manager.update(work.id, { status: 'ready' }))
+    requireOk(await fixture.manager.update(personal.id, { status: 'ready' }))
     requireOk(await fixture.manager.setDefault('codex', work.id))
 
     const resolved = requireOk(await fixture.manager.resolve('codex', UBUNTU, personal.id))
@@ -789,7 +940,10 @@ function fakeWslRuntime(): WorkspaceRuntime {
   }
 }
 
-function setupWslOnWindows(fs: FakeDistroFs): Fixture {
+function setupWslOnWindows(
+  fs: FakeDistroFs,
+  runtimeOverrides: Partial<WorkspaceRuntime> = {},
+): Fixture {
   const fixture = setup()
   const registry = createDefaultAgentRegistry(false)
   if (!registry.ok) throw new Error('expected Agent Registry')
@@ -801,7 +955,7 @@ function setupWslOnWindows(fs: FakeDistroFs): Fixture {
     paths: fixture.paths,
     config,
     events: fixture.events,
-    createRuntime: () => ({ ok: true, data: fakeWslRuntime() }),
+    createRuntime: () => ({ ok: true, data: { ...fakeWslRuntime(), ...runtimeOverrides } }),
     commands: { run: (request) => fs.run(request) },
   })
   return { ...fixture, manager }
@@ -882,5 +1036,61 @@ describe('AccountProfileManager on WSL-on-Windows (TASK-097, §48.2 (b))', () =>
     expect(fs.dirs.has(created.configHome as string)).toBe(false)
     const rm = fs.calls.find((call) => call.command === 'rm')
     expect(rm?.args).toEqual(['-rf', '--', created.configHome])
+  })
+
+  it('fails fast with WSL_DISTRO_NOT_FOUND when the distro home is unknown — no fs side effects, nothing cached (P1-5)', async () => {
+    const fs = new FakeDistroFs()
+    // Unknown distro home: resolveAgentProfilesRoot() degrades to the literal
+    // `~/...` fallback, which no shell would expand (§5.3).
+    const fixture = setupWslOnWindows(fs, {
+      resolveAgentProfilesRoot: () => '~/.teskra/agent-profiles',
+      resolveAgentProfileHome: (agentId, slug) => ({
+        ok: true,
+        data: `~/.teskra/agent-profiles/${agentId}/${slug}`,
+      }),
+    })
+
+    const result = await createManaged(fixture)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('WSL_DISTRO_NOT_FOUND')
+    expect(result.error.message).toContain('home directory is unknown')
+    // No directory was probed or created inside the distro, and no row was
+    // inserted — the failure happened before ANY fs side effect.
+    expect(fs.calls).toEqual([])
+    expect(fs.dirs.has('~')).toBe(false)
+    expect(requireOk(await fixture.manager.list()).length).toBe(0)
+
+    // The bad root was never cached: a retry fails the same structured way
+    // instead of reusing a poisoned trustedRoot.
+    const retried = await createManaged(fixture, { name: 'Retry', slug: 'retry' })
+    expect(retried.ok).toBe(false)
+    if (retried.ok) return
+    expect(retried.error.code).toBe('WSL_DISTRO_NOT_FOUND')
+    expect(fs.calls).toEqual([])
+  })
+
+  it('refuses deleteHome when the stored configHome is the distro root itself (P2-1)', async () => {
+    const fs = new FakeDistroFs()
+    const fixture = setupWslOnWindows(fs)
+    const seeded = requireOk(
+      fixture.profiles.create({
+        id: 'acct-root',
+        agentId: 'codex',
+        name: 'Corrupted',
+        authType: 'subscription',
+        runtime: UBUNTU,
+        configHome: '/home/u/.teskra/agent-profiles',
+      }),
+    )
+
+    const result = await fixture.manager.remove(seeded.id, { deleteHome: true })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('VALIDATION_FAILED')
+    // The root may have been created by the trust check, but it was never deleted.
+    expect(fs.dirs.has('/home/u/.teskra/agent-profiles')).toBe(true)
+    expect(fs.calls.some((call) => call.command === 'rm')).toBe(false)
   })
 })

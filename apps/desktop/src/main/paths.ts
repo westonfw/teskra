@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, relative, sep } from 'node:path'
 
 import type { IpcResult } from '@teskra/contracts'
 
@@ -116,7 +116,8 @@ export interface TeskraPaths {
   resolveAgentProfileHome(agentId: string, slug: string): IpcResult<string>
   /**
    * Creates a previously resolved profile home (§9.2: only AFTER the INSERT
-   * succeeded). The absolute path must come from resolveAgentProfileHome.
+   * succeeded). The absolute path must come from resolveAgentProfileHome;
+   * anything outside agentProfilesRoot() is rejected (defense in depth).
    */
   createAgentProfileHome(absolutePath: string): IpcResult<void>
 }
@@ -232,6 +233,27 @@ export function createTeskraPaths(env: NodeJS.ProcessEnv = process.env): TeskraP
       return { ok: true, data: join(home(), AGENT_PROFILES_DIR, agentId, slug) }
     },
     createAgentProfileHome(absolutePath) {
+      // §9.2 defense in depth: only ever create homes UNDER the
+      // agent-profiles root — never the root itself, never anywhere else,
+      // even if a caller hands over an arbitrary absolute path.
+      const root = join(home(), AGENT_PROFILES_DIR)
+      const contained = isAbsolute(absolutePath) ? relative(root, absolutePath) : '..'
+      if (
+        contained === '' ||
+        contained === '..' ||
+        contained.startsWith(`..${sep}`) ||
+        isAbsolute(contained)
+      ) {
+        return {
+          ok: false,
+          error: toPublicError({
+            code: 'VALIDATION_FAILED',
+            message: 'The profile home must be inside the Teskra agent-profiles directory.',
+            retryable: false,
+            detail: `createAgentProfileHome rejected ${absolutePath} (root ${root})`,
+          }),
+        }
+      }
       const created = ensureDir(absolutePath)
       return created.ok ? { ok: true, data: undefined } : created
     },

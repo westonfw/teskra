@@ -328,6 +328,23 @@ describe('CodexAccountProfileAdapter.detectStatus (§10.4)', () => {
     expect(detection).toEqual({ status: 'login-required' })
   })
 
+  it('treats any ran-but-non-zero probe exit as login-required, not unknown', async () => {
+    // The probe RAN and the file was not confirmed — only a probe that could
+    // not run at all is inconclusive (unknown).
+    const commands = new FakeCommands(() => ({
+      ok: true,
+      data: { stdout: '', stderr: '', exitCode: 2 },
+    }))
+    const adapter = createCodexAccountProfileAdapter({
+      commands,
+      createRuntime: () => ({ ok: true, data: stubRuntime(UBUNTU_REF, false) }),
+    })
+
+    const detection = requireOk(await adapter.detectStatus(makeProfile()))
+
+    expect(detection).toEqual({ status: 'login-required' })
+  })
+
   it('reports unknown when the WSL probe fails or no command runner exists', async () => {
     const failing = new FakeCommands(() => ({
       ok: false,

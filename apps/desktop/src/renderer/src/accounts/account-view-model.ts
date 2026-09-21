@@ -90,12 +90,21 @@ export function isValidAccountSlug(value: string): boolean {
 
 /**
  * §5.3 — UX-level mirror of the contracts configHome rule for the external
- * profile form; Main re-validates authoritatively on create.
+ * profile form; Main re-validates authoritatively on create. When the target
+ * runtime kind is known, the path shape must match it (P2-2): a Windows
+ * profile never accepts a POSIX path and vice versa.
  */
-export function isValidConfigHomePath(value: string): boolean {
+export function isValidConfigHomePath(
+  value: string,
+  runtimeKind?: WorkspaceRuntimeRef['kind'],
+): boolean {
   if (value.length === 0) return false
   if (value.startsWith('~') || value.includes('$') || value.includes('%')) return false
-  return value.startsWith('/') || value.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(value)
+  const posixAbsolute = value.startsWith('/')
+  const windowsAbsolute = value.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(value)
+  if (runtimeKind === 'windows') return windowsAbsolute
+  if (runtimeKind === 'wsl') return posixAbsolute
+  return posixAbsolute || windowsAbsolute
 }
 
 /** Derives a slug suggestion from a display name; always lowercase per §48.1. */

@@ -46,7 +46,7 @@ export function ExternalAccountModal({ open, onClose }: ExternalAccountModalProp
     })
   }, [open, runtimeKind])
 
-  const configHomeValid = isValidConfigHomePath(configHome.trim())
+  const configHomeValid = isValidConfigHomePath(configHome.trim(), runtimeKind)
   const runtimeValid = runtimeKind === 'windows' || (distro ?? '').length > 0
   const valid = agentId !== undefined && name.trim().length > 0 && configHomeValid && runtimeValid
 

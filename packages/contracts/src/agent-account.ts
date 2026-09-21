@@ -30,6 +30,18 @@ export const ACCOUNT_PROFILE_STATUSES = [
 export const accountProfileStatusSchema = z.enum(ACCOUNT_PROFILE_STATUSES)
 export type AccountProfileStatus = z.infer<typeof accountProfileStatusSchema>
 
+/**
+ * §18.0 — conservative default window for a `limited` profile whose provider
+ * gave no parseable reset time. The §18 projection writes
+ * `limitedUntil = lastFailureAt + ACCOUNT_LIMITED_DEFAULT_DURATION_MS` instead
+ * of leaving the column empty, and a legacy `limited` row without
+ * `limitedUntil` reads as expired once its `lastFailureAt` is older than this
+ * window — so such a profile can never be excluded from the §37 / §26
+ * candidate lists forever. Shared by Main (status service) and Renderer
+ * (continuation candidates) so both judge identically.
+ */
+export const ACCOUNT_LIMITED_DEFAULT_DURATION_MS = 60 * 60 * 1000
+
 export const ACCOUNT_AUTH_TYPES = ['subscription', 'api-key', 'external'] as const
 export const accountAuthTypeSchema = z.enum(ACCOUNT_AUTH_TYPES)
 export type AccountAuthType = z.infer<typeof accountAuthTypeSchema>

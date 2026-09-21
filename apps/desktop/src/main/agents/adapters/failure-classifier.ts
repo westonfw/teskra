@@ -91,8 +91,12 @@ const BASE_FAILURE_PATTERNS: readonly FailurePattern[] = [
 /**
  * `resets at 2026-10-01T00:00:00Z` / `try again at ...` — the only reset
  * formats parsed. Fuzzy natural language ("in 3 hours", "at 11pm") is NOT
- * guessed: a wrong limitedUntil is worse than none (§18.0 recovery degrades
- * to unknown, so a missing resetAt never strands the profile).
+ * guessed: a wrong resetAt is worse than none. A missing resetAt never
+ * strands the profile either — the §18.0 projection
+ * (account-profile-status-service) writes a conservative default limitedUntil
+ * (failure time + ACCOUNT_LIMITED_DEFAULT_DURATION_MS) whenever the
+ * classification carries no resetAt, and reads a legacy `limited` row without
+ * `limitedUntil` as expired once that window has passed.
  */
 const RESET_AT_PATTERN =
   /(?:resets?\s+(?:at|on)|try again at)\s+(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)/i

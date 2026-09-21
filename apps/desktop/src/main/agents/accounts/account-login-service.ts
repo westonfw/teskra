@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { mkdirSync } from 'node:fs'
+import { posix, win32 } from 'node:path'
 
 import type {
   AccountLoginSession,
@@ -12,6 +14,7 @@ import type { AccountEventRepository, AccountProfileRepository } from '../../db/
 import type { EventBus } from '../../events/event-bus'
 import { type InternalAppError, toPublicError } from '../../errors'
 import { getLogger } from '../../logger'
+import type { CommandRunner } from '../../process/command-runner'
 import type { ProcessManager } from '../../process/process-manager'
 import { createWorkspaceRuntime, type WorkspaceRuntime } from '../../workspace/runtime'
 import type { AccountProfileAdapterRegistry } from './account-profile-adapter'
@@ -48,6 +51,17 @@ import type { AccountProfileAdapterRegistry } from './account-profile-adapter'
 /** §24.2: OAuth device flows take minutes — 10 minutes, then Main cleans up. */
 export const ACCOUNT_LOGIN_SESSION_TIMEOUT_MS = 10 * 60 * 1000
 
+/**
+ * Per-profile login working directory under the runtime's data root
+ * (P2-13): the login PTY must NOT run with cwd = configHome, because the
+ * CLI treats its cwd as a PROJECT directory — Claude Code would write a
+ * project-level `.claude/` into the account Home it is logging into.
+ */
+export const ACCOUNT_LOGIN_WORKDIR_NAME = 'account-logins'
+
+/** One-shot mkdir probe budget for the WSL login workdir; mirrors the manager. */
+const LOGIN_WORKDIR_TIMEOUT_MS = 10_000
+
 type LoginProcesses = Pick<ProcessManager, 'start' | 'write' | 'resize' | 'stop'>
 
 export interface AccountLoginService {
@@ -75,6 +89,13 @@ export interface AccountLoginServiceDeps {
    */
   readonly accountEvents?: Pick<AccountEventRepository, 'append'> | undefined
   readonly createRuntime?: ((ref: WorkspaceRuntimeRef) => IpcResult<WorkspaceRuntime>) | undefined
+  /**
+   * WSL-on-Windows only: creates the per-profile login working directory
+   * inside the distro filesystem (argv-array `mkdir -p --`, the same
+   * mechanism the AccountProfileManager uses). Without a runner a WSL login
+   * session is refused with CAPABILITY_NOT_AVAILABLE.
+   */
+  readonly commands?: CommandRunner | undefined
   readonly createId?: (() => string) | undefined
   readonly now?: (() => string) | undefined
   /** Test seam; production uses ACCOUNT_LOGIN_SESSION_TIMEOUT_MS. */
@@ -279,9 +300,89 @@ export function createAccountLoginService(deps: AccountLoginServiceDeps): Accoun
     return { ok: true, data: undefined }
   }
 
-  // Synchronous body (ProcessManager.start is sync); the interface returns a
-  // Promise so the IPC facade shape stays uniform.
-  const startSession = ({ profileId }: { profileId: string }): IpcResult<AccountLoginSession> => {
+  /**
+   * P2-13: the login PTY's working directory is a dedicated per-profile
+   * directory under the runtime's data root (resolved through the
+   * WorkspaceRuntime / paths abstraction, never hand-built), created before
+   * spawn. Running the login with cwd = configHome made the CLI treat the
+   * account Home as a project directory — Claude Code writes a project-level
+   * `.claude/` into its cwd.
+   */
+  const ensureLoginWorkdir = async (
+    profile: AgentAccountProfile,
+    runtime: WorkspaceRuntime,
+  ): Promise<IpcResult<string>> => {
+    const root = runtime.resolveDataRoot()
+    // Mirror the AccountProfileManager's guard: when WSL detection could not
+    // probe the distro home, the data root degrades to a literal `~/...`
+    // that no shell expands — creating directories there would litter a
+    // literal `~` directory into the wsl.exe cwd. Fail fast instead.
+    if (!win32.isAbsolute(root) && !posix.isAbsolute(root)) {
+      return fail({
+        code: 'WSL_DISTRO_NOT_FOUND',
+        message:
+          "The WSL distribution's home directory is unknown. Re-run WSL detection, then try again.",
+        retryable: true,
+        detail: `resolveDataRoot() returned the non-absolute fallback ${JSON.stringify(root)}; cannot resolve the login working directory for profile ${profile.id}`,
+      })
+    }
+    const workdir =
+      runtime.ref.kind === 'windows'
+        ? win32.join(root, ACCOUNT_LOGIN_WORKDIR_NAME, profile.id)
+        : posix.join(root, ACCOUNT_LOGIN_WORKDIR_NAME, profile.id)
+
+    if (runtime.hostNative) {
+      try {
+        mkdirSync(workdir, { recursive: true })
+        return { ok: true, data: workdir }
+      } catch (cause) {
+        return fail({
+          code: 'UNKNOWN',
+          message: 'Failed to create the login working directory.',
+          retryable: true,
+          detail: `mkdir ${workdir}`,
+          cause,
+        })
+      }
+    }
+
+    // WSL-on-Windows: the workdir lives inside the distro filesystem —
+    // argv-array mkdir, never a shell string.
+    if (deps.commands === undefined) {
+      return fail({
+        code: 'CAPABILITY_NOT_AVAILABLE',
+        message: 'WSL login sessions cannot be prepared without a command runner.',
+        retryable: false,
+        detail: 'AccountLoginService has no CommandRunner for WSL-on-Windows fs operations',
+      })
+    }
+    const created = await deps.commands.run({
+      command: 'mkdir',
+      args: ['-p', '--', workdir],
+      runtime,
+      timeoutMs: LOGIN_WORKDIR_TIMEOUT_MS,
+    })
+    if (!created.ok) {
+      return created
+    }
+    if (created.data.exitCode !== 0) {
+      return fail({
+        code: 'UNKNOWN',
+        message: 'Failed to create the login working directory.',
+        retryable: true,
+        detail: `mkdir -p -- ${workdir} exited ${String(created.data.exitCode)}: ${created.data.stderr.trim()}`,
+      })
+    }
+    return { ok: true, data: workdir }
+  }
+
+  // ProcessManager.start itself is sync, but preparing the login working
+  // directory may await a WSL mkdir, so the whole body is async.
+  const startSession = async ({
+    profileId,
+  }: {
+    profileId: string
+  }): Promise<IpcResult<AccountLoginSession>> => {
     const existing = sessionByProfile.get(profileId)
     if (existing !== undefined) {
       const entry = sessions.get(existing)
@@ -298,6 +399,16 @@ export function createAccountLoginService(deps: AccountLoginServiceDeps): Accoun
       return profileNotFound(profileId)
     }
     const profile = found.data
+    // A disabled profile must not acquire new credentials: enabling it again
+    // is the explicit user gesture that re-activates the account.
+    if (!profile.enabled) {
+      return fail({
+        code: 'ACCOUNT_PROFILE_DISABLED',
+        message: 'This account profile is disabled. Enable it before signing in.',
+        retryable: false,
+        detail: `login rejected for disabled profile ${profileId}`,
+      })
+    }
     // §49: an external home is managed outside Teskra — the login terminal
     // would run the CLI's login flow against it and rewrite its auth files,
     // so Teskra refuses to start a login session for it at all.
@@ -335,6 +446,19 @@ export function createAccountLoginService(deps: AccountLoginServiceDeps): Accoun
     if (!projection.ok) {
       return projection
     }
+    const workdir = await ensureLoginWorkdir(profile, runtime.data)
+    if (!workdir.ok) {
+      return workdir
+    }
+    // The async workdir preparation opened a window for a concurrent start
+    // for the same profile — re-check the mutex before registering.
+    const raced = sessionByProfile.get(profileId)
+    if (raced !== undefined) {
+      const entry = sessions.get(raced)
+      if (entry !== undefined) {
+        return { ok: true, data: entry.session }
+      }
+    }
 
     const session: AccountLoginSession = {
       sessionId: createId(),
@@ -355,10 +479,12 @@ export function createAccountLoginService(deps: AccountLoginServiceDeps): Accoun
       args: command.data.args,
       // codex/claude login is a global CLI operation against the profile's
       // CLI Home (CODEX_HOME / CLAUDE_CONFIG_DIR via env), not a workspace
-      // operation — no worktree, no workspaceId. The profile's configHome is
-      // the minimal guaranteed-to-exist cwd; an external profile without one
-      // simply inherits the runtime default cwd.
-      ...(profile.configHome === undefined ? {} : { cwd: profile.configHome }),
+      // operation — no worktree, no workspaceId. The cwd is a dedicated
+      // per-profile login directory under the data root (P2-13): running
+      // with cwd = configHome made the CLI treat the account Home as a
+      // project directory (Claude Code writes a project-level `.claude/`
+      // into its cwd).
+      cwd: workdir.data,
       env: projection.data.env,
       runtime: runtime.data,
     })
@@ -389,7 +515,7 @@ export function createAccountLoginService(deps: AccountLoginServiceDeps): Accoun
 
   const service: AccountLoginService = {
     start(request) {
-      return Promise.resolve(startSession(request))
+      return startSession(request)
     },
 
     write(sessionId, data) {

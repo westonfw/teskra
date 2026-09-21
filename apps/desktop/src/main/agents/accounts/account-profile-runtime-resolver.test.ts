@@ -100,6 +100,26 @@ describe('AccountProfileRuntimeResolver (§37)', () => {
     expect(resolved.error.code).toBe('ACCOUNT_PROFILE_NOT_FOUND')
   })
 
+  it.each(['login-required', 'expired'] as const)(
+    'errors when the explicit profile is %s (§47.2 (3))',
+    async (status) => {
+      const resolver = resolverWith([profile({ status })], undefined)
+      const resolved = await resolver.resolve('codex', UBUNTU, 'acct-1')
+      expect(resolved.ok).toBe(false)
+      if (resolved.ok) return
+      expect(resolved.error.code).toBe('ACCOUNT_PROFILE_NOT_READY')
+    },
+  )
+
+  it('does not gate an explicit limited profile — limited flows through §18/§26', async () => {
+    const resolver = resolverWith(
+      [profile({ status: 'limited', limitedUntil: '2999-01-01T00:00:00.000Z' })],
+      undefined,
+    )
+    const resolved = await resolver.resolve('codex', UBUNTU, 'acct-1')
+    expect(resolved.ok && resolved.data?.id).toBe('acct-1')
+  })
+
   it('falls back to legacy when the default is for another runtime', async () => {
     const resolver = resolverWith([profile()], 'acct-1')
     const resolved = await resolver.resolve('codex', { kind: 'windows' })
@@ -113,6 +133,24 @@ describe('AccountProfileRuntimeResolver (§37)', () => {
     if (resolved.ok) return
     expect(resolved.error.code).toBe('ACCOUNT_PROFILE_DISABLED')
     expect(resolved.error.message).toContain('default')
+  })
+
+  it.each(['login-required', 'expired'] as const)(
+    'errors on a %s default — no legacy fallback (§47.2 (3))',
+    async (status) => {
+      const resolver = resolverWith([profile({ status })], 'acct-1')
+      const resolved = await resolver.resolve('codex', UBUNTU)
+      expect(resolved.ok).toBe(false)
+      if (resolved.ok) return
+      expect(resolved.error.code).toBe('ACCOUNT_PROFILE_NOT_READY')
+      expect(resolved.error.message).toContain('default')
+    },
+  )
+
+  it('still falls back to legacy when a login-required default is for another runtime', async () => {
+    const resolver = resolverWith([profile({ status: 'login-required' })], 'acct-1')
+    const resolved = await resolver.resolve('codex', { kind: 'windows' })
+    expect(resolved).toEqual({ ok: true, data: undefined })
   })
 
   it('errors when the default points at a deleted profile', async () => {

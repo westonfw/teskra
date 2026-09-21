@@ -79,7 +79,6 @@ export interface CreateAccountProfileInput {
 export interface UpdateAccountProfileInput {
   readonly name?: string
   readonly description?: string | null
-  readonly configHome?: string | null
   readonly maxConcurrentRuns?: number | null
   readonly limitedUntil?: string | null
   readonly lastUsedAt?: string | null
@@ -274,7 +273,9 @@ export function createAccountProfileRepository(
       const columnByField = {
         name: 'name',
         description: 'description',
-        configHome: 'config_home',
+        // §48.1: config_home is deliberately absent — it is generated for
+        // managed profiles and immutable for every profile, so the UPDATE
+        // path structurally cannot rewrite it (DB-level guard, P2-4).
         maxConcurrentRuns: 'max_concurrent_runs',
         limitedUntil: 'limited_until',
         lastUsedAt: 'last_used_at',

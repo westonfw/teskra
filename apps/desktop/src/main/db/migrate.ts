@@ -38,6 +38,13 @@ export interface Migration {
    * the migration back like any other failure.
    */
   readonly foreignKeysOff?: boolean
+  /**
+   * Optional data-migration hook for rewrites SQL cannot express (e.g.
+   * path normalization with per-row collision logging). Runs INSIDE the
+   * migration transaction after the SQL step; throwing rolls the migration
+   * back like any SQL failure.
+   */
+  readonly run?: (connection: Database.Database) => void
 }
 
 export interface MigrationRunResult {
@@ -167,6 +174,7 @@ export function runMigrations(
       try {
         connection.transaction(() => {
           connection.exec(migration.sql)
+          migration.run?.(connection)
           if (migration.foreignKeysOff === true) {
             const violations = connection.pragma('foreign_key_check') as unknown[]
             if (violations.length > 0) {

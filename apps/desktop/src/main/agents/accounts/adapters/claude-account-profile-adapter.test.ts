@@ -201,7 +201,18 @@ describe('ClaudeAccountProfileAdapter (TASK-099, §11)', () => {
     // onboarding/login flow; there is no repo-confirmed non-interactive
     // login subcommand (see the adapter's buildLoginCommand comment).
     expect(login.command).toBe(CLAUDE_AGENT.executable.command)
-    expect(login.args).toEqual([])
+    expect(login.args).toEqual([...(CLAUDE_AGENT.executable.defaultArgs ?? [])])
+  })
+
+  it('uses the resolved executable (detection / override) for the login command', () => {
+    // P2-13: parity with the Codex adapter — an executable override must
+    // reach the Login Terminal instead of the bare definition command.
+    const adapter = createClaudeAccountProfileAdapter({
+      resolveExecutable: () => 'C:\\Tools\\claude.cmd',
+    })
+    const login = requireOk(adapter.buildLoginCommand(profile()))
+    expect(login.command).toBe('C:\\Tools\\claude.cmd')
+    expect(login.args).toEqual([...(CLAUDE_AGENT.executable.defaultArgs ?? [])])
   })
 })
 
@@ -209,36 +220,32 @@ describe('ClaudeAccountProfileAdapter.detectStatus (§16/§18)', () => {
   it('reports ready when the credentials file exists in the profile home', async () => {
     const adapter = createClaudeAccountProfileAdapter({
       createRuntime: createHostNativeRuntime,
-      fs: { credentialsExist: () => true },
+      hostFileExists: () => true,
     })
     const result = requireOk(await adapter.detectStatus(profile()))
     expect(result.status).toBe('ready')
   })
 
-  it('probes the profile configHome verbatim and nothing else', async () => {
+  it('probes only the credentials file inside the profile configHome', async () => {
     const probed: string[] = []
     const adapter = createClaudeAccountProfileAdapter({
       createRuntime: createHostNativeRuntime,
-      fs: {
-        credentialsExist: (configHome) => {
-          probed.push(configHome)
-          return false
-        },
+      hostFileExists: (path) => {
+        probed.push(path)
+        return false
       },
     })
     const result = requireOk(await adapter.detectStatus(profile()))
     expect(result.status).toBe('login-required')
-    expect(probed).toEqual(['/home/u/.teskra/agent-profiles/claude/personal'])
+    expect(probed).toEqual(['/home/u/.teskra/agent-profiles/claude/personal/.credentials.json'])
   })
 
   it('reports unknown when the probe is inconclusive', async () => {
     // Probe throws (EACCES and friends) → unknown, never a guessed status.
     const throwing = createClaudeAccountProfileAdapter({
       createRuntime: createHostNativeRuntime,
-      fs: {
-        credentialsExist: () => {
-          throw new Error('EACCES')
-        },
+      hostFileExists: () => {
+        throw new Error('EACCES')
       },
     })
     expect(requireOk(await throwing.detectStatus(profile())).status).toBe('unknown')
@@ -246,7 +253,7 @@ describe('ClaudeAccountProfileAdapter.detectStatus (§16/§18)', () => {
     // External profile without a configHome → nothing profile-scoped to probe.
     const adapter = createClaudeAccountProfileAdapter({
       createRuntime: createHostNativeRuntime,
-      fs: { credentialsExist: () => true },
+      hostFileExists: () => true,
     })
     const external = requireOk(
       await adapter.detectStatus(profile({ authType: 'external', configHome: undefined })),

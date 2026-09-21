@@ -201,6 +201,15 @@ describe('isValidConfigHomePath (§5.3)', () => {
     expect(isValidConfigHomePath('.codex')).toBe(false)
     expect(isValidConfigHomePath('')).toBe(false)
   })
+
+  it('enforces the runtime path shape when the kind is known (P2-2)', () => {
+    expect(isValidConfigHomePath(String.raw`C:\Users\weston\.codex`, 'windows')).toBe(true)
+    expect(isValidConfigHomePath(String.raw`\\server\share\.codex`, 'windows')).toBe(true)
+    expect(isValidConfigHomePath('/home/weston/.codex', 'windows')).toBe(false)
+    expect(isValidConfigHomePath('/home/weston/.codex', 'wsl')).toBe(true)
+    expect(isValidConfigHomePath(String.raw`C:\Users\weston\.codex`, 'wsl')).toBe(false)
+    expect(isValidConfigHomePath(String.raw`\\server\share\.codex`, 'wsl')).toBe(false)
+  })
 })
 
 describe('accountLoginAvailable (TASK-113, §49)', () => {

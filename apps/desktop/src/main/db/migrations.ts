@@ -18,6 +18,7 @@ import agentAccountProfilesSql from './migrations/012_agent_account_profiles.sql
 import agentRunAccountProfileSql from './migrations/013_agent_run_account_profile.sql?raw'
 import agentExecutionProfilesSql from './migrations/014_agent_execution_profiles.sql?raw'
 import workspaceTrustSql from './migrations/015_workspace_trust.sql?raw'
+import { normalizeExternalConfigHomes } from './migrations/016_external_config_home_normalize'
 
 /**
  * The canonical migration chain (TASK-006). The .sql files under
@@ -58,6 +59,15 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 13, name: '013_agent_run_account_profile', sql: agentRunAccountProfileSql },
   { version: 14, name: '014_agent_execution_profiles', sql: agentExecutionProfilesSql },
   { version: 15, name: '015_workspace_trust', sql: workspaceTrustSql },
+  {
+    version: 16,
+    name: '016_external_config_home_normalize',
+    // Pure data migration (P2-2 follow-up): no DDL — the run hook rewrites
+    // legacy windows-runtime external config_home rows to the normalized
+    // storage form (win32.normalize + trailing-separator strip + case-fold).
+    sql: '-- 016: data-only migration; the rewrite happens in the run hook',
+    run: normalizeExternalConfigHomes,
+  },
 ]
 
 /** Brings the database schema up to the latest known version. */

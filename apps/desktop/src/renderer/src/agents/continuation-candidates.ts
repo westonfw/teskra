@@ -4,6 +4,7 @@ import type {
   ErrorCode,
   WorkspaceRuntimeRef,
 } from '@teskra/contracts'
+import { ACCOUNT_LIMITED_DEFAULT_DURATION_MS } from '@teskra/contracts'
 
 /**
  * TASK-108 (Milestone 24 §26/§37) — candidate filtering for the
@@ -29,7 +30,12 @@ export function runtimeCompatible(
  * usable (`ready` / `unknown`). A row still marked `limited` whose
  * `limitedUntil` has already passed is also offerable: §18.0's lazy sweep
  * demotes it on the next account.list, and the modal always refreshes before
- * judging, so an expired limit must not exclude the profile forever.
+ * judging, so an expired limit must not exclude the profile forever. A
+ * `limited` row without `limitedUntil` is judged by the same §18.0 default
+ * window as the Main-side isLimitedExpired: it becomes offerable once its
+ * `lastFailureAt` is older than ACCOUNT_LIMITED_DEFAULT_DURATION_MS (or
+ * immediately when no timestamp exists), so a provider message without a
+ * parseable reset time can never exclude the profile permanently (P1-3).
  */
 export function isContinuationCandidate(
   profile: AgentAccountProfile,
@@ -39,8 +45,13 @@ export function isContinuationCandidate(
   if (!profile.enabled) return false
   if (!runtimeCompatible(profile.runtime, workspaceRuntime)) return false
   if (profile.status === 'ready' || profile.status === 'unknown') return true
-  if (profile.status === 'limited' && profile.limitedUntil !== undefined) {
-    return Date.parse(profile.limitedUntil) <= now
+  if (profile.status === 'limited') {
+    if (profile.limitedUntil !== undefined) {
+      return Date.parse(profile.limitedUntil) <= now
+    }
+    if (profile.lastFailureAt === undefined) return true
+    const failedAt = Date.parse(profile.lastFailureAt)
+    return Number.isNaN(failedAt) || failedAt + ACCOUNT_LIMITED_DEFAULT_DURATION_MS <= now
   }
   return false
 }

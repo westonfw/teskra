@@ -34,6 +34,12 @@ export const ERROR_CODES = [
   /** The profile's runtime cannot host the workspace runtime. */
   'ACCOUNT_PROFILE_INCOMPATIBLE',
   /**
+   * The profile cannot authenticate as-is (`login-required` / `expired`) and
+   * needs a re-login before it can start a Run. `limited` is deliberately NOT
+   * gated by this code — it flows through the §18 / §26 continuation process.
+   */
+  'ACCOUNT_PROFILE_NOT_READY',
+  /**
    * Milestone 24 (§14 / TASK-110): execution-profile resolution failures,
    * distinct from the account codes so a wrong execution profile id is never
    * mistaken for a bad account reference.

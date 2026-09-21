@@ -20,6 +20,10 @@ import { toPublicError } from '../../errors'
  *   never a silent downgrade (§37).
  * - A default pointing at a disabled profile is an ERROR prompting the user
  *   to reset the default — it does NOT fall back to legacy (§47.2 (2)).
+ * - A profile that cannot authenticate (`login-required` / `expired`) is an
+ *   ERROR (ACCOUNT_PROFILE_NOT_READY) prompting a re-login — §47.2 (3) makes
+ *   such profiles unavailable to §37 candidate filtering. `limited` is
+ *   deliberately NOT gated here: it flows through the §18 / §26 process.
  * - A runtime-incompatible DEFAULT is filtered out (step 0) and falls
  *   through to legacy fallback — that is the designed behavior for "the
  *   default happens to be for another runtime".
@@ -63,11 +67,17 @@ function fail(
     | 'ACCOUNT_PROFILE_NOT_FOUND'
     | 'ACCOUNT_PROFILE_MISMATCH'
     | 'ACCOUNT_PROFILE_DISABLED'
-    | 'ACCOUNT_PROFILE_INCOMPATIBLE',
+    | 'ACCOUNT_PROFILE_INCOMPATIBLE'
+    | 'ACCOUNT_PROFILE_NOT_READY',
   message: string,
   detail: string,
 ): IpcResult<never> {
   return { ok: false, error: toPublicError({ code, message, retryable: false, detail }) }
+}
+
+/** §47.2 (3): statuses that cannot authenticate and need a re-login first. */
+function isNotReady(profile: AgentAccountProfile): boolean {
+  return profile.status === 'login-required' || profile.status === 'expired'
 }
 
 export function createAccountProfileRuntimeResolver(
@@ -109,6 +119,13 @@ export function createAccountProfileRuntimeResolver(
             `explicit profile ${profile.id} runtime=${JSON.stringify(profile.runtime)} workspace=${JSON.stringify(workspaceRuntime)}`,
           )
         }
+        if (isNotReady(profile)) {
+          return fail(
+            'ACCOUNT_PROFILE_NOT_READY',
+            `Account profile "${profile.name}" requires a new login (status: ${profile.status}). Log in again from Settings → Accounts, or choose another profile.`,
+            `explicit profile ${profile.id} status=${profile.status}`,
+          )
+        }
         return { ok: true, data: profile }
       }
 
@@ -145,6 +162,15 @@ export function createAccountProfileRuntimeResolver(
         // §37 step 0: an incompatible default is filtered out, falling
         // through to the legacy CLI environment.
         return { ok: true, data: undefined }
+      }
+      if (isNotReady(profile)) {
+        // §47.2 (3): a default that cannot authenticate is a deterministic
+        // error, never a silent legacy fallback.
+        return fail(
+          'ACCOUNT_PROFILE_NOT_READY',
+          `The default account profile "${profile.name}" requires a new login (status: ${profile.status}). Log in again or set a new default in Settings → Accounts.`,
+          `default profile ${profile.id} status=${profile.status}`,
+        )
       }
       return { ok: true, data: profile }
     },

@@ -221,6 +221,43 @@ describe('Run outcome projection (TASK-106, §18)', () => {
     }
   })
 
+  it('rate-limited failure without a resetAt writes the conservative default limitedUntil (§18.0, P1-3)', () => {
+    const fixture = setup()
+    seedProfile(fixture, 'acct-1')
+    seedRun(fixture, 'run-1', {
+      status: 'failed',
+      accountProfileId: 'acct-1',
+      failureClassification: { kind: 'rate-limited', retryable: true },
+    })
+    const emissions = recordEmissions(fixture, 'acct-1')
+
+    requireOk(fixture.service.projectRunOutcome('run-1'))
+
+    // NOW + ACCOUNT_LIMITED_DEFAULT_DURATION_MS (1h).
+    const defaultUntil = '2026-09-12T13:00:00.000Z'
+    const profile = profileOf(fixture, 'acct-1')
+    expect(profile.status).toBe('limited')
+    expect(profile.limitedUntil).toBe(defaultUntil)
+    expect(emissions).toEqual([
+      { kind: 'status_changed', previous: 'ready', next: 'limited' },
+      { kind: 'limited', limitedUntil: defaultUntil },
+    ])
+  })
+
+  it('a rate-limited failure without a resetAt overwrites a stale limitedUntil instead of keeping it', () => {
+    const fixture = setup()
+    seedProfile(fixture, 'acct-1', { status: 'limited', limitedUntil: RESET_AT })
+    seedRun(fixture, 'run-1', {
+      status: 'failed',
+      accountProfileId: 'acct-1',
+      failureClassification: { kind: 'rate-limited', retryable: true },
+    })
+
+    requireOk(fixture.service.projectRunOutcome('run-1'))
+
+    expect(profileOf(fixture, 'acct-1').limitedUntil).toBe('2026-09-12T13:00:00.000Z')
+  })
+
   it('authentication-required failure → login-required with the dedicated event', () => {
     const fixture = setup()
     seedProfile(fixture, 'acct-1')

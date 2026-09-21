@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, mkdirSync, realpathSync, rmSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { dirname } from 'node:path'
+import { dirname, posix, win32 } from 'node:path'
 
 import type {
   AccountAuthType,
@@ -33,6 +33,7 @@ import {
   createAccountProfileRuntimeResolver,
   type AccountProfileRuntimeResolver,
 } from './account-profile-runtime-resolver'
+import { normalizeWindowsConfigHome, WINDOWS_DRIVE_ABSOLUTE } from './external-config-home'
 
 /**
  * AccountProfileManager (TASK-097, Milestone 24 / ADR-0009).
@@ -172,6 +173,25 @@ function isWithinRoot(root: string, candidate: string, caseInsensitive: boolean)
   return c === r || c.startsWith(`${r}/`) || c.startsWith(`${r}\\`)
 }
 
+/**
+ * §9.1 depth: a managed home is exactly `<root>/<agentId>/<slug>` — the root
+ * itself and shallower/deeper paths are never valid fs-mutation targets.
+ * Both segments are single non-empty names (slug rules forbid separators).
+ */
+function hasManagedHomeDepth(root: string, canonical: string, caseInsensitive: boolean): boolean {
+  const r = caseInsensitive ? root.toLowerCase() : root
+  const c = caseInsensitive ? canonical.toLowerCase() : canonical
+  const separator = c.startsWith(`${r}/`) ? '/' : c.startsWith(`${r}\\`) ? '\\' : undefined
+  if (separator === undefined) {
+    return false
+  }
+  const segments = c.slice(r.length + 1).split(/[/\\]/u)
+  return (
+    segments.length === 2 &&
+    segments.every((segment) => segment.length > 0 && segment !== '.' && segment !== '..')
+  )
+}
+
 export function createAccountProfileManager(
   deps: AccountProfileManagerDeps,
 ): AccountProfileManager {
@@ -277,6 +297,25 @@ export function createAccountProfileManager(
       return { ok: true, data: cached }
     }
     const root = runtime.resolveAgentProfilesRoot()
+
+    // §48.2 (a0) / P1-5: when WSL detection could not probe the distro home,
+    // the root degrades to a literal `~/.teskra/...` that no shell expands —
+    // any fs operation would create a literal `~` directory in the wsl.exe
+    // cwd and poison trustedRoots for the rest of the process. Fail fast
+    // BEFORE any fs side effect and never cache a non-absolute root.
+    // The flavor check accepts both absolute forms: host-native runtimes use
+    // the HOST path flavor (a "wsl" workspace on a Linux dev host resolves
+    // host paths, and tests run that configuration on win32 hosts too); only
+    // the degraded `~/...` fallback is absolute in neither flavor.
+    if (!win32.isAbsolute(root) && !posix.isAbsolute(root)) {
+      return fail({
+        code: 'WSL_DISTRO_NOT_FOUND',
+        message:
+          "The WSL distribution's home directory is unknown. Re-run WSL detection, then try again.",
+        retryable: true,
+        detail: `resolveAgentProfilesRoot() returned the non-absolute fallback ${JSON.stringify(root)} for runtime ${key}`,
+      })
+    }
 
     if (runtime.hostNative) {
       try {
@@ -483,12 +522,16 @@ export function createAccountProfileManager(
         return { ok: true, data: undefined }
       }
       try {
-        if (!isWithinRoot(trustedRoot, realpathSync(home), caseInsensitive)) {
+        const canonical = realpathSync(home)
+        if (
+          !isWithinRoot(trustedRoot, canonical, caseInsensitive) ||
+          !hasManagedHomeDepth(trustedRoot, canonical, caseInsensitive)
+        ) {
           return fail({
             code: 'VALIDATION_FAILED',
             message: 'Refusing to delete a directory outside the Teskra agent-profiles directory.',
             retryable: false,
-            detail: `${home} resolves outside trusted root ${trustedRoot}`,
+            detail: `${home} resolves to ${canonical}, which is not a <root>/<agentId>/<slug> home under trusted root ${trustedRoot}`,
           })
         }
         rmSync(home, { recursive: true, force: true })
@@ -507,12 +550,15 @@ export function createAccountProfileManager(
     if (!canonical.ok) {
       return canonical
     }
-    if (!isWithinRoot(trustedRoot, canonical.data, false) || canonical.data === trustedRoot) {
+    if (
+      !isWithinRoot(trustedRoot, canonical.data, false) ||
+      !hasManagedHomeDepth(trustedRoot, canonical.data, false)
+    ) {
       return fail({
         code: 'VALIDATION_FAILED',
         message: 'Refusing to delete a directory outside the Teskra agent-profiles directory.',
         retryable: false,
-        detail: `${home} resolves to ${canonical.data}, trusted root ${trustedRoot}`,
+        detail: `${home} resolves to ${canonical.data}, which is not a <root>/<agentId>/<slug> home under trusted root ${trustedRoot}`,
       })
     }
     const removed = await runFsChecked(runtime, 'delete', 'rm', ['-rf', '--', home])
@@ -534,7 +580,7 @@ export function createAccountProfileManager(
 
   const notFound = (id: string): IpcResult<never> =>
     fail({
-      code: 'VALIDATION_FAILED',
+      code: 'ACCOUNT_PROFILE_NOT_FOUND',
       message: 'The account profile no longer exists.',
       retryable: false,
       detail: `account profile ${id} not found`,
@@ -555,6 +601,53 @@ export function createAccountProfileManager(
     return { ok: true, data: parsed.data }
   }
 
+  /**
+   * §49 / P2-2: an external configHome is stored in the path form of ITS
+   * runtime. Windows runtimes get a normalized, case-folded win32 path so the
+   * per-runtime config_home unique index cannot be bypassed by case or
+   * trailing-slash variants (`C:\Users\x` vs `c:\users\x\`); WSL runtimes get
+   * a normalized POSIX path. A path shaped for the other runtime kind is
+   * rejected outright — it could never address a home inside that runtime.
+   * The windows normalization itself is normalizeWindowsConfigHome
+   * (./external-config-home.ts), shared with data migration 016
+   * (db/migrations/016_external_config_home_normalize.ts), which rewrites
+   * legacy rows stored before this rule — so the read/update paths need no
+   * compatibility fallback for un-normalized values.
+   */
+  const normalizeExternalConfigHome = (
+    runtime: WorkspaceRuntimeRef,
+    configHome: string,
+  ): IpcResult<string> => {
+    if (runtime.kind === 'windows') {
+      if (
+        !WINDOWS_DRIVE_ABSOLUTE.test(configHome) &&
+        !configHome.startsWith('\\\\') &&
+        !configHome.startsWith('//')
+      ) {
+        return fail({
+          code: 'VALIDATION_FAILED',
+          message:
+            'A Windows account profile requires a Windows absolute path (X:\\... or \\\\server\\...).',
+          retryable: false,
+          detail: `configHome ${JSON.stringify(configHome)} is not a Windows-shaped absolute path`,
+        })
+      }
+      return { ok: true, data: normalizeWindowsConfigHome(configHome) }
+    }
+    if (!configHome.startsWith('/')) {
+      return fail({
+        code: 'VALIDATION_FAILED',
+        message: 'A WSL account profile requires a POSIX absolute path (/...).',
+        retryable: false,
+        detail: `configHome ${JSON.stringify(configHome)} is not a POSIX-shaped absolute path`,
+      })
+    }
+    const normalized = posix.normalize(configHome)
+    // node:path keeps a trailing separator; the unique index must not see
+    // `/home/u/.codex` and `/home/u/.codex/` as two homes.
+    return { ok: true, data: normalized.length > 1 ? normalized.replace(/\/+$/u, '') : normalized }
+  }
+
   const createExternal = (
     request: CreateAccountProfileRequest,
   ): Promise<IpcResult<AgentAccountProfile>> => {
@@ -568,6 +661,10 @@ export function createAccountProfileManager(
         }),
       )
     }
+    const configHome = normalizeExternalConfigHome(request.runtime, request.configHome)
+    if (!configHome.ok) {
+      return Promise.resolve(configHome)
+    }
     const clock = now()
     const draft = validateDraft({
       id: createId(),
@@ -576,7 +673,7 @@ export function createAccountProfileManager(
       description: request.description,
       authType: request.authType,
       runtime: request.runtime,
-      configHome: request.configHome,
+      configHome: configHome.data,
       maxConcurrentRuns: request.maxConcurrentRuns,
       status: 'unknown',
       enabled: true,
@@ -964,7 +1061,8 @@ export function createAccountProfileManager(
 
       if (options.deleteHome === true) {
         // §48.2: external homes are user-managed; the option is unavailable,
-        // not merely guarded.
+        // not merely guarded. Rejected BEFORE any mutation so the profile is
+        // left untouched.
         if (profile.authType === 'external') {
           return fail({
             code: 'VALIDATION_FAILED',
@@ -973,24 +1071,6 @@ export function createAccountProfileManager(
             retryable: false,
             detail: `deleteHome rejected for external profile ${id}`,
           })
-        }
-        if (profile.configHome !== undefined) {
-          const runtime = await runtimeFor(profile.runtime)
-          if (!runtime.ok) {
-            return runtime
-          }
-          const trustedRoot = await ensureTrustedRoot(runtime.data)
-          if (!trustedRoot.ok) {
-            return trustedRoot
-          }
-          const deleted = await deleteManagedHome(
-            runtime.data,
-            trustedRoot.data,
-            profile.configHome,
-          )
-          if (!deleted.ok) {
-            return deleted
-          }
         }
       }
 
@@ -1018,10 +1098,44 @@ export function createAccountProfileManager(
         profileId: disabled.data.id,
         agentId: disabled.data.agentId,
       })
+
+      // P2-3: deleting the home is the only IRREVERSIBLE step, so it runs
+      // last — after the default was cleared and the row disabled. A failure
+      // here leaves a disabled profile with a leftover home (recoverable),
+      // never an enabled profile without one.
+      let homeDeleted = false
+      if (options.deleteHome === true && profile.configHome !== undefined) {
+        const runtime = await runtimeFor(profile.runtime)
+        if (!runtime.ok) {
+          audit('account.updated', disabled.data.id, {
+            agentId: disabled.data.agentId,
+            enabled: false,
+          })
+          return runtime
+        }
+        const trustedRoot = await ensureTrustedRoot(runtime.data)
+        if (!trustedRoot.ok) {
+          audit('account.updated', disabled.data.id, {
+            agentId: disabled.data.agentId,
+            enabled: false,
+          })
+          return trustedRoot
+        }
+        const deleted = await deleteManagedHome(runtime.data, trustedRoot.data, profile.configHome)
+        if (!deleted.ok) {
+          audit('account.updated', disabled.data.id, {
+            agentId: disabled.data.agentId,
+            enabled: false,
+          })
+          return deleted
+        }
+        homeDeleted = true
+      }
+
       audit('account.updated', disabled.data.id, {
         agentId: disabled.data.agentId,
         enabled: false,
-        ...(options.deleteHome === true ? { homeDeleted: true } : {}),
+        ...(homeDeleted ? { homeDeleted: true } : {}),
       })
       return { ok: true, data: disabled.data }
     },

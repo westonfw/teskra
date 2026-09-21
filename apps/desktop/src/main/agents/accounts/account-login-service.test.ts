@@ -8,6 +8,7 @@ import type {
 } from '@teskra/contracts'
 
 import { createEventBus, type EventBus } from '../../events/event-bus'
+import type { CommandRequest, CommandResult } from '../../process/command-runner'
 import type {
   ManagedProcess,
   ProcessStartRequest,
@@ -143,23 +144,44 @@ function fakeProcesses(events: EventBus<WorkbenchEvents>): FakeProcesses {
   return fake
 }
 
+interface FakeCommands {
+  commands: NonNullable<AccountLoginServiceDeps['commands']>
+  calls: CommandRequest[]
+}
+
+function fakeCommands(exitCode = 0): FakeCommands {
+  const calls: CommandRequest[] = []
+  return {
+    calls,
+    commands: {
+      run(request: CommandRequest): Promise<IpcResult<CommandResult>> {
+        calls.push(request)
+        return Promise.resolve({ ok: true, data: { stdout: '', stderr: '', exitCode } })
+      },
+    },
+  }
+}
+
 function setup(
   overrides: {
     profiles?: readonly AgentAccountProfile[]
     adapter?: AgentAccountProfileAdapter
     sessionTimeoutMs?: number
     idValues?: string[]
+    commands?: FakeCommands
   } = {},
 ) {
   const events = createEventBus<WorkbenchEvents>()
   const processes = fakeProcesses(events)
   const profiles = fakeProfiles(overrides.profiles ?? [PROFILE])
   const adapter = overrides.adapter ?? fakeAdapter()
+  const commands = overrides.commands ?? fakeCommands()
   const service = createAccountLoginService({
     profiles,
     processes: processes.processes,
     events,
     adapters: { get: (agentId) => (agentId === 'codex' ? adapter : undefined) },
+    commands: commands.commands,
     createRuntime: (ref: WorkspaceRuntimeRef) =>
       createWorkspaceRuntime(ref, {
         hostPlatform: 'win32',
@@ -168,20 +190,21 @@ function setup(
           version: '2.6.3.0',
           distributions: ['Ubuntu-24.04'],
           defaultDistro: 'Ubuntu-24.04',
+          homeDirs: { 'Ubuntu-24.04': '/home/dev' },
         },
       }),
     createId: ids(...(overrides.idValues ?? ['sess-1', 'proc-1', 'sess-2', 'proc-2'])),
     now: () => AT,
     sessionTimeoutMs: overrides.sessionTimeoutMs,
   })
-  return { events, processes, profiles, adapter, service }
+  return { events, processes, profiles, adapter, commands, service }
 }
 
 describe('AccountLoginService (TASK-102 §24)', () => {
   afterEach(() => vi.useRealTimers())
 
   it('starts a login session immediately with argv/env built in Main (never a shell string)', async () => {
-    const { processes, service } = setup()
+    const { processes, commands, service } = setup()
 
     const result = await service.start({ profileId: 'acct-1' })
 
@@ -194,11 +217,115 @@ describe('AccountLoginService (TASK-102 §24)', () => {
       id: 'proc-1',
       command: 'codex',
       args: ['login'],
-      cwd: PROFILE.configHome,
       env: { CODEX_HOME: PROFILE.configHome },
     })
+    // P2-13: the login PTY runs from a dedicated per-profile directory under
+    // the runtime's data root — never the configHome, which the CLI would
+    // otherwise treat as a project directory (Claude Code writes a
+    // project-level `.claude/` into its cwd).
+    expect(start?.cwd).toBe('/home/dev/.teskra/account-logins/acct-1')
+    expect(start?.cwd).not.toBe(PROFILE.configHome)
+    // The workdir is created inside the distro with an argv-array mkdir.
+    expect(commands.calls).toEqual([
+      expect.objectContaining({
+        command: 'mkdir',
+        args: ['-p', '--', '/home/dev/.teskra/account-logins/acct-1'],
+      }),
+    ])
     // No workspace binding — login is a global CLI operation (§24).
     expect(start?.workspaceId).toBeUndefined()
+  })
+
+  it('refuses a disabled profile with ACCOUNT_PROFILE_DISABLED before any side effect', async () => {
+    const disabled: AgentAccountProfile = { ...PROFILE, id: 'acct-disabled', enabled: false }
+    const { processes, commands, service } = setup({ profiles: [disabled] })
+
+    const result = await service.start({ profileId: 'acct-disabled' })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('ACCOUNT_PROFILE_DISABLED')
+    }
+    expect(processes.starts).toHaveLength(0)
+    expect(commands.calls).toHaveLength(0)
+    expect(service.sessionForProfile('acct-disabled')).toBeUndefined()
+  })
+
+  it('fails fast when the WSL distro home is unknown instead of creating a literal ~ directory', async () => {
+    const events = createEventBus<WorkbenchEvents>()
+    const processes = fakeProcesses(events)
+    const commands = fakeCommands()
+    const service = createAccountLoginService({
+      profiles: fakeProfiles([PROFILE]),
+      processes: processes.processes,
+      events,
+      adapters: { get: () => fakeAdapter() },
+      commands: commands.commands,
+      createRuntime: (ref: WorkspaceRuntimeRef) =>
+        createWorkspaceRuntime(ref, {
+          hostPlatform: 'win32',
+          // No homeDirs: detection could not probe the distro home, so the
+          // data root degrades to a literal `~/.teskra` that no shell expands.
+          wsl: { available: true, version: '2.6.3.0' },
+        }),
+      createId: ids('sess-1', 'proc-1'),
+      now: () => AT,
+    })
+
+    const result = await service.start({ profileId: 'acct-1' })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('WSL_DISTRO_NOT_FOUND')
+    }
+    expect(processes.starts).toHaveLength(0)
+    expect(commands.calls).toHaveLength(0)
+    expect(service.sessionForProfile('acct-1')).toBeUndefined()
+  })
+
+  it('fails the login when the working directory cannot be created', async () => {
+    const { processes, service } = setup({ commands: fakeCommands(1) })
+
+    const result = await service.start({ profileId: 'acct-1' })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('UNKNOWN')
+    }
+    expect(processes.starts).toHaveLength(0)
+    expect(service.sessionForProfile('acct-1')).toBeUndefined()
+  })
+
+  it('refuses a WSL login session without a command runner', async () => {
+    const events = createEventBus<WorkbenchEvents>()
+    const processes = fakeProcesses(events)
+    const service = createAccountLoginService({
+      profiles: fakeProfiles([PROFILE]),
+      processes: processes.processes,
+      events,
+      adapters: { get: () => fakeAdapter() },
+      createRuntime: (ref: WorkspaceRuntimeRef) =>
+        createWorkspaceRuntime(ref, {
+          hostPlatform: 'win32',
+          wsl: {
+            available: true,
+            version: '2.6.3.0',
+            distributions: ['Ubuntu-24.04'],
+            defaultDistro: 'Ubuntu-24.04',
+            homeDirs: { 'Ubuntu-24.04': '/home/dev' },
+          },
+        }),
+      createId: ids('sess-1', 'proc-1'),
+      now: () => AT,
+    })
+
+    const result = await service.start({ profileId: 'acct-1' })
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error.code).toBe('CAPABILITY_NOT_AVAILABLE')
+    }
+    expect(processes.starts).toHaveLength(0)
   })
 
   it('returns structured errors for unknown profiles and agents without an adapter', async () => {
@@ -353,8 +480,18 @@ describe('AccountLoginService (TASK-102 §24)', () => {
       processes: failing.processes,
       events,
       adapters: { get: () => fakeAdapter() },
+      commands: fakeCommands().commands,
       createRuntime: (ref: WorkspaceRuntimeRef) =>
-        createWorkspaceRuntime(ref, { hostPlatform: 'win32', wsl: { available: false } }),
+        createWorkspaceRuntime(ref, {
+          hostPlatform: 'win32',
+          wsl: {
+            available: true,
+            version: '2.6.3.0',
+            distributions: ['Ubuntu-24.04'],
+            defaultDistro: 'Ubuntu-24.04',
+            homeDirs: { 'Ubuntu-24.04': '/home/dev' },
+          },
+        }),
       createId: ids('sess-1', 'proc-1'),
       now: () => AT,
     })

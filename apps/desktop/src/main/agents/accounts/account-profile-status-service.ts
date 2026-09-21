@@ -4,6 +4,7 @@ import type {
   IpcResult,
   WorkbenchEvents,
 } from '@teskra/contracts'
+import { ACCOUNT_LIMITED_DEFAULT_DURATION_MS } from '@teskra/contracts'
 
 import type {
   AccountEventRepository,
@@ -21,7 +22,9 @@ import { getLogger } from '../../logger'
  * account profile (start() subscribes to agent.completed / agent.failed):
  *
  *   completed                              → ready + lastSuccessfulAt
- *   failed + rate-limited                  → limited + limitedUntil (resetAt)
+ *   failed + rate-limited                  → limited + limitedUntil (resetAt,
+ *                                            or the §18.0 default window when
+ *                                            the provider gave no reset time)
  *   failed + authentication-required       → login-required
  *   failed + authentication-expired        → expired
  *   failed + any other / no classification → health timestamps only
@@ -37,6 +40,11 @@ import { getLogger } from '../../logger'
  * reader (list / get / selector candidate) applies to a profile it touched.
  * Sweep (auxiliary): sweepExpiredLimited() rewrites stale rows in bulk — call
  * it at app startup and when Settings → Accounts opens. No timers anywhere.
+ *
+ * A `limited` row WITHOUT `limitedUntil` is covered too: it reads as expired
+ * once its `lastFailureAt` is older than ACCOUNT_LIMITED_DEFAULT_DURATION_MS
+ * (and immediately when no timestamp exists at all), so a provider message
+ * without a parseable reset time can never strand the profile (P1-3).
  */
 
 export interface AccountProfileStatusService {
@@ -77,11 +85,25 @@ export interface AccountProfileStatusServiceDeps {
 }
 
 export function isLimitedExpired(profile: AgentAccountProfile, now: string): boolean {
-  return (
-    profile.status === 'limited' &&
-    profile.limitedUntil !== undefined &&
-    profile.limitedUntil <= now
-  )
+  if (profile.status !== 'limited') {
+    return false
+  }
+  if (profile.limitedUntil !== undefined) {
+    return profile.limitedUntil <= now
+  }
+  // §18.0: a `limited` row without `limitedUntil` (written before the default
+  // window existed) must never be excluded from the candidate lists forever —
+  // once lastFailureAt is older than the conservative default window the limit
+  // reads as expired. No timestamp at all degrades immediately: `unknown`
+  // only asserts "may retry", which is always safe.
+  if (profile.lastFailureAt === undefined) {
+    return true
+  }
+  const failedAt = Date.parse(profile.lastFailureAt)
+  if (Number.isNaN(failedAt)) {
+    return true
+  }
+  return new Date(failedAt + ACCOUNT_LIMITED_DEFAULT_DURATION_MS).toISOString() <= now
 }
 
 export function createAccountProfileStatusService(
@@ -183,9 +205,17 @@ export function createAccountProfileStatusService(
     const classification = record.failureClassification
     switch (classification?.kind) {
       case 'rate-limited': {
+        // §18.0: without a provider resetAt, write a conservative default
+        // limitedUntil (failure time + ACCOUNT_LIMITED_DEFAULT_DURATION_MS)
+        // instead of silently keeping the previous value — a `limited` row
+        // without a fresh deadline could keep a stale limitedUntil or none at
+        // all and never recover (code review 2026-09-21, P1-3).
+        const limitedUntil =
+          classification.resetAt ??
+          new Date(Date.parse(at) + ACCOUNT_LIMITED_DEFAULT_DURATION_MS).toISOString()
         const updated = deps.profiles.setStatus(profile.id, {
           status: 'limited',
-          ...(classification.resetAt === undefined ? {} : { limitedUntil: classification.resetAt }),
+          limitedUntil,
           ...health,
         })
         if (!updated.ok) {
@@ -195,7 +225,7 @@ export function createAccountProfileStatusService(
         deps.events.emit('account.limited', {
           profileId: profile.id,
           agentId: profile.agentId,
-          ...(classification.resetAt === undefined ? {} : { limitedUntil: classification.resetAt }),
+          limitedUntil,
         })
         return { ok: true, data: undefined }
       }

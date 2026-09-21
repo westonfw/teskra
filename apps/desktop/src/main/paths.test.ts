@@ -178,4 +178,21 @@ describe('createTeskraPaths (ADR-0003 / TASK-078)', () => {
     const valid = paths.resolveAgentProfileHome('codex', 'work')
     expect(valid.ok).toBe(true)
   })
+
+  it('refuses to create a home outside the agent-profiles root (P2-5 defense in depth)', () => {
+    const dir = makeTempHome()
+    const paths = createTeskraPaths({ TESKRA_HOME: dir })
+
+    const outside = [join(dir, 'elsewhere'), join(dir, 'agent-profiles', '..', 'escape')]
+    for (const bad of [...outside, paths.agentProfilesRoot(), 'relative/path']) {
+      const result = paths.createAgentProfileHome(bad)
+      expect(result.ok).toBe(false)
+      if (!result.ok) {
+        expect(result.error.code).toBe('VALIDATION_FAILED')
+      }
+    }
+    // Nothing was created anywhere.
+    expect(existsSync(join(dir, 'elsewhere'))).toBe(false)
+    expect(existsSync(paths.agentProfilesRoot())).toBe(false)
+  })
 })

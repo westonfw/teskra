@@ -250,6 +250,8 @@ export const enUS = {
     'Enable the account profile in Settings → Accounts, or choose another profile.',
   'errorSuggestion.ACCOUNT_PROFILE_INCOMPATIBLE':
     'The account profile targets a different runtime. Choose a profile that matches this workspace runtime.',
+  'errorSuggestion.ACCOUNT_PROFILE_NOT_READY':
+    'The account profile requires a new login. Log in again from Settings → Accounts, or choose another profile.',
   'errorSuggestion.EXECUTION_PROFILE_NOT_FOUND':
     'The execution profile no longer exists. Choose another profile or create a new one in Settings.',
   'errorSuggestion.EXECUTION_PROFILE_MISMATCH':
@@ -736,6 +738,9 @@ export const enUS = {
     'This profile is the default for this Agent — removing it also clears the default account.',
   'accounts.remove.deleteHome': 'Also delete local CLI profile data',
   'accounts.remove.deleteHomeExternal': 'Managed externally — Teskra never deletes this directory.',
+  'accounts.disable.title': 'Disable Profile',
+  'accounts.disable.defaultWarning':
+    'This profile is the default for this Agent — disabling it also clears the default account.',
   'accounts.login.title': 'Login: {name}',
 
   'accounts.wizard.title': 'Add Account',
@@ -787,6 +792,8 @@ export const enUS = {
 
   'accounts.select.label': 'Account',
   'accounts.select.auto': 'Auto (default account)',
+  'accounts.select.autoDefault': 'Auto · {name}',
+  'accounts.select.autoHost': 'Host CLI account (no profile)',
 
   'aliases.title': 'Aliases',
   'aliases.subtitle':
