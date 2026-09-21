@@ -43,6 +43,10 @@ function launchEnv(teskraHome: string): Record<string, string> {
   // TASK-076: every test gets its own data root; the developer's real
   // ~/.teskra is never touched.
   env['TESKRA_HOME'] = teskraHome
+  // TASK-083: the suite drives the Fake Agent through real runs. Registration
+  // is opt-in in dev (the regular dev UI matches the packaged catalog), so
+  // E2E launches enable it explicitly.
+  env['TESKRA_DEV_AGENTS'] = '1'
   if (env['DISPLAY'] === undefined && process.platform === 'linux') env['DISPLAY'] = ':0'
   return env
 }

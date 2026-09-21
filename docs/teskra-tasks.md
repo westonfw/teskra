@@ -1621,7 +1621,8 @@ Claude Code
 
 ### 验收标准
 
-- [ ] Fake Agent 出现在 Registry 中，UI 可选择（dev 环境）。
+- [ ] Fake Agent 出现在 Registry 中，UI 可选择（dev 环境需显式设置
+      `TESKRA_DEV_AGENTS=1`；E2E fixtures 默认带上）。
 - [ ] 加入 Fake Agent **未修改** AgentManager / IPC schema / UI 的任何核心逻辑
       （这是 TASK-022 验收标准的实际检验方式）。
 - [ ] 上述 7 个 scenario 全部可用。

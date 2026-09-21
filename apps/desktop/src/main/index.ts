@@ -47,7 +47,11 @@ if (!app.requestSingleInstanceLock()) {
     // root. A structured startup failure leaves the secure shell operational.
     const composed = await composeTeskraRuntime({
       appVersion: app.getVersion(),
-      includeDevelopmentAgents: !app.isPackaged,
+      // The Fake Agent is a test/E2E harness (TASK-083), not a product agent:
+      // never in packaged builds, and in dev only on explicit opt-in so the
+      // regular dev UI shows the same agent catalog as production. The E2E
+      // fixtures set TESKRA_DEV_AGENTS=1 on every launch.
+      includeDevelopmentAgents: !app.isPackaged && process.env['TESKRA_DEV_AGENTS'] === '1',
       openPath: (path) => shell.openPath(path),
       credentialCipher: createSafeStorageCipher(),
       selectDirectory: async () => {
