@@ -1,0 +1,10 @@
+# Fixture: Codex CLI 0.154.0 exec --json — protocol noise tolerance.
+# Contains CRLF line endings, a reasoning item (no observation), a non-JSON
+# garbage line, an unknown event type, and the legacy item.type discriminant.
+{"type":"thread.started","thread_id":"03ac34ef-6666-4a71-c8d9-000000000006"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","item_type":"reasoning","text":["thinking about it"]}}
+garbage line without json
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"bash -lc 'pwd'","aggregated_output":"/repo\n","exit_code":0,"status":"completed"}}
+{"type":"some_future_codex_event","x":true}
+{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":5}}

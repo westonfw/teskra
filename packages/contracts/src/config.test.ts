@@ -28,10 +28,13 @@ describe('config contracts (TASK-080)', () => {
     expect(DEFAULT_CONFIG.watchdog.idleAction).toBe('ask')
     expect(DEFAULT_CONFIG.environment.defaultDistro).toBeNull()
     // plan §135 / TASK-069: merged worktrees 1d, run logs 30d, discarded runs 30d.
+    // TASK-133: default artifact patterns node_modules/.next/.turbo, idle 7d.
     expect(DEFAULT_CONFIG.retention).toEqual({
       mergedWorktreeDays: 1,
       completedRunLogsDays: 30,
       discardedRunDays: 30,
+      worktreeArtifactPatterns: ['node_modules', '.next', '.turbo'],
+      worktreeArtifactIdleDays: 7,
     })
     // TASK-122 (Milestone 25 §6.1): structured streams on by default.
     expect(DEFAULT_CONFIG.observability).toEqual({ structuredStream: true })
@@ -52,6 +55,34 @@ describe('config contracts (TASK-080)', () => {
     ).toBe(false)
     expect(
       teskraConfigLayerSchema.safeParse({ decisions: { stalledRunTimeoutMs: 1.5 } }).success,
+    ).toBe(false)
+  })
+
+  it('retention worktree-artifact fields: partial layers, validated values (TASK-133)', () => {
+    expect(
+      teskraConfigLayerSchema.safeParse({ retention: { worktreeArtifactPatterns: ['dist'] } })
+        .success,
+    ).toBe(true)
+    expect(
+      teskraConfigLayerSchema.safeParse({ retention: { worktreeArtifactIdleDays: 14 } }).success,
+    ).toBe(true)
+    expect(
+      teskraConfigLayerSchema.safeParse({ retention: { worktreeArtifactPatterns: [] } }).success,
+    ).toBe(true)
+    // Negative idle days, fractional days, empty pattern names, and non-array
+    // patterns are all rejected.
+    expect(
+      teskraConfigLayerSchema.safeParse({ retention: { worktreeArtifactIdleDays: -1 } }).success,
+    ).toBe(false)
+    expect(
+      teskraConfigLayerSchema.safeParse({ retention: { worktreeArtifactIdleDays: 1.5 } }).success,
+    ).toBe(false)
+    expect(
+      teskraConfigLayerSchema.safeParse({ retention: { worktreeArtifactPatterns: [''] } }).success,
+    ).toBe(false)
+    expect(
+      teskraConfigLayerSchema.safeParse({ retention: { worktreeArtifactPatterns: 'dist' } })
+        .success,
     ).toBe(false)
   })
 

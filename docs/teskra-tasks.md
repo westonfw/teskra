@@ -4600,20 +4600,20 @@ IPC:       teskra:agent:list-observations { runId, afterSeq?, limit? }
 
 ### 验收标准
 
-- [ ] 只对 `structuredOutput !== 'none'` 的 Run 挂 Parser；数据源是 `process.output` chunk，
+- [x] 只对 `structuredOutput !== 'none'` 的 Run 挂 Parser；数据源是 `process.output` chunk，
       在 32 ms 批处理之前；`terminal.log` 与 `readOutput` 语义不变。
-- [ ] `\r` 去除、按 `\n` 切行、半行跨 chunk 正确拼接；单行 > 64 KiB 丢弃计数。
-- [ ] 每协议 ≥ 3 份来自真实 CLI 的 fixture（文件头记录 CLI 版本），覆盖 session /
+- [x] `\r` 去除、按 `\n` 切行、半行跨 chunk 正确拼接；单行 > 64 KiB 丢弃计数。
+- [x] 每协议 ≥ 3 份来自真实 CLI 的 fixture（文件头记录 CLI 版本），覆盖 session /
       assistant_text / tool_call / tool_result / usage / error / result。
-- [ ] 未知 `type` 与非 JSON 行忽略并计数；Run 结束写 `agent.observation_summary { parsed, ignored }`。
-- [ ] 观测持久化前 `redactSecrets`；`tool_call.input` / `tool_result.output` 截断到 4 KiB，
+- [x] 未知 `type` 与非 JSON 行忽略并计数；Run 结束写 `agent.observation_summary { parsed, ignored }`。
+- [x] 观测持久化前 `redactSecrets`；`tool_call.input` / `tool_result.output` 截断到 4 KiB，
       `assistant_text` 到 8 KiB。
-- [ ] 命令类 tool_call（Claude `Bash`、Codex `command_execution`）追加 `agent.command`，
+- [x] 命令类 tool_call（Claude `Bash`、Codex `command_execution`）追加 `agent.command`，
       且该 Run 的 `auditCommandPatterns` 正则被关闭（不重复，有测试）。
-- [ ] `providerSession` 缺失时用 `session` 观测补写；已存在不覆盖。
-- [ ] `error` 观测作为 `structuredError` 传给 FailureClassifier（只在进程退出后分类，ADR-0010 §4）。
-- [ ] Parser 任何异常不改变 Run 状态、不终止进程（有 fuzz 风格测试：随机字节流）。
-- [ ] `agent.observation` 刷新 `lastOutputAt`（TASK-119 入口）。
+- [x] `providerSession` 缺失时用 `session` 观测补写；已存在不覆盖。
+- [x] `error` 观测作为 `structuredError` 传给 FailureClassifier（只在进程退出后分类，ADR-0010 §4）。
+- [x] Parser 任何异常不改变 Run 状态、不终止进程（有 fuzz 风格测试：随机字节流）。
+- [x] `agent.observation` 刷新 `lastOutputAt`（TASK-119 入口）。
 
 ---
 
@@ -4755,16 +4755,16 @@ config:    decisions.shellConfirmationTimeoutMs, decisions.stalledRunTimeoutMs (
 
 ### 验收标准
 
-- [ ] `shell-confirmation.ts` 的 `request()` 先 `decisionService.open({ kind: 'shell_confirmation', dedupeKey: stepId, ... })`
+- [x] `shell-confirmation.ts` 的 `request()` 先 `decisionService.open({ kind: 'shell_confirmation', dedupeKey: stepId, ... })`
       再挂内存 settle；`resolve` / `cancel` 经 Decision 通道。
-- [ ] 既有 `shell-confirmation.test.ts` 全部通过；批准仍记入 step result（`confirmationRecord`）。
-- [ ] `decisions.shellConfirmationTimeoutMs > 0` 时超时 → `expired` → step 拒绝并记审计。
-- [ ] 重启后 open 的 shell 确认不可再批准（`resolve` 返回 `VALIDATION_FAILED`），步骤走
+- [x] 既有 `shell-confirmation.test.ts` 全部通过；批准仍记入 step result（`confirmationRecord`）。
+- [x] `decisions.shellConfirmationTimeoutMs > 0` 时超时 → `expired` → step 拒绝并记审计。
+- [x] 重启后 open 的 shell 确认不可再批准（`resolve` 返回 `VALIDATION_FAILED`），步骤走
       reconciliation 失败路径。
-- [ ] `workflowShellConfirmation` / `workflowListPendingShellConfirmations` 通道保留为兼容别名，
+- [x] `workflowShellConfirmation` / `workflowListPendingShellConfirmations` 通道保留为兼容别名，
       内部转到 decision 通道；`workflow.shell_confirmation_required` 事件继续发出。
-- [ ] `ShellConfirmationHost` 数据源改为 `decision.list({ kind: 'shell_confirmation', status: 'open' })`。
-- [ ] 无「always allow」；命令与 cwd 完整展示（不变）。
+- [x] `ShellConfirmationHost` 数据源改为 `decision.list({ kind: 'shell_confirmation', status: 'open' })`。
+- [x] 无「always allow」；命令与 cwd 完整展示（不变）。
 
 ---
 
@@ -4840,12 +4840,12 @@ kind:   worktree-artifacts
 
 ### 验收标准
 
-- [ ] 仅匹配 worktree 顶层与一级子目录名（不做 glob）；只处理状态 ∈ `{merged, discarded, archived}`，
+- [x] 仅匹配 worktree 顶层与一级子目录名（不做 glob）；只处理状态 ∈ `{merged, discarded, archived}`，
       或 `ready` / `dirty` 且无非终态 Run 且空闲超过 `worktreeArtifactIdleDays`。
-- [ ] `conflict` 状态永不处理；有活动 Run 的 worktree 不处理；主工作区永不处理。
-- [ ] `ownsWorktreePath` 守卫：`realpath` 后必须位于 worktree 之下，符号链接逃逸跳过并审计。
-- [ ] `plan()` 不写；列出估算大小（超时 10 秒显示未知）；`run()` 逐项可中断。
-- [ ] 审计条目沿用 `RetentionAuditEntry`；`dispose()` 等待进行中的 run。
+- [x] `conflict` 状态永不处理；有活动 Run 的 worktree 不处理；主工作区永不处理。
+- [x] `ownsWorktreePath` 守卫：`realpath` 后必须位于 worktree 之下，符号链接逃逸跳过并审计。
+- [x] `plan()` 不写；列出估算大小（超时 10 秒显示未知）；`run()` 逐项可中断。
+- [x] 审计条目沿用 `RetentionAuditEntry`；`dispose()` 等待进行中的 run。
 
 ---
 

@@ -1,11 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import type { IpcResult, RetentionConfig, WorkbenchEvents } from '@teskra/contracts'
+import type { IpcResult, RetentionConfig, RetentionPlan, WorkbenchEvents } from '@teskra/contracts'
 
 import { migrateDatabase } from '../db/migrations'
 import {
@@ -57,7 +57,11 @@ interface Fixture {
   readonly setOnItemStart: (hook: ((item: unknown) => void) | undefined) => void
 }
 
-async function setup(): Promise<Fixture> {
+async function setup(
+  options: {
+    measureDirectorySize?: (path: string, timeoutMs: number) => number | undefined
+  } = {},
+): Promise<Fixture> {
   const directory = mkdtempSync(join(tmpdir(), 'teskra-retention-'))
   directories.push(directory)
   const repoDir = join(directory, 'repo')
@@ -111,6 +115,8 @@ async function setup(): Promise<Fixture> {
     mergedWorktreeDays: 1,
     completedRunLogsDays: 30,
     discardedRunDays: 30,
+    worktreeArtifactPatterns: ['node_modules', '.next', '.turbo'],
+    worktreeArtifactIdleDays: 7,
   }
   let currentDate = new Date('2026-09-11T00:00:00.000Z')
   let onItemStart: ((item: unknown) => void) | undefined
@@ -126,6 +132,9 @@ async function setup(): Promise<Fixture> {
     resolvePolicy: () => ({ ok: true, data: policy }),
     now: () => currentDate,
     onItemStart: (item) => onItemStart?.(item),
+    ...(options.measureDirectorySize === undefined
+      ? {}
+      : { measureDirectorySize: options.measureDirectorySize }),
   })
 
   return {
@@ -246,6 +255,8 @@ describe('RetentionService (TASK-069)', () => {
       mergedWorktreeDays: 1,
       completedRunLogsDays: 30,
       discardedRunDays: 30,
+      worktreeArtifactPatterns: ['node_modules', '.next', '.turbo'],
+      worktreeArtifactIdleDays: 7,
     })
     for (const item of plan.items) {
       expect(item.reason.length).toBeGreaterThan(0)
@@ -588,12 +599,24 @@ describe('RetentionService (TASK-069)', () => {
   it('respects per-call workspace scoping and retention thresholds', async () => {
     const fixture = await setup()
     const recent = createRunRecord(fixture, 'run-recent', { finishedDaysAgo: 10 })
-    fixture.setPolicy({ mergedWorktreeDays: 1, completedRunLogsDays: 30, discardedRunDays: 30 })
+    fixture.setPolicy({
+      mergedWorktreeDays: 1,
+      completedRunLogsDays: 30,
+      discardedRunDays: 30,
+      worktreeArtifactPatterns: ['node_modules', '.next', '.turbo'],
+      worktreeArtifactIdleDays: 7,
+    })
 
     // Below the threshold → no candidates.
     expect(requireOk(await fixture.service.plan()).items).toEqual([])
 
-    fixture.setPolicy({ mergedWorktreeDays: 1, completedRunLogsDays: 7, discardedRunDays: 30 })
+    fixture.setPolicy({
+      mergedWorktreeDays: 1,
+      completedRunLogsDays: 7,
+      discardedRunDays: 30,
+      worktreeArtifactPatterns: ['node_modules', '.next', '.turbo'],
+      worktreeArtifactIdleDays: 7,
+    })
     const plan = requireOk(await fixture.service.plan({ workspaceId: WORKSPACE_ID }))
     expect(plan.items.map((item) => item.runId)).toEqual(['run-recent'])
     expect(existsSync(recent.files.events)).toBe(true)
@@ -601,5 +624,280 @@ describe('RetentionService (TASK-069)', () => {
     const missing = await fixture.service.plan({ workspaceId: 'no-such-workspace' })
     expect(missing.ok).toBe(false)
     if (!missing.ok) expect(missing.error.code).toBe('WORKSPACE_NOT_FOUND')
+  })
+})
+
+/**
+ * TASK-133 — worktree build-artifact GC.
+ *
+ * Same fixture as TASK-069. Artifact worktrees are marked `merged` with
+ * `mergedAt` = now (age 0 < `mergedWorktreeDays`) so the merged-worktree
+ * category never interferes: only the worktree-artifacts items fire.
+ */
+async function createWorktreeWithArtifacts(
+  fixture: Fixture,
+  runId: string,
+  artifactDirs: readonly string[],
+) {
+  const created = requireOk(
+    await fixture.manager.create({ workspaceId: WORKSPACE_ID, runId, baseBranch: 'main' }),
+  )
+  for (const dir of artifactDirs) {
+    mkdirSync(join(created.path, dir), { recursive: true })
+    writeFileSync(join(created.path, dir, 'blob.bin'), `${dir}\n`)
+  }
+  return created
+}
+
+/** Marks a worktree merged "right now": terminal, but below the merged-worktree GC threshold. */
+function markMergedNow(fixture: Fixture, worktreeId: string): void {
+  requireOk(
+    fixture.worktrees.update(worktreeId, { state: 'merged', mergedAt: daysAgo(0) }, daysAgo(0)),
+  )
+}
+
+function artifactItems(plan: RetentionPlan) {
+  return plan.items.filter((item) => item.kind === 'worktree-artifacts')
+}
+
+describe('RetentionService worktree artifacts (TASK-133)', () => {
+  it('matches top-level and one-level-deep directory names only, never deeper', async () => {
+    const fixture = await setup()
+    const worktree = await createWorktreeWithArtifacts(fixture, 'run-depth', [
+      'node_modules',
+      '.next',
+      join('pkg', 'node_modules'),
+      join('pkg', 'deep', 'node_modules'),
+      'src',
+    ])
+    markMergedNow(fixture, worktree.id)
+
+    const plan = requireOk(await fixture.service.plan())
+    const paths = artifactItems(plan)
+      .map((item) => item.path?.slice(worktree.path.length + 1))
+      .sort()
+    expect(paths).toEqual(['.next', 'node_modules', join('pkg', 'node_modules')].sort())
+
+    const report = requireOk(await fixture.service.run())
+    const entries = report.entries.filter((entry) => entry.item.kind === 'worktree-artifacts')
+    expect(entries).toHaveLength(3)
+    expect(entries.every((entry) => entry.action === 'deleted')).toBe(true)
+
+    expect(existsSync(join(worktree.path, 'node_modules'))).toBe(false)
+    expect(existsSync(join(worktree.path, '.next'))).toBe(false)
+    expect(existsSync(join(worktree.path, 'pkg', 'node_modules'))).toBe(false)
+    // Two levels down is out of scope.
+    expect(existsSync(join(worktree.path, 'pkg', 'deep', 'node_modules'))).toBe(true)
+    expect(existsSync(join(worktree.path, 'src'))).toBe(true)
+  })
+
+  it('collects artifacts of merged, discarded, and archived worktrees', async () => {
+    const fixture = await setup()
+    const merged = await createWorktreeWithArtifacts(fixture, 'run-m', ['node_modules'])
+    markMergedNow(fixture, merged.id)
+    const discarded = await createWorktreeWithArtifacts(fixture, 'run-d', ['node_modules'])
+    requireOk(
+      fixture.worktrees.update(
+        discarded.id,
+        { state: 'discarded', discardedAt: daysAgo(0) },
+        daysAgo(0),
+      ),
+    )
+    const archived = await createWorktreeWithArtifacts(fixture, 'run-a', ['node_modules'])
+    // archive() semantics: only the archivedAt marker, no state transition.
+    requireOk(fixture.worktrees.update(archived.id, { archivedAt: daysAgo(0) }, daysAgo(0)))
+
+    const plan = requireOk(await fixture.service.plan())
+    expect(
+      artifactItems(plan)
+        .map((item) => item.worktreeId)
+        .sort(),
+    ).toEqual([merged.id, discarded.id, archived.id].sort())
+
+    const report = requireOk(await fixture.service.run())
+    for (const worktree of [merged, discarded, archived]) {
+      const entry = report.entries.find(
+        (candidate) =>
+          candidate.item.kind === 'worktree-artifacts' && candidate.item.worktreeId === worktree.id,
+      )
+      expect(entry?.action).toBe('deleted')
+      expect(existsSync(join(worktree.path, 'node_modules'))).toBe(false)
+    }
+  })
+
+  it('collects idle ready/dirty worktrees past the idle threshold, keeps fresh ones', async () => {
+    const fixture = await setup()
+    const readyIdle = await createWorktreeWithArtifacts(fixture, 'run-ri', ['node_modules'])
+    requireOk(fixture.worktrees.update(readyIdle.id, { state: 'ready' }, daysAgo(10)))
+    const dirtyIdle = await createWorktreeWithArtifacts(fixture, 'run-di', ['node_modules'])
+    requireOk(fixture.worktrees.updateState(dirtyIdle.id, 'dirty', daysAgo(10)))
+    const readyFresh = await createWorktreeWithArtifacts(fixture, 'run-rf', ['node_modules'])
+    requireOk(fixture.worktrees.update(readyFresh.id, { state: 'ready' }, daysAgo(2)))
+
+    const plan = requireOk(await fixture.service.plan())
+    expect(
+      artifactItems(plan)
+        .map((item) => item.worktreeId)
+        .sort(),
+    ).toEqual([readyIdle.id, dirtyIdle.id].sort())
+    const idle = artifactItems(plan).find((item) => item.worktreeId === readyIdle.id)
+    expect(idle?.reason).toContain('idle 10d (threshold 7d)')
+
+    const report = requireOk(await fixture.service.run())
+    expect(report.entries.filter((entry) => entry.item.kind === 'worktree-artifacts')).toHaveLength(
+      2,
+    )
+    expect(existsSync(join(readyIdle.path, 'node_modules'))).toBe(false)
+    expect(existsSync(join(dirtyIdle.path, 'node_modules'))).toBe(false)
+    expect(existsSync(join(readyFresh.path, 'node_modules'))).toBe(true)
+  })
+
+  it('never touches a conflict worktree', async () => {
+    const fixture = await setup()
+    const conflict = await createWorktreeWithArtifacts(fixture, 'run-c', ['node_modules'])
+    requireOk(fixture.worktrees.update(conflict.id, { state: 'conflict' }, daysAgo(30)))
+
+    const plan = requireOk(await fixture.service.plan())
+    expect(artifactItems(plan)).toEqual([])
+
+    const report = requireOk(await fixture.service.run())
+    expect(report.entries).toEqual([])
+    expect(existsSync(join(conflict.path, 'node_modules', 'blob.bin'))).toBe(true)
+  })
+
+  it('never touches a worktree with a non-terminal run', async () => {
+    const fixture = await setup()
+    const worktree = await createWorktreeWithArtifacts(fixture, 'run-live', ['node_modules'])
+    markMergedNow(fixture, worktree.id)
+    createRunRecord(fixture, 'run-live', {})
+    requireOk(fixture.runs.update('run-live', { status: 'running' }, new Date().toISOString()))
+
+    const plan = requireOk(await fixture.service.plan())
+    expect(artifactItems(plan)).toEqual([])
+
+    const report = requireOk(await fixture.service.run())
+    expect(report.entries).toEqual([])
+    expect(existsSync(join(worktree.path, 'node_modules', 'blob.bin'))).toBe(true)
+
+    // Once the run is terminal, the same worktree becomes collectable.
+    requireOk(fixture.runs.update('run-live', { status: 'completed' }, new Date().toISOString()))
+    const second = requireOk(await fixture.service.run())
+    const entry = second.entries.find(
+      (candidate) =>
+        candidate.item.kind === 'worktree-artifacts' && candidate.item.worktreeId === worktree.id,
+    )
+    expect(entry?.action).toBe('deleted')
+    expect(existsSync(join(worktree.path, 'node_modules'))).toBe(false)
+  })
+
+  it('never touches the repository main working tree', async () => {
+    const fixture = await setup()
+    mkdirSync(join(fixture.repoDir, 'node_modules'), { recursive: true })
+    writeFileSync(join(fixture.repoDir, 'node_modules', 'keep.txt'), 'precious\n')
+    // A stray worktree record pointing at the repository root itself.
+    const created = fixture.worktrees.create({
+      id: 'wt-main',
+      workspaceId: WORKSPACE_ID,
+      branch: 'main',
+      baseBranch: 'main',
+      path: fixture.repoDir,
+      isolation: 'worktree',
+      state: 'merged',
+    })
+    requireOk(created)
+    requireOk(fixture.worktrees.update('wt-main', { mergedAt: daysAgo(0) }, daysAgo(0)))
+
+    const plan = requireOk(await fixture.service.plan())
+    expect(artifactItems(plan)).toEqual([])
+
+    const report = requireOk(await fixture.service.run())
+    expect(report.entries).toEqual([])
+    expect(existsSync(join(fixture.repoDir, 'node_modules', 'keep.txt'))).toBe(true)
+  })
+
+  it('skips symlink escapes and audits the refusal', async () => {
+    const fixture = await setup()
+    const outside = resolve(fixture.repoDir, '..', 'precious-outside')
+    mkdirSync(outside, { recursive: true })
+    writeFileSync(join(outside, 'keep.txt'), 'precious\n')
+    const worktree = await createWorktreeWithArtifacts(fixture, 'run-sym', ['.next'])
+    // 'junction' is ignored on POSIX and needs no privilege on Windows.
+    symlinkSync(outside, join(worktree.path, 'node_modules'), 'junction')
+    markMergedNow(fixture, worktree.id)
+
+    // plan() never lists an escape as a deletion candidate.
+    const plan = requireOk(await fixture.service.plan())
+    expect(artifactItems(plan).map((item) => item.path)).toEqual([join(worktree.path, '.next')])
+
+    const report = requireOk(await fixture.service.run())
+    const entry = report.entries.find(
+      (candidate) =>
+        candidate.item.kind === 'worktree-artifacts' && candidate.item.worktreeId === worktree.id,
+    )
+    expect(entry?.action).toBe('deleted')
+    expect(entry?.detail).toContain('symlink escapes skipped: node_modules')
+
+    expect(existsSync(join(worktree.path, '.next'))).toBe(false)
+    // The escape target and the symlink itself survive untouched.
+    expect(existsSync(join(outside, 'keep.txt'))).toBe(true)
+    expect(existsSync(join(worktree.path, 'node_modules'))).toBe(true)
+  })
+
+  it('plan() lists estimated sizes and changes nothing on disk', async () => {
+    const fixture = await setup()
+    const worktree = await createWorktreeWithArtifacts(fixture, 'run-size', ['node_modules'])
+    markMergedNow(fixture, worktree.id)
+
+    const plan = requireOk(await fixture.service.plan())
+    const items = artifactItems(plan)
+    expect(items).toHaveLength(1)
+    expect(items[0]?.estimatedBytes).toBeGreaterThan(0)
+    // plan() is a pure preview: the directory is still there.
+    expect(existsSync(join(worktree.path, 'node_modules', 'blob.bin'))).toBe(true)
+  })
+
+  it('degrades the size estimate to unknown when estimation times out', async () => {
+    const fixture = await setup({ measureDirectorySize: () => undefined })
+    const worktree = await createWorktreeWithArtifacts(fixture, 'run-slow', ['node_modules'])
+    markMergedNow(fixture, worktree.id)
+
+    const plan = requireOk(await fixture.service.plan())
+    const items = artifactItems(plan)
+    expect(items).toHaveLength(1)
+    expect(items[0]?.estimatedBytes).toBeUndefined()
+
+    // run() still executes: a missing estimate never blocks collection.
+    const report = requireOk(await fixture.service.run())
+    expect(report.entries[0]?.action).toBe('deleted')
+    expect(existsSync(join(worktree.path, 'node_modules'))).toBe(false)
+  })
+
+  it('run() is interruptible between artifact items', async () => {
+    const fixture = await setup()
+    const first = await createWorktreeWithArtifacts(fixture, 'run-i1', ['node_modules'])
+    markMergedNow(fixture, first.id)
+    const second = await createWorktreeWithArtifacts(fixture, 'run-i2', ['node_modules'])
+    markMergedNow(fixture, second.id)
+
+    const controller = new AbortController()
+    let seen = 0
+    fixture.setOnItemStart(() => {
+      seen += 1
+      if (seen === 2) controller.abort()
+    })
+
+    const report = requireOk(await fixture.service.run({}, controller.signal))
+    expect(report.cancelled).toBe(true)
+    expect(report.entries.map((entry) => entry.action)).toEqual(['deleted', 'skipped'])
+    expect(report.entries[1]?.detail).toContain('cancelled')
+
+    const removed = [first, second].filter(
+      (worktree) => !existsSync(join(worktree.path, 'node_modules')),
+    )
+    const kept = [first, second].filter((worktree) =>
+      existsSync(join(worktree.path, 'node_modules')),
+    )
+    expect(removed).toHaveLength(1)
+    expect(kept).toHaveLength(1)
   })
 })

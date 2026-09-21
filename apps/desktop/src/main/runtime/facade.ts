@@ -12,6 +12,7 @@ import type {
   AgentDetectionRequest,
   AgentDetectionResult,
   AgentExecutionProfile,
+  AgentObservationRecord,
   AgentProgressRecord,
   AgentRun,
   AgentRunIdRequest,
@@ -65,6 +66,7 @@ import type {
   ListRecoveryIssuesRequest,
   ListRecentWorkspacesRequest,
   ListAgentDetectionsRequest,
+  ListAgentObservationsRequest,
   ListAgentProgressRequest,
   ListAgentRunsRequest,
   ListArtifactsRequest,
@@ -435,6 +437,10 @@ export interface AgentCatalogPort {
   getOutput(request: AgentRunOutputRequest): IpcResult<string>
   /** TASK-126 (ADR-0012): persisted agent.progress events, paged by seq. */
   listProgress(request: ListAgentProgressRequest): IpcResult<readonly AgentProgressRecord[]>
+  /** TASK-123 (ADR-0013): persisted agent.observation events, paged by seq. */
+  listObservations(
+    request: ListAgentObservationsRequest,
+  ): IpcResult<readonly AgentObservationRecord[]>
 }
 
 export interface WorktreePort {
@@ -481,12 +487,17 @@ export interface WorkflowPort {
   /**
    * TASK-118: user decision for a shell step parked on
    * workflow.shell_confirmation_required; true = it was awaiting a decision.
+   * TASK-129 (ADR-0014): compat alias over the decision channel — the parked
+   * step is a persisted `shell_confirmation` PendingDecision and answering
+   * here CAS-resolves it (same as DecisionPort.resolve with approve/reject).
    */
   confirmShellStep(request: WorkflowShellConfirmationRequest): IpcResult<boolean>
   /**
    * Code-review P1-6: every shell confirmation still parked in Main. The
    * renderer host pulls this on (re)subscribe so a window reload never
    * strands a step in `running` on an event it missed.
+   * TASK-129: compat alias for `decision.list({ kind: 'shell_confirmation',
+   * status: 'open' })`; one Milestone later it is removed (design doc §13).
    */
   listPendingShellConfirmations(
     request?: ListPendingShellConfirmationsRequest,

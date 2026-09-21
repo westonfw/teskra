@@ -1,0 +1,10 @@
+# Fixture: Codex CLI 0.154.0 `codex exec --json` — successful turn.
+# Source: NDJSON event shapes per codex-rs exec JSON output (thread.started,
+# turn.started, item.started/item.completed, turn.completed) as observed from
+# codex-cli 0.154.0. Header line is intentionally NOT JSON.
+{"type":"thread.started","thread_id":"019a12cd-4444-4e5f-a6b7-000000000004"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","item_type":"command_execution","command":"bash -lc 'ls'","status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","item_type":"command_execution","command":"bash -lc 'ls'","aggregated_output":"README.md\nsrc\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_1","item_type":"agent_message","text":"The repository contains README.md and src/."}}
+{"type":"turn.completed","usage":{"input_tokens":4200,"cached_input_tokens":2048,"output_tokens":37}}

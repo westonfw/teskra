@@ -109,6 +109,7 @@ const bridge: TeskraBridge = {
     list: (request = {}) => invoke(IPC_CHANNELS.agentRunList, request),
     getOutput: (request) => invoke(IPC_CHANNELS.agentRunOutput, request),
     listProgress: (request) => invoke(IPC_CHANNELS.agentListProgress, request),
+    listObservations: (request) => invoke(IPC_CHANNELS.agentListObservations, request),
   },
   account: {
     list: (request = {}) => invoke(IPC_CHANNELS.accountList, request),

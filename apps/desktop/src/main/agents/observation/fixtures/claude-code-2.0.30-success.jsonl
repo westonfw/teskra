@@ -1,0 +1,11 @@
+# Fixture: Claude Code 2.0.30 `claude --print --output-format stream-json --verbose`
+# Source: NDJSON event shapes per the Claude Code 2.x stream-json schema
+# (system/init, assistant, user, result) as documented in the Claude Code
+# headless-mode docs; line shape matches a real 2.0.30 run. This header line
+# is intentionally NOT JSON — parsers must ignore it and count it.
+{"type":"system","subtype":"init","cwd":"/repo","session_id":"b8f2c1a4-1111-4a2b-9c3d-000000000001","tools":["Bash","Read","Edit"],"mcp_servers":[],"model":"claude-sonnet-4-5-20250929","permissionMode":"default","apiKeySource":"none"}
+{"type":"assistant","message":{"id":"msg_01Xy","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"text","text":"I'll inspect the repository layout first."}],"stop_reason":null,"usage":{"input_tokens":4,"output_tokens":12}},"parent_tool_use_id":null,"session_id":"b8f2c1a4-1111-4a2b-9c3d-000000000001"}
+{"type":"assistant","message":{"id":"msg_01Xz","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"tool_use","id":"toolu_01Ab","name":"Bash","input":{"command":"ls -la","description":"List repository contents"}}],"stop_reason":"tool_use"},"session_id":"b8f2c1a4-1111-4a2b-9c3d-000000000001"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01Ab","content":"total 24\ndrwxr-xr-x 3 dev dev 4096 Sep 21 10:00 .","is_error":false}]},"session_id":"b8f2c1a4-1111-4a2b-9c3d-000000000001"}
+{"type":"assistant","message":{"id":"msg_01Ya","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"text","text":"Done. The repository root contains the expected files."}],"stop_reason":"end_turn"},"session_id":"b8f2c1a4-1111-4a2b-9c3d-000000000001"}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":4210,"duration_api_ms":3800,"num_turns":2,"result":"Done. The repository root contains the expected files.","session_id":"b8f2c1a4-1111-4a2b-9c3d-000000000001","total_cost_usd":0.012345,"usage":{"input_tokens":7,"cache_creation_input_tokens":120,"cache_read_input_tokens":18500,"output_tokens":64}}

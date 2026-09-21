@@ -148,7 +148,13 @@ describe('ConfigService.resolve — layer order', () => {
       environment: { defaultDistro: null },
       agents: { executableOverrides: {}, defaultAccountProfiles: {}, defaultExecutionProfiles: {} },
       review: { mediumBlockThreshold: 0 }, // default untouched
-      retention: { mergedWorktreeDays: 1, completedRunLogsDays: 30, discardedRunDays: 30 },
+      retention: {
+        mergedWorktreeDays: 1,
+        completedRunLogsDays: 30,
+        discardedRunDays: 30,
+        worktreeArtifactPatterns: ['node_modules', '.next', '.turbo'],
+        worktreeArtifactIdleDays: 7,
+      },
       observability: { structuredStream: true }, // default untouched
       decisions: { shellConfirmationTimeoutMs: 0, stalledRunTimeoutMs: 0 }, // default untouched
     })
@@ -166,6 +172,8 @@ describe('ConfigService.resolve — layer order', () => {
       'retention.mergedWorktreeDays': 'default',
       'retention.completedRunLogsDays': 'default',
       'retention.discardedRunDays': 'default',
+      'retention.worktreeArtifactPatterns': 'default',
+      'retention.worktreeArtifactIdleDays': 'default',
       'observability.structuredStream': 'default',
       'decisions.shellConfirmationTimeoutMs': 'default',
       'decisions.stalledRunTimeoutMs': 'default',

@@ -51,7 +51,10 @@ import { createCommandExtractor, type CommandExtractor } from './command-extract
  *     at"). Recognition is line-based with a per-Run cross-chunk buffer (the
  *     output batcher cuts at time boundaries) and stays best-effort:
  *     full-screen TUI redraws may not be recognized, so an empty audit never
- *     proves no commands ran. Auditing never blocks the Run.
+ *     proves no commands ran. Auditing never blocks the Run. Runs with an
+ *     attached structured-output parser (TASK-123) are excluded via
+ *     `suppressCommandAudit` — their command audit comes from tool_call
+ *     observations instead, never from both sources.
  */
 
 /** Matches a stored rule pattern against a detected command line. */
@@ -97,9 +100,16 @@ export interface AgentPermissionPreparer {
     approvalMode: ApprovalMode
     runDir: string
   }): IpcResult<PreparedAgentPermission | undefined>
+  /**
+   * TASK-123 (ADR-0013 §3): a run whose structured output stream supplies
+   * `agent.command` audit events turns OFF the `auditCommandPatterns` regex
+   * for that run — structured source wins, the two never double-record.
+   */
+  suppressCommandAudit?(runId: string): void
 }
 
 export interface PermissionManager extends AgentPermissionPreparer {
+  suppressCommandAudit(runId: string): void
   listRules(request?: ListPermissionRulesRequest): IpcResult<PermissionRule[]>
   createRule(request: CreatePermissionRuleRequest): IpcResult<PermissionRule>
   updateRule(request: UpdatePermissionRuleRequest): IpcResult<PermissionRule | null>
@@ -149,6 +159,12 @@ export function createPermissionManager(deps: PermissionManagerDeps): Permission
    * when the Run ends.
    */
   const extractors = new Map<string, CommandExtractor>()
+  /**
+   * TASK-123 (ADR-0013 §3): runs with an attached structured-output parser —
+   * their command audit comes from tool_call observations (agent.command), so
+   * the regex extractor is off for them (no double recording).
+   */
+  const structuredStreamRuns = new Set<string>()
 
   const mergeSession = (
     key: string,
@@ -219,6 +235,8 @@ export function createPermissionManager(deps: PermissionManagerDeps): Permission
   }
 
   const auditChunk = (runId: string, data: string): void => {
+    // Structured-stream runs audit commands from tool_call observations.
+    if (structuredStreamRuns.has(runId)) return
     try {
       auditCommands(runId, extractorFor(runId).push(data))
     } catch (cause) {
@@ -227,6 +245,7 @@ export function createPermissionManager(deps: PermissionManagerDeps): Permission
   }
 
   const finishAudit = (runId: string): void => {
+    structuredStreamRuns.delete(runId)
     const extractor = extractors.get(runId)
     extractors.delete(runId)
     try {
@@ -321,6 +340,12 @@ export function createPermissionManager(deps: PermissionManagerDeps): Permission
   }
 
   const manager: PermissionManager = {
+    suppressCommandAudit(runId) {
+      structuredStreamRuns.add(runId)
+      // Drop any partial line buffer: the structured stream covers the run.
+      extractors.delete(runId)
+    },
+
     listRules(request = {}) {
       return deps.permissions.listApplicableRules(request.workspaceId)
     },
@@ -465,6 +490,7 @@ export function createPermissionManager(deps: PermissionManagerDeps): Permission
       sessionDecisions.clear()
       auditedCommands.clear()
       extractors.clear()
+      structuredStreamRuns.clear()
     },
   }
 

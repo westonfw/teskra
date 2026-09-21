@@ -110,11 +110,19 @@ export type ReviewConfig = z.infer<typeof reviewConfigSchema>
 /**
  * TASK-069 / plan §135: RetentionService GC thresholds, in days. A worktree,
  * run log, or discarded run older than its threshold becomes a GC candidate.
+ *
+ * TASK-133 (Milestone 25 §11): `worktreeArtifactPatterns` names build-output
+ * directories inside a worktree (matched against top-level and one-level-deep
+ * directory names only — no glob); `worktreeArtifactIdleDays` is the idle
+ * threshold after which a `ready`/`dirty` worktree without a live run loses
+ * those directories.
  */
 export const retentionConfigSchema = z.strictObject({
   mergedWorktreeDays: z.number().int().min(0),
   completedRunLogsDays: z.number().int().min(0),
   discardedRunDays: z.number().int().min(0),
+  worktreeArtifactPatterns: z.array(z.string().min(1)),
+  worktreeArtifactIdleDays: z.number().int().min(0),
 })
 export type RetentionConfig = z.infer<typeof retentionConfigSchema>
 
@@ -184,7 +192,15 @@ export const DEFAULT_CONFIG: TeskraConfig = {
   review: { mediumBlockThreshold: 0 },
   // plan §135: merged worktrees are collected quickly; run logs and discarded
   // runs get a longer window for post-hoc audit (ADR-0002).
-  retention: { mergedWorktreeDays: 1, completedRunLogsDays: 30, discardedRunDays: 30 },
+  // TASK-133: node_modules / .next / .turbo are the default build artifacts;
+  // ready/dirty worktrees keep them for a week of idleness.
+  retention: {
+    mergedWorktreeDays: 1,
+    completedRunLogsDays: 30,
+    discardedRunDays: 30,
+    worktreeArtifactPatterns: ['node_modules', '.next', '.turbo'],
+    worktreeArtifactIdleDays: 7,
+  },
   observability: { structuredStream: true },
   // ADR-0014 §4: decisions never expire unless the user opts into a timeout.
   decisions: { shellConfirmationTimeoutMs: 0, stalledRunTimeoutMs: 0 },

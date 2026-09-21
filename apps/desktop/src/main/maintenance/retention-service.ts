@@ -1,5 +1,5 @@
-import { existsSync, realpathSync, rmSync } from 'node:fs'
-import { basename, join, resolve, sep } from 'node:path'
+import { existsSync, lstatSync, readdirSync, realpathSync, rmSync } from 'node:fs'
+import { basename, join, relative, resolve, sep } from 'node:path'
 
 import type {
   AgentRun,
@@ -45,6 +45,17 @@ import type { WorkspaceRuntime } from '../workspace/runtime'
  *   worktree leftover. The agent_runs row is deleted only when no handoff
  *   DB record exists — handoff records are kept by default (ADR-0002
  *   post-hoc audit). Branches of discarded worktrees are never touched.
+ * - worktree artifacts (TASK-133, Milestone 25 §11): build-output
+ *   directories named in `worktreeArtifactPatterns` (matched against
+ *   top-level and one-level-deep directory names only — no glob) are
+ *   deleted from worktrees in a terminal state (`merged` / `discarded` /
+ *   archived) or from `ready` / `dirty` worktrees that have no
+ *   non-terminal run and have been idle for `worktreeArtifactIdleDays`.
+ *   `conflict` worktrees, worktrees with a live run, and the repository
+ *   main working tree are NEVER touched; symlink escapes beyond the
+ *   worktree are skipped and audited (`ownsWorktreePath`, same shape as
+ *   the P1-7 `ownsRunDir` gate). plan() lists an estimated size per item
+ *   (du-style total; "unknown" when estimation exceeds 10 seconds).
  *
  * Guarantees pinned by tests: plan() never mutates; run() checks the abort
  * signal between items (cancellation leaves unprocessed items untouched);
@@ -55,6 +66,8 @@ import type { WorkspaceRuntime } from '../workspace/runtime'
 
 const GIT_TIMEOUT_MS = 60_000
 const DAY_MS = 24 * 60 * 60 * 1000
+/** TASK-133: per-directory size-estimation ceiling; over it → "unknown". */
+const SIZE_ESTIMATE_TIMEOUT_MS = 10_000
 
 /** Runs eligible for log GC: nothing a live process could still append to. */
 const LOG_COLLECTABLE_STATUSES = new Set<AgentRun['status']>([
@@ -63,6 +76,9 @@ const LOG_COLLECTABLE_STATUSES = new Set<AgentRun['status']>([
   'cancelled',
   'interrupted',
 ])
+
+/** TASK-133: a run in any other status still counts as activity on its worktree. */
+const TERMINAL_RUN_STATUSES = LOG_COLLECTABLE_STATUSES
 
 export interface RetentionService {
   plan(request?: RetentionPlanRequest): Promise<IpcResult<RetentionPlan>>
@@ -93,6 +109,11 @@ export interface RetentionServiceDeps {
   readonly pathExists?: (path: string) => boolean
   /** Test hook invoked at each item boundary, before the abort check. */
   readonly onItemStart?: (item: RetentionPlanItem) => void
+  /**
+   * TASK-133: du-style total size of a directory in bytes, or undefined when
+   * the estimation exceeds `timeoutMs` ("unknown"). Tests inject a fake.
+   */
+  readonly measureDirectorySize?: (path: string, timeoutMs: number) => number | undefined
 }
 
 interface WorkspaceContext {
@@ -162,6 +183,60 @@ export function createRetentionService(deps: RetentionServiceDeps): RetentionSer
       'Retention refused to delete a run directory outside the Teskra data root.',
     )
   }
+
+  /**
+   * TASK-133 ownership gate, same shape as ownsRunDir: after realpath the
+   * artifact target must sit below the worktree it was found in. A symlink
+   * (at the top level or one level down) whose target escapes the worktree
+   * fails this check and is skipped with an audit entry.
+   */
+  const ownsWorktreePath = (worktreePath: string, target: string): boolean => {
+    let root = resolve(worktreePath)
+    let resolvedTarget = resolve(target)
+    try {
+      root = realpathSync(worktreePath)
+      resolvedTarget = realpathSync(target)
+    } catch {
+      // Missing path: the lexical check below still applies.
+    }
+    return resolvedTarget !== root && resolvedTarget.startsWith(root + sep)
+  }
+
+  /**
+   * Default du-style size estimate: iterative walk, symlinks not followed
+   * (never count bytes outside the directory), deadline-checked so a huge
+   * node_modules tree degrades to "unknown" instead of stalling plan().
+   */
+  const defaultMeasureDirectorySize = (root: string, timeoutMs: number): number | undefined => {
+    const deadline = Date.now() + timeoutMs
+    let total = 0
+    const stack = [root]
+    while (stack.length > 0) {
+      if (Date.now() > deadline) return undefined
+      const dir = stack.pop() as string
+      let entries
+      try {
+        entries = readdirSync(dir, { withFileTypes: true })
+      } catch {
+        continue
+      }
+      for (const entry of entries) {
+        const full = join(dir, entry.name)
+        if (entry.isSymbolicLink()) continue
+        if (entry.isDirectory()) {
+          stack.push(full)
+          continue
+        }
+        try {
+          total += lstatSync(full).size
+        } catch {
+          // Raced with a writer; the estimate stays best-effort.
+        }
+      }
+    }
+    return total
+  }
+  const measureDirectorySize = deps.measureDirectorySize ?? defaultMeasureDirectorySize
 
   const git = async (
     context: WorkspaceContext,
@@ -314,7 +389,168 @@ export function createRetentionService(deps: RetentionServiceDeps): RetentionSer
     return { ok: true, data: undefined }
   }
 
-  const collect = async (workspaceId?: string): Promise<IpcResult<CollectedPlan>> => {
+  /**
+   * TASK-133: true when the worktree still has a non-terminal run attached
+   * (via either pointer direction). Such worktrees are never touched.
+   */
+  const hasActiveRun = (worktree: Worktree, runs: readonly AgentRun[]): boolean =>
+    runs.some(
+      (run) =>
+        !TERMINAL_RUN_STATUSES.has(run.status) &&
+        (run.worktreeId === worktree.id || run.id === worktree.runId),
+    )
+
+  /**
+   * TASK-133 eligibility gate: terminal state (`merged` / `discarded` /
+   * archived marker), or `ready` / `dirty` idle beyond
+   * `worktreeArtifactIdleDays` with no live run. `conflict`, transitional
+   * states (`creating` / `missing` / `orphaned`), and worktrees with a
+   * non-terminal run are never eligible.
+   */
+  const artifactEligibility = (
+    worktree: Worktree,
+    policy: RetentionConfig,
+    current: Date,
+    activeRun: boolean,
+  ): { ageDays: number; basis: string } | undefined => {
+    if (worktree.state === 'conflict' || activeRun) return undefined
+    if (worktree.state === 'merged' || worktree.state === 'discarded') {
+      const stamp = worktree.mergedAt ?? worktree.discardedAt ?? worktree.updatedAt
+      return { ageDays: ageDays(current, stamp) ?? 0, basis: worktree.state }
+    }
+    if (worktree.archivedAt !== undefined) {
+      return { ageDays: ageDays(current, worktree.archivedAt) ?? 0, basis: 'archived' }
+    }
+    if (worktree.state !== 'ready' && worktree.state !== 'dirty') return undefined
+    const age = ageDays(current, worktree.updatedAt)
+    if (age === undefined || age < policy.worktreeArtifactIdleDays) return undefined
+    return {
+      ageDays: age,
+      basis: `${worktree.state}, idle ${String(age)}d (threshold ${String(policy.worktreeArtifactIdleDays)}d)`,
+    }
+  }
+
+  /**
+   * TASK-133 name matching: top-level entries and entries of top-level
+   * directories (one level down) only — no glob, no deeper descent;
+   * symlinked top-level directories are matched but never descended into.
+   */
+  const findArtifactDirs = (worktreePath: string, patterns: readonly string[]): string[] => {
+    const names = new Set(patterns)
+    const matches: string[] = []
+    let top
+    try {
+      top = readdirSync(worktreePath, { withFileTypes: true })
+    } catch {
+      return matches
+    }
+    for (const entry of top) {
+      const full = join(worktreePath, entry.name)
+      if (names.has(entry.name)) {
+        if (entry.isDirectory() || entry.isSymbolicLink()) matches.push(full)
+        continue
+      }
+      if (!entry.isDirectory()) continue
+      let children
+      try {
+        children = readdirSync(full, { withFileTypes: true })
+      } catch {
+        continue
+      }
+      for (const child of children) {
+        if (names.has(child.name) && (child.isDirectory() || child.isSymbolicLink())) {
+          matches.push(join(full, child.name))
+        }
+      }
+    }
+    return matches
+  }
+
+  /**
+   * TASK-133 main-workspace guard: a worktree record whose path resolves to
+   * the repository root itself is never touched, whatever its state says.
+   */
+  const isMainWorkspacePath = (context: WorkspaceContext, hostPath: string): boolean => {
+    const repoHost = hostPathFor(context, context.workspace.gitRoot ?? context.workspace.path)
+    if (repoHost === undefined) return false
+    let worktreeReal = resolve(hostPath)
+    let repoReal = resolve(repoHost)
+    try {
+      worktreeReal = realpathSync(hostPath)
+      repoReal = realpathSync(repoHost)
+    } catch {
+      // Missing path: the lexical comparison still applies.
+    }
+    return worktreeReal === repoReal
+  }
+
+  const mainWorkspaceWarn = (worktreeId: string, path: string): void => {
+    getLogger('runtime').warn(
+      { worktreeId, path },
+      'Retention skipped a worktree record pointing at the repository main working tree.',
+    )
+  }
+
+  const symlinkEscapeWarn = (worktreeId: string, path: string): void => {
+    getLogger('runtime').warn(
+      { worktreeId, path },
+      'Retention skipped a worktree artifact escaping its worktree via symlink.',
+    )
+  }
+
+  const collectWorktreeArtifactItems = (
+    context: WorkspaceContext,
+    items: RetentionPlanItem[],
+    withSizes: boolean,
+  ): IpcResult<void> => {
+    const listed = deps.worktrees.listByWorkspace(context.workspace.id, undefined, true)
+    if (!listed.ok) return listed
+    const runs = deps.runs.listByWorkspace(context.workspace.id)
+    if (!runs.ok) return runs
+    const current = now()
+    for (const worktree of listed.data) {
+      const eligible = artifactEligibility(
+        worktree,
+        context.policy,
+        current,
+        hasActiveRun(worktree, runs.data),
+      )
+      if (eligible === undefined) continue
+      const hostPath = hostPathFor(context, worktree.path)
+      if (hostPath === undefined || !pathExists(hostPath)) continue
+      if (isMainWorkspacePath(context, hostPath)) {
+        mainWorkspaceWarn(worktree.id, hostPath)
+        continue
+      }
+      for (const target of findArtifactDirs(hostPath, context.policy.worktreeArtifactPatterns)) {
+        // plan() applies the same ownership gate as run(): a symlink escape
+        // is never listed as a deletion candidate.
+        if (!ownsWorktreePath(hostPath, target)) {
+          symlinkEscapeWarn(worktree.id, target)
+          continue
+        }
+        const estimatedBytes = withSizes
+          ? measureDirectorySize(target, SIZE_ESTIMATE_TIMEOUT_MS)
+          : undefined
+        items.push({
+          kind: 'worktree-artifacts',
+          workspaceId: context.workspace.id,
+          worktreeId: worktree.id,
+          ...(worktree.runId === undefined ? {} : { runId: worktree.runId }),
+          path: target,
+          ...(estimatedBytes === undefined ? {} : { estimatedBytes }),
+          ageDays: eligible.ageDays,
+          reason: `worktree is ${eligible.basis}; build-artifact directory ${relative(hostPath, target)} collected`,
+        })
+      }
+    }
+    return { ok: true, data: undefined }
+  }
+
+  const collect = async (
+    workspaceId?: string,
+    withSizes = false,
+  ): Promise<IpcResult<CollectedPlan>> => {
     const policy = deps.resolvePolicy(workspaceId)
     if (!policy.ok) return policy
 
@@ -347,6 +583,8 @@ export function createRetentionService(deps: RetentionServiceDeps): RetentionSer
       if (!worktreeItems.ok) return worktreeItems
       const runItems = collectRunItems(context.data, items)
       if (!runItems.ok) return runItems
+      const artifactItems = collectWorktreeArtifactItems(context.data, items, withSizes)
+      if (!artifactItems.ok) return artifactItems
     }
     return { ok: true, data: { policy: policy.data, items, contexts } }
   }
@@ -525,6 +763,82 @@ export function createRetentionService(deps: RetentionServiceDeps): RetentionSer
     )
   }
 
+  const executeWorktreeArtifacts = (
+    context: WorkspaceContext,
+    item: RetentionPlanItem,
+  ): EntryResult => {
+    const worktreeId = item.worktreeId as string
+    const found = deps.worktrees.getById(worktreeId)
+    if (!found.ok) return found
+    if (found.data === null) return okEntry('skipped', 'worktree record is gone')
+    const worktree = found.data
+
+    // plan() may be stale: re-check the full eligibility gate at execution
+    // time — a resumed run or a state flip since the plan keeps everything.
+    const runs = deps.runs.listByWorkspace(context.workspace.id)
+    if (!runs.ok) return runs
+    const eligible = artifactEligibility(
+      worktree,
+      context.policy,
+      now(),
+      hasActiveRun(worktree, runs.data),
+    )
+    if (eligible === undefined) {
+      return okEntry(
+        'skipped',
+        `worktree is ${worktree.state}${worktree.archivedAt !== undefined ? ' (archived)' : ''} with a live run or inside the idle window; artifacts left untouched`,
+      )
+    }
+    const hostPath = hostPathFor(context, worktree.path)
+    if (hostPath === undefined || !pathExists(hostPath)) {
+      return okEntry('skipped', 'worktree directory is gone')
+    }
+    if (isMainWorkspacePath(context, hostPath)) {
+      mainWorkspaceWarn(worktree.id, hostPath)
+      return okEntry(
+        'skipped',
+        'worktree record points at the repository main working tree; artifacts left untouched',
+      )
+    }
+
+    // One plan item = one directory: delete only this item's target so
+    // sibling items stay meaningful (and individually auditable). Escapes
+    // present at execution time are detected here and audited on this item.
+    const target = item.path
+    if (target === undefined) {
+      return okEntry('skipped', 'no artifact path on the plan item')
+    }
+    const escaped = findArtifactDirs(hostPath, context.policy.worktreeArtifactPatterns)
+      .filter((candidate) => !ownsWorktreePath(hostPath, candidate))
+      .map((candidate) => relative(hostPath, candidate))
+    for (const escapee of escaped) symlinkEscapeWarn(worktree.id, join(hostPath, escapee))
+    const escapeNote = escaped.length > 0 ? `; symlink escapes skipped: ${escaped.join(' + ')}` : ''
+
+    if (!ownsWorktreePath(hostPath, target)) {
+      // The plan was clean but the path was swapped for a symlink meanwhile.
+      symlinkEscapeWarn(worktree.id, target)
+      return okEntry(
+        'skipped',
+        `artifact path escapes its worktree via symlink; left untouched${escapeNote}`,
+      )
+    }
+    if (!pathExists(target)) {
+      return okEntry('skipped', `artifact directory already gone${escapeNote}`)
+    }
+    try {
+      rmSync(target, { recursive: true, force: true })
+    } catch (cause) {
+      return fail({
+        code: 'UNKNOWN',
+        message: 'Failed to delete worktree build artifacts.',
+        retryable: true,
+        detail: `worktree artifact GC failed for ${target}`,
+        cause,
+      })
+    }
+    return okEntry('deleted', `removed ${relative(hostPath, target)}${escapeNote}`)
+  }
+
   const executeItem = async (
     contexts: ReadonlyMap<string, WorkspaceContext>,
     item: RetentionPlanItem,
@@ -545,6 +859,8 @@ export function createRetentionService(deps: RetentionServiceDeps): RetentionSer
         return executeRunLogs(item)
       case 'discarded-run':
         return executeDiscardedRun(context, item)
+      case 'worktree-artifacts':
+        return executeWorktreeArtifacts(context, item)
       default:
         return fail({
           code: 'VALIDATION_FAILED',
@@ -638,7 +954,9 @@ export function createRetentionService(deps: RetentionServiceDeps): RetentionSer
 
   return {
     async plan(request = {}) {
-      const collected = await collect(request.workspaceId)
+      // plan() is the preview: it pays for du-style size estimates; run()
+      // re-collects without them so deletion is never delayed by measuring.
+      const collected = await collect(request.workspaceId, true)
       if (!collected.ok) return collected
       return {
         ok: true,

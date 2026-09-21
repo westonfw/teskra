@@ -1,0 +1,6 @@
+# Fixture: Claude Code 2.0.30 stream-json — failing run (result is_error=true).
+# Source: Claude Code 2.x result event with subtype error_max_turns, per the
+# documented stream-json result schema. Header line is intentionally not JSON.
+{"type":"system","subtype":"init","cwd":"/repo","session_id":"c9a3d2b5-2222-4b3c-8d4e-000000000002","tools":["Bash"],"mcp_servers":[],"model":"claude-sonnet-4-5-20250929","permissionMode":"default","apiKeySource":"none"}
+{"type":"assistant","message":{"id":"msg_02Aa","type":"message","role":"assistant","model":"claude-sonnet-4-5-20250929","content":[{"type":"text","text":"Retrying the API call..."}],"stop_reason":null},"session_id":"c9a3d2b5-2222-4b3c-8d4e-000000000002"}
+{"type":"result","subtype":"error_max_turns","is_error":true,"duration_ms":61000,"num_turns":10,"result":"Reached the maximum number of turns without completing the task.","session_id":"c9a3d2b5-2222-4b3c-8d4e-000000000002","usage":{"input_tokens":900,"cache_creation_input_tokens":0,"cache_read_input_tokens":4000,"output_tokens":2100}}

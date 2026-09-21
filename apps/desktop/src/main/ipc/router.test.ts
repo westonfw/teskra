@@ -340,6 +340,7 @@ function fakeRuntime(): TeskraRuntime {
       list: vi.fn(() => ok([])),
       getOutput: vi.fn(() => ok('')),
       listProgress: vi.fn(() => ok([])),
+      listObservations: vi.fn(() => ok([])),
     },
     account: {
       list: vi.fn(async () => ok([])),
@@ -414,7 +415,13 @@ function fakeRuntime(): TeskraRuntime {
       planRetention: vi.fn(async () =>
         ok({
           generatedAt: '2026-09-10T00:00:00.000Z',
-          policy: { mergedWorktreeDays: 1, completedRunLogsDays: 30, discardedRunDays: 30 },
+          policy: {
+            mergedWorktreeDays: 1,
+            completedRunLogsDays: 30,
+            discardedRunDays: 30,
+            worktreeArtifactPatterns: ['node_modules', '.next', '.turbo'],
+            worktreeArtifactIdleDays: 7,
+          },
           items: [],
         }),
       ),
@@ -424,7 +431,13 @@ function fakeRuntime(): TeskraRuntime {
           finishedAt: '2026-09-10T00:00:00.000Z',
           dryRun: false,
           cancelled: false,
-          policy: { mergedWorktreeDays: 1, completedRunLogsDays: 30, discardedRunDays: 30 },
+          policy: {
+            mergedWorktreeDays: 1,
+            completedRunLogsDays: 30,
+            discardedRunDays: 30,
+            worktreeArtifactPatterns: ['node_modules', '.next', '.turbo'],
+            worktreeArtifactIdleDays: 7,
+          },
           entries: [],
         }),
       ),
@@ -489,7 +502,13 @@ function fakeRuntime(): TeskraRuntime {
               defaultExecutionProfiles: {},
             },
             review: { mediumBlockThreshold: 0 },
-            retention: { mergedWorktreeDays: 1, completedRunLogsDays: 30, discardedRunDays: 30 },
+            retention: {
+              mergedWorktreeDays: 1,
+              completedRunLogsDays: 30,
+              discardedRunDays: 30,
+              worktreeArtifactPatterns: ['node_modules', '.next', '.turbo'],
+              worktreeArtifactIdleDays: 7,
+            },
             observability: { structuredStream: true },
             decisions: { shellConfirmationTimeoutMs: 0, stalledRunTimeoutMs: 0 },
           },
@@ -523,7 +542,13 @@ function fakeRuntime(): TeskraRuntime {
               defaultExecutionProfiles: {},
             },
             review: { mediumBlockThreshold: 0 },
-            retention: { mergedWorktreeDays: 1, completedRunLogsDays: 30, discardedRunDays: 30 },
+            retention: {
+              mergedWorktreeDays: 1,
+              completedRunLogsDays: 30,
+              discardedRunDays: 30,
+              worktreeArtifactPatterns: ['node_modules', '.next', '.turbo'],
+              worktreeArtifactIdleDays: 7,
+            },
             observability: { structuredStream: true },
             decisions: { shellConfirmationTimeoutMs: 0, stalledRunTimeoutMs: 0 },
           },
@@ -686,6 +711,36 @@ describe('Typed IPC Router (TASK-020)', () => {
     const invalid = await ipc.invoke(IPC_CHANNELS.agentListProgress, { runId: 'run-1', extra: 1 })
     expect(invalid).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
     const overLimit = await ipc.invoke(IPC_CHANNELS.agentListProgress, {
+      runId: 'run-1',
+      limit: 10_000,
+    })
+    expect(overLimit).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+  })
+
+  it('pages Agent observation events through the runtime facade (TASK-123)', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    expect(
+      await ipc.invoke(IPC_CHANNELS.agentListObservations, {
+        runId: 'run-1',
+        afterSeq: 3,
+        limit: 100,
+      }),
+    ).toEqual({ ok: true, data: [] })
+    expect(runtime.agent.listObservations).toHaveBeenCalledWith({
+      runId: 'run-1',
+      afterSeq: 3,
+      limit: 100,
+    })
+
+    const invalid = await ipc.invoke(IPC_CHANNELS.agentListObservations, {
+      runId: 'run-1',
+      extra: 1,
+    })
+    expect(invalid).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    const overLimit = await ipc.invoke(IPC_CHANNELS.agentListObservations, {
       runId: 'run-1',
       limit: 10_000,
     })

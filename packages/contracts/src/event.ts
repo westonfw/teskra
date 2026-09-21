@@ -1,6 +1,7 @@
 import type { DiffPatchResult } from './git'
 import type { AccountProfileStatus } from './agent-account'
 import type { AgentProgressEvent } from './agent-progress'
+import type { AgentObservation } from './agent-observation'
 import type { PendingDecision } from './decision'
 import type { PublicAppError } from './error'
 import type { ReviewPanelStatus } from './review'
@@ -127,6 +128,27 @@ export interface WorkbenchEvents {
     runId: string
     truncated: boolean
     sizeBytes: number
+  }
+  /**
+   * TASK-123 (ADR-0013): one normalized observation from the run's structured
+   * output stream, redacted and persisted (events.jsonl + agent_events); `seq`
+   * aligns with the events.jsonl line number so list-observations paging can
+   * resume. Observation-only — it never drives Run state.
+   */
+  'agent.observation': {
+    runId: string
+    seq: number
+    observation: AgentObservation
+  }
+  /**
+   * TASK-123 (ADR-0013 §5): terminal parse tallies of the run's structured
+   * stream — parsed observations vs ignored lines (unknown type / non-JSON /
+   * oversized). Emitted once per run when the run reaches a terminal state.
+   */
+  'agent.observation_summary': {
+    runId: string
+    parsed: number
+    ignored: number
   }
 
   'task.created': {
@@ -282,6 +304,8 @@ export const WORKBENCH_EVENT_NAMES = [
   'agent.stalled',
   'agent.progress',
   'agent.progress_summary',
+  'agent.observation',
+  'agent.observation_summary',
   'task.created',
   'task.updated',
   'git.changed',

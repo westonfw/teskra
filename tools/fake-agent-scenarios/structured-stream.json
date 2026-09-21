@@ -1,0 +1,19 @@
+{
+  "comment": "TASK-123: emits a claude-stream-json-shaped NDJSON stream on stdout. The fake agent definition declares output.structured 'none', so this scenario is parsed only when a test registry overrides the fake definition's output declaration.",
+  "stdout": [
+    "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"fake-session-0001\",\"model\":\"fake-1\"}",
+    "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Fake structured stream started.\"}]}}",
+    "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_fake1\",\"name\":\"Bash\",\"input\":{\"command\":\"fake-agent --scenario structured-stream\"}}]}}",
+    "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_fake1\",\"content\":\"ok\",\"is_error\":false}]}}",
+    "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"duration_ms\":10,\"num_turns\":1,\"result\":\"done\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}"
+  ],
+  "handoff": {
+    "type": "implementation",
+    "summary": "Fake Agent emitted a structured NDJSON stream.",
+    "filesChanged": [],
+    "commandsRun": [{ "command": "fake-agent --scenario structured-stream", "exitCode": 0 }],
+    "tests": [{ "name": "fake deterministic check", "passed": true }],
+    "suggestedNextAction": "Review the deterministic Fake Agent result."
+  },
+  "exitCode": 0
+}

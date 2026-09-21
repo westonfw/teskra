@@ -74,6 +74,7 @@ import {
   projectHistoricalProfileIdentity,
 } from './accounts/runtime-identity'
 import type { ExecutionProfileManager } from './execution-profiles/execution-profile-manager'
+import type { ObservationRecorder } from './observation/observation-recorder'
 import type { WorkspaceRuntime } from '../workspace/runtime'
 
 export interface AgentManager {
@@ -205,6 +206,19 @@ export interface AgentManagerDeps {
    * never a lifecycle gate.
    */
   readonly failureClassifiers?: readonly AgentFailureClassifier[]
+  /**
+   * TASK-123 (§6.2 / ADR-0013): the structured-output observation recorder.
+   * The AgentManager attaches a parser when the launch request carries a
+   * resolved non-`none` `structuredOutput` (TASK-122) and feeds every raw
+   * `process.output` chunk to it BEFORE the 32ms output batcher; on process
+   * exit the recorder's latest `error` observation joins the classifier
+   * context as structuredEvents (ADR-0010 §4). Observation-only — it never
+   * changes Run state.
+   */
+  readonly observations?: Pick<
+    ObservationRecorder,
+    'attach' | 'ingestChunk' | 'flush' | 'structuredErrorFor'
+  >
   /** Resolves the workspace runtime object for profile env projection (§13). */
   readonly resolveRuntime?: (ref: WorkspaceRuntimeRef) => IpcResult<WorkspaceRuntime>
 }
@@ -639,6 +653,16 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     return tail.data ?? ''
   }
 
+  /**
+   * TASK-123 / ADR-0010 §4: the run's latest structured `error` observation
+   * (redacted, observation-only while the run lived) joins the classifier
+   * context as structuredEvents — read ONLY on the post-exit / settle paths.
+   */
+  const structuredErrorEvents = (runId: string): { structuredEvents?: readonly unknown[] } => {
+    const error = deps.observations?.structuredErrorFor(runId)
+    return error === undefined ? {} : { structuredEvents: [error] }
+  }
+
   /** TASK-116 (§41): a run whose terminal classification is a rate limit. */
   const auditRateLimited = (run: AgentRun): void => {
     const classification = run.failureClassification
@@ -663,11 +687,13 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     const finishedAt = now()
     // TASK-105: a launch-time failure has no exit code; the adapter error
     // plus whatever output exists still feeds the classifier (§17.2).
+    deps.observations?.flush(runId)
     const classifier = failureClassifierFor(runId)
     const failureClassification = classifier?.classify({
       outputTail: [readClassificationTail(runId), error.message]
         .filter((part) => part.length > 0)
         .join('\n'),
+      ...structuredErrorEvents(runId),
     })
     appendEvent(runId, 'agent.failed', { error })
     const updated = deps.runs.update(
@@ -761,6 +787,15 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     }
 
     activeAdapters.set(request.runId, adapter)
+    // TASK-123 (§6.2): attach the structured-stream parser BEFORE the adapter
+    // starts so no NDJSON line is missed, and turn off the audit regex for the
+    // run — its command audit arrives as agent.command events from tool_call
+    // observations (structured source wins, ADR-0013 §3).
+    const structuredOutput = request.structuredOutput
+    if (structuredOutput !== undefined && structuredOutput.structured !== 'none') {
+      deps.observations?.attach(request.runId, structuredOutput.structured)
+      deps.permissions?.suppressCommandAudit?.(request.runId)
+    }
     const started =
       pending.resumeSession !== undefined && adapter.resume !== undefined
         ? await adapter.resume({
@@ -962,6 +997,10 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
 
   const stopOutput = deps.events.subscribe('process.output', ({ agentRunId, data }) => {
     if (agentRunId === undefined || !activeAdapters.has(agentRunId)) return
+    // TASK-123: the observation parser sees the raw chunk BEFORE the 32ms
+    // batcher; the terminal.log / readOutput path below is unchanged (ADR-0013
+    // §4). ingestChunk never throws and never touches Run state.
+    deps.observations?.ingestChunk(agentRunId, data)
     outputBatcher.push(agentRunId, data)
   })
 
@@ -1181,6 +1220,10 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
   const stopExited = deps.events.subscribe('process.exited', ({ agentRunId, exitCode, signal }) => {
     if (agentRunId === undefined || !activeAdapters.has(agentRunId)) return
     outputBatcher.flush(agentRunId)
+    // TASK-123: flush the observation parser's held tail line BEFORE the
+    // failure classification below reads structuredErrorFor — a CLI crash
+    // often leaves its final NDJSON error line unterminated.
+    deps.observations?.flush(agentRunId)
     // TASK-107 (§19.3): a registered fail-and-stop intent wins over both the
     // plain-cancel and the exit-code branches — the run lands on failed with
     // the pre-registered classification, never on cancelled.
@@ -1218,6 +1261,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         exitCode,
         ...(signal === undefined ? {} : { signal }),
         outputTail: readClassificationTail(agentRunId),
+        ...structuredErrorEvents(agentRunId),
       })
     appendEvent(agentRunId, `agent.${status}`, {
       exitCode,
@@ -2218,6 +2262,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           request.reason === 'rate-limit'
             ? (failureClassifierFor(source.id)?.classify({
                 outputTail: readClassificationTail(source.id),
+                ...structuredErrorEvents(source.id),
               }) ?? { kind: 'unknown', retryable: true })
             : { kind: 'unknown', retryable: true }
         const stopped = await manager.failAndStop(source.id, classification)

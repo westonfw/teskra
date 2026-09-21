@@ -15,7 +15,8 @@ import { createAgentDetector } from '../agents/agent-detector'
 import { createAgentHealthManager } from '../agents/agent-health-manager'
 import { createAgentManager } from '../agents/agent-manager'
 import { createProgressFollower } from '../agents/progress-follower'
-import { createRunWatchdogService } from '../agents/run-watchdog-service'
+import { createObservationRecorder } from '../agents/observation/observation-recorder'
+import { createRunWatchdogService, type RunWatchdogService } from '../agents/run-watchdog-service'
 import { createDefaultAgentRegistry } from '../agents/agent-registry'
 import { createAccountProfileAdapterRegistry } from '../agents/accounts/account-profile-adapter'
 import { createAccountProfileManager } from '../agents/accounts/account-profile-manager'
@@ -541,6 +542,20 @@ export async function composeTeskraRuntime(
     commands,
     hostPlatform: options.hostPlatform,
   })
+  // TASK-123 (§6.2 / ADR-0013): the structured-output observation recorder.
+  // It must exist BEFORE the AgentManager (the manager attaches parsers and
+  // feeds it raw output chunks), while its silence-baseline target — the
+  // watchdog — can only be created AFTER the manager (it stops runs through
+  // failAndStop). Late-bind the watchdog through this holder; observations
+  // can only arrive once a run launches, long after the holder is set below.
+  const observationWatchdog: { current?: Pick<RunWatchdogService, 'noteActivity'> } = {}
+  const observationRecorder = createObservationRecorder({
+    runLogs,
+    agentEvents: repositories.agentEvents,
+    runs: repositories.agentRuns,
+    events,
+    watchdog: { noteActivity: (runId) => observationWatchdog.current?.noteActivity(runId) },
+  })
   const agentManager = createAgentManager({
     registry: registeredAgents.data,
     adapters: [
@@ -595,6 +610,8 @@ export async function composeTeskraRuntime(
       const resolved = config.resolve({ workspaceId })
       return resolved.ok ? { ok: true, data: resolved.data.config.observability } : resolved
     },
+    // TASK-123 (§6.2): structured-stream parsing on the process.output path.
+    observations: observationRecorder,
   })
   // TASK-119 (Milestone 25 §5): the single periodic task in the Main process —
   // preparing-timeout and idle watchdog over the active runs. All stop actions
@@ -608,6 +625,8 @@ export async function composeTeskraRuntime(
       return resolved.ok ? { ok: true, data: resolved.data.config.watchdog } : resolved
     },
   })
+  // TASK-123: the observation recorder created above now gets its watchdog.
+  observationWatchdog.current = runWatchdog
   // TASK-128 (ADR-0014): the persisted Decision Inbox. The service owns the
   // lifecycle only — the action behind a resolution belongs to the source
   // modules' onResolved handlers (TASK-129/130 wire those). Expiry rides the
@@ -762,7 +781,24 @@ export async function composeTeskraRuntime(
   // TASK-058 shell executor for its Build/Test steps.
   // TASK-118: repo-defined shell commands only execute after the user
   // confirms the full command line (workflow.shell_confirmation_required).
-  const shellConfirmation = createShellConfirmationService({ events })
+  // TASK-129 (ADR-0014): the confirmation is a persisted `shell_confirmation`
+  // PendingDecision; resolve/cancel route through the decision channel, and
+  // decisions.shellConfirmationTimeoutMs (> 0) makes it expire (reject).
+  const shellConfirmation = createShellConfirmationService({
+    events,
+    decisions: decisionService,
+    resolveTimeoutMs: (workspaceId) => {
+      const resolved = config.resolve({ workspaceId })
+      if (!resolved.ok) {
+        getLogger('runtime').error(
+          { workspaceId, error: resolved.error },
+          'Failed to resolve decisions.shellConfirmationTimeoutMs; the confirmation will not expire.',
+        )
+        return 0
+      }
+      return resolved.data.config.decisions.shellConfirmationTimeoutMs
+    },
+  })
   const fullWorkflowEngine = createWorkflowEngine({
     runs: workflowRunStore,
     events,
@@ -1038,8 +1074,21 @@ export async function composeTeskraRuntime(
           ...(outcome === undefined ? {} : { outcome }),
           ...(result === undefined ? {} : { result }),
         }),
+      // TASK-129 (ADR-0014): both channels are compat aliases over the
+      // decision channel — resolve() CAS-resolves the persisted decision and
+      // listPending() reads the open shell_confirmation rows. The service
+      // details carry workspaceId, which the strict response schema forbids.
       confirmShellStep: ({ stepId, approved }) => shellConfirmation.resolve(stepId, approved),
-      listPendingShellConfirmations: () => ({ ok: true, data: shellConfirmation.listPending() }),
+      listPendingShellConfirmations: () => ({
+        ok: true,
+        data: shellConfirmation.listPending().map(({ runId, stepId, nodeId, command, cwd }) => ({
+          runId,
+          stepId,
+          nodeId,
+          command,
+          cwd,
+        })),
+      }),
       dispatch: (request) => dispatchService.dispatch(request),
       iterate: (request) => iterationController.iterate(request),
       startFullWorkflow: (request) => fullWorkflow.start(request),
@@ -1101,6 +1150,7 @@ export async function composeTeskraRuntime(
       getOutput: ({ runId, tailBytes }) =>
         agentManager.getOutput(runId, tailBytes === undefined ? undefined : { tailBytes }),
       listProgress: (request) => progressFollower.list(request),
+      listObservations: (request) => observationRecorder.list(request),
     },
     account: {
       list: (request = {}) => accountProfileManager.list(request),
@@ -1325,6 +1375,8 @@ export async function composeTeskraRuntime(
       // already triggered the followers' final drains); stop the poll timer
       // before the shared RunLogStore releases its handles.
       progressFollower.dispose()
+      // TASK-123: detach the observation parser's terminal-event subscriptions.
+      observationRecorder.dispose()
       // Belt and braces: compose owns the shared RunLogStore — make sure its
       // throttled writes are fsynced and handles released even if the Agent
       // manager's own shutdown path bailed out early.

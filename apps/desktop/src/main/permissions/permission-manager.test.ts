@@ -455,6 +455,18 @@ describe('PermissionManager audit (TASK-065)', () => {
     emitOutput(context, 'run-2', 'exec\nbash -lc "npm test" in /home/dev/ws\n')
     expect(unwrap(context.manager.listAudit({ runId: 'run-2' }))).toEqual([])
   })
+
+  it('stops regex auditing once the structured stream takes over the run (TASK-123)', () => {
+    const context = setup()
+    context.manager.suppressCommandAudit('run-1')
+    emitOutput(context, 'run-1', 'exec\nbash -lc "npm run build" in /home/dev/ws\n')
+    expect(unwrap(context.manager.listAudit({ runId: 'run-1' }))).toEqual([])
+    // Suppression ends with the run: a later same-id chunk (e.g. a resume
+    // without structured output) is audited fresh again.
+    context.events.emit('agent.completed', { runId: 'run-1', exitCode: 0 })
+    emitOutput(context, 'run-1', 'exec\nbash -lc "npm run build" in /home/dev/ws\n')
+    expect(unwrap(context.manager.listAudit({ runId: 'run-1' }))).toHaveLength(1)
+  })
 })
 
 describe('PermissionManager.prepareRunPermission (TASK-065 + TASK-077)', () => {

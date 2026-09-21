@@ -19,13 +19,24 @@ import { ipcIdSchema } from './limits'
  *   `discardedRunDays`, lose the whole run directory and — only when no
  *   handoff DB record exists — the agent_runs row. Handoff records are kept
  *   by default (post-hoc audit value, ADR-0002).
+ * - worktree-artifacts (TASK-133, Milestone 25 §11): build-output directories
+ *   matching `worktreeArtifactPatterns` (top-level and one-level-deep names
+ *   only, no glob) inside terminal (`merged`/`discarded`/archived) worktrees,
+ *   or idle `ready`/`dirty` worktrees without a live run, are deleted.
+ *   `conflict` worktrees, worktrees with a non-terminal run, and the
+ *   repository's main working tree are never touched.
  *
  * plan() is the dry-run preview; run() executes and supports cancellation
  * (one item at a time, checked between items). Every executed item produces
  * an audit entry: what was deleted, why, and when.
  */
 
-export const RETENTION_ITEM_KINDS = ['merged-worktree', 'run-logs', 'discarded-run'] as const
+export const RETENTION_ITEM_KINDS = [
+  'merged-worktree',
+  'run-logs',
+  'discarded-run',
+  'worktree-artifacts',
+] as const
 export const retentionItemKindSchema = z.enum(RETENTION_ITEM_KINDS)
 export type RetentionItemKind = z.infer<typeof retentionItemKindSchema>
 
@@ -36,6 +47,11 @@ export const retentionPlanItemSchema = z.strictObject({
   runId: z.string().min(1).optional(),
   /** Host-side directory affected by the cleanup, when one exists. */
   path: z.string().min(1).optional(),
+  /**
+   * TASK-133: estimated size in bytes of a worktree-artifacts item. Absent
+   * when no estimate was computed or the estimation timed out ("unknown").
+   */
+  estimatedBytes: z.number().int().min(0).optional(),
   ageDays: z.number().int().min(0),
   /** Human-readable justification: which threshold the item exceeded. */
   reason: z.string().min(1),

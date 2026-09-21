@@ -78,6 +78,12 @@ import {
   type ListAgentProgressRequest,
 } from './agent-progress'
 import {
+  agentObservationRecordSchema,
+  listAgentObservationsRequestSchema,
+  type AgentObservationRecord,
+  type ListAgentObservationsRequest,
+} from './agent-observation'
+import {
   bindProfileAliasRequestSchema,
   listProfileAliasesRequestSchema,
   profileAliasSchema,
@@ -477,6 +483,7 @@ export const IPC_CHANNELS = {
   agentRunResume: 'teskra:agent-run:resume',
   agentRunContinueWithProfile: 'teskra:agent:continue-with-profile',
   agentListProgress: 'teskra:agent:list-progress',
+  agentListObservations: 'teskra:agent:list-observations',
   accountList: 'teskra:account:list',
   accountListAdapterAgents: 'teskra:account:adapter-agents:list',
   accountListRateLimitStats: 'teskra:account:rate-limit-stats:list',
@@ -878,6 +885,12 @@ export const agentListProgressChannel = channel(
   IPC_CHANNELS.agentListProgress,
   listAgentProgressRequestSchema,
   z.array(agentProgressRecordSchema),
+)
+// TASK-123 (ADR-0013): page the persisted agent.observation events of a run.
+export const agentListObservationsChannel = channel(
+  IPC_CHANNELS.agentListObservations,
+  listAgentObservationsRequestSchema,
+  z.array(agentObservationRecordSchema),
 )
 // TASK-102 (Milestone 24 §28): account profile CRUD + default + status detect.
 // The alias channels (TASK-111) live right after the login session block.
@@ -1424,6 +1437,7 @@ export const ipcChannelDefinitions = {
   agentRunResume: agentRunResumeChannel,
   agentRunContinueWithProfile: agentRunContinueWithProfileChannel,
   agentListProgress: agentListProgressChannel,
+  agentListObservations: agentListObservationsChannel,
   accountList: accountListChannel,
   accountListAdapterAgents: accountListAdapterAgentsChannel,
   accountListRateLimitStats: accountListRateLimitStatsChannel,
@@ -1619,6 +1633,10 @@ export interface TeskraBridge {
     continueWithProfile(request: ContinueAgentRunRequest): Promise<IpcResult<AgentRun>>
     /** TASK-126 (ADR-0012): persisted agent.progress events, paged by seq. */
     listProgress(request: ListAgentProgressRequest): Promise<IpcResult<AgentProgressRecord[]>>
+    /** TASK-123 (ADR-0013): persisted agent.observation events, paged by seq. */
+    listObservations(
+      request: ListAgentObservationsRequest,
+    ): Promise<IpcResult<AgentObservationRecord[]>>
   }
   /**
    * TASK-102 (Milestone 24 §28/§24.2): account profile CRUD + default + detect,

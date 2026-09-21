@@ -77,4 +77,15 @@ describe('redactSecrets (TASK-004)', () => {
     expect(redacted['token']).toBe(REDACTED)
     expect(redacted['self']).toBe(redacted)
   })
+
+  it('passes numbers under token-named keys through (TASK-123 usage metrics)', () => {
+    const redacted = redactSecrets({
+      inputTokens: 10,
+      cacheReadTokens: 2,
+      apiKey: 'sk-abc123',
+    }) as Record<string, unknown>
+    expect(redacted['inputTokens']).toBe(10)
+    expect(redacted['cacheReadTokens']).toBe(2)
+    expect(redacted['apiKey']).toBe(REDACTED)
+  })
 })

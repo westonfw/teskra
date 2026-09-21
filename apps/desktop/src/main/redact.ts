@@ -89,7 +89,13 @@ function redactValue(value: unknown, seen: Map<object, unknown>): unknown {
     const redacted: Record<string, unknown> = {}
     seen.set(value, redacted)
     for (const [key, entry] of Object.entries(value)) {
-      redacted[key] = SECRET_KEY_PATTERN.test(key) ? REDACTED : redactValue(entry, seen)
+      // Key-based masking is for string secrets; a number or boolean under a
+      // *token-named key (e.g. usage `inputTokens`, TASK-123) is a metric,
+      // not a credential, and passes through.
+      redacted[key] =
+        SECRET_KEY_PATTERN.test(key) && typeof entry === 'string'
+          ? REDACTED
+          : redactValue(entry, seen)
     }
     return redacted
   }

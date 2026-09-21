@@ -35,7 +35,7 @@ import {
   type CredentialStore,
 } from '../security/credential-store'
 import type { CodingAgentAdapter } from './adapters/coding-agent-adapter'
-import { createAgentManager, type AgentManager } from './agent-manager'
+import { createAgentManager, type AgentManager, type AgentManagerDeps } from './agent-manager'
 import { createBuiltInAgentRegistry } from './agent-registry'
 import { createReviewCollector } from './review-collector'
 import { CLAUDE_AGENT } from './definitions/claude'
@@ -114,6 +114,11 @@ function setup(
   credentials?: CredentialStore,
   hostProcesses?: Pick<HostProcessControl, 'probe' | 'identity' | 'terminate'>,
   observability?: ObservabilityConfig,
+  extras?: {
+    observations?: NonNullable<AgentManagerDeps['observations']>
+    permissions?: NonNullable<AgentManagerDeps['permissions']>
+    failureClassifiers?: NonNullable<AgentManagerDeps['failureClassifiers']>
+  },
 ): TestContext {
   const connection = new Database(':memory:')
   connection.pragma('foreign_keys = ON')
@@ -192,6 +197,11 @@ function setup(
     ...(observability === undefined
       ? {}
       : { resolveObservability: () => ({ ok: true as const, data: observability }) }),
+    ...(extras?.observations === undefined ? {} : { observations: extras.observations }),
+    ...(extras?.permissions === undefined ? {} : { permissions: extras.permissions }),
+    ...(extras?.failureClassifiers === undefined
+      ? {}
+      : { failureClassifiers: extras.failureClassifiers }),
   })
   const context = {
     connection,
@@ -1976,5 +1986,118 @@ describe('AgentManager structured output resolution (TASK-122)', () => {
     expect(vi.mocked(context.adapters.claude.start).mock.calls[0]?.[0].structuredOutput).toEqual(
       CLAUDE_AGENT.output,
     )
+  })
+})
+
+describe('AgentManager structured observation wiring (TASK-123 / ADR-0013)', () => {
+  function makeObservations() {
+    return {
+      attach: vi.fn(),
+      ingestChunk: vi.fn(),
+      flush: vi.fn(),
+      structuredErrorFor: vi.fn(() => undefined),
+    }
+  }
+
+  function makePermissions() {
+    return {
+      prepareRunPermission: vi.fn(() => ({ ok: true as const, data: undefined })),
+      suppressCommandAudit: vi.fn(),
+    }
+  }
+
+  it('attaches the parser before the adapter starts and suppresses the audit regex', async () => {
+    const observations = makeObservations()
+    const permissions = makePermissions()
+    const context = setup(undefined, false, undefined, undefined, undefined, {
+      observations,
+      permissions,
+    })
+    const started = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      prompt: 'Implement',
+      mode: 'exec',
+    })
+    expect(started.ok).toBe(true)
+
+    expect(observations.attach).toHaveBeenCalledWith('run-1', 'codex-exec-json')
+    expect(permissions.suppressCommandAudit).toHaveBeenCalledWith('run-1')
+    // The parser attaches BEFORE the process launches, so no NDJSON line is missed.
+    const attachOrder = observations.attach.mock.invocationCallOrder[0]
+    const startOrder = vi.mocked(context.adapters.codex.start).mock.invocationCallOrder[0]
+    expect(attachOrder).toBeDefined()
+    expect(startOrder).toBeDefined()
+    expect(attachOrder!).toBeLessThan(startOrder!)
+  })
+
+  it('feeds raw process.output chunks to the parser BEFORE the 32ms batcher', async () => {
+    const observations = makeObservations()
+    const context = setup(undefined, false, undefined, undefined, undefined, { observations })
+    await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      prompt: 'Implement',
+      mode: 'exec',
+    })
+    const batched: string[] = []
+    context.events.subscribe('agent.output', ({ data }) => batched.push(data))
+
+    const chunk = '{"type":"turn.started"}\n'
+    context.events.emit('process.output', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      data: chunk,
+    })
+    // Synchronously ingested; the batched agent.output event has NOT fired yet.
+    expect(observations.ingestChunk).toHaveBeenCalledWith('run-1', chunk)
+    expect(batched).toEqual([])
+  })
+
+  it('does not attach a parser for interactive runs or structured:"none" agents', async () => {
+    const observations = makeObservations()
+    const permissions = makePermissions()
+    const context = setup(undefined, false, undefined, undefined, undefined, {
+      observations,
+      permissions,
+    })
+    // Interactive claude: mode gate closes the parser even though the gate is on.
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'claude' })
+    expect(observations.attach).not.toHaveBeenCalled()
+    expect(permissions.suppressCommandAudit).not.toHaveBeenCalled()
+  })
+
+  it('hands the structured error to the classifier on a failed exit (ADR-0010 §4)', async () => {
+    const structuredError = { kind: 'error' as const, message: 'rate limit exceeded, try again' }
+    const observations = {
+      ...makeObservations(),
+      structuredErrorFor: vi.fn(() => structuredError),
+    }
+    const classify = vi.fn(() => ({ kind: 'rate-limited' as const, retryable: true }))
+    const context = setup(undefined, false, undefined, undefined, undefined, {
+      observations,
+      failureClassifiers: [{ agentId: 'codex', classify }],
+    })
+    await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      prompt: 'Implement',
+      mode: 'exec',
+    })
+    context.events.emit('process.exited', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      exitCode: 1,
+    })
+
+    // The held tail line was flushed before classification read the error.
+    expect(observations.flush).toHaveBeenCalledWith('run-1')
+    expect(classify).toHaveBeenCalledWith(
+      expect.objectContaining({ exitCode: 1, structuredEvents: [structuredError] }),
+    )
+    expect(context.manager.get('run-1')).toMatchObject({
+      ok: true,
+      data: { status: 'failed', failureClassification: { kind: 'rate-limited' } },
+    })
   })
 })

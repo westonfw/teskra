@@ -144,6 +144,7 @@ export function createShellStepExecutor(deps: ShellStepExecutorDeps): WorkflowSt
           }
         }
         const approved = await deps.confirmation.request({
+          workspaceId: context.workspaceId,
           runId: run.id,
           stepId: step.id,
           nodeId: node.id,

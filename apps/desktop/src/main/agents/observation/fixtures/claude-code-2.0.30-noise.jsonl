@@ -1,0 +1,10 @@
+# Fixture: Claude Code 2.0.30 stream-json — protocol noise tolerance.
+# Contains CRLF line endings, an unknown event type, a rate_limit_event, and a
+# non-JSON garbage line; parsers must ignore/count them and keep going.
+{"type":"system","subtype":"init","cwd":"/repo","session_id":"d4b5e6f7-3333-4c5d-9e5f-000000000003","tools":["Read"],"model":"claude-sonnet-4-5-20250929"}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"five_hour"},"session_id":"d4b5e6f7-3333-4c5d-9e5f-000000000003"}
+{"type":"assistant","message":{"id":"msg_03Bb","role":"assistant","content":[{"type":"tool_use","id":"toolu_03Cd","name":"Read","input":{"file_path":"/repo/README.md"}}]},"session_id":"d4b5e6f7-3333-4c5d-9e5f-000000000003"}
+this is not json at all
+{"type":"some_future_event","payload":{"x":1}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_03Cd","content":[{"type":"text","text":"readme contents"}],"is_error":false}]},"session_id":"d4b5e6f7-3333-4c5d-9e5f-000000000003"}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":1500,"num_turns":1,"result":"readme contents","session_id":"d4b5e6f7-3333-4c5d-9e5f-000000000003","total_cost_usd":0.001,"usage":{"input_tokens":5,"output_tokens":9}}

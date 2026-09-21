@@ -1,0 +1,8 @@
+# Fixture: Codex CLI 0.154.0 `codex exec --json` — failed turn + stream error.
+# Source: codex-rs exec JSON error shapes (turn.failed, error) as observed from
+# codex-cli 0.154.0. Header line is intentionally NOT JSON.
+{"type":"thread.started","thread_id":"029b23de-5555-4f60-b7c8-000000000005"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","item_type":"command_execution","command":"bash -lc 'exit 3'","aggregated_output":"","exit_code":3,"status":"completed"}}
+{"type":"turn.failed","error":{"message":"stream disconnected before completion: rate limit exceeded, please try again later"}}
+{"type":"error","message":"stream error: idle timeout waiting for SSE"}
