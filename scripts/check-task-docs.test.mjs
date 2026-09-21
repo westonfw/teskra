@@ -1,15 +1,18 @@
-// Guards the Milestone 24 <-> design doc §59 consistency check: the parser must
-// read both heading levels and both docs must currently agree end-to-end.
+// Guards the Milestone <-> design doc consistency check: the parser must
+// read both heading levels and every registered doc pair must currently agree
+// end-to-end.
 import { readFileSync } from 'node:fs'
 
 import { describe, expect, it } from 'vitest'
 
 import {
+  checkAllTaskDocs,
   checkTaskDocs,
   compareTaskEntries,
   DESIGN_DOC,
   extractSection,
   parseTaskEntries,
+  TASK_DOC_PAIRS,
   TASKS_DOC,
 } from './check-task-docs.mjs'
 
@@ -87,9 +90,30 @@ describe('compareTaskEntries', () => {
   })
 })
 
+describe('checkTaskDocs', () => {
+  it('accepts a custom pair so a second milestone can be checked with its own section anchors', () => {
+    const pair = {
+      label: 'fixture',
+      designDoc: 'unused',
+      milestoneStart: /^# Milestone 24\b/,
+      designStart: /^## 59\./,
+      designEnd: /^## 60\./,
+    }
+    expect(checkTaskDocs(tasksFixture, designFixture, pair)).toEqual([])
+  })
+})
+
 describe('repository documents', () => {
   it('Milestone 24 and the design doc §59 currently agree', () => {
     const diffs = checkTaskDocs(readFileSync(TASKS_DOC, 'utf8'), readFileSync(DESIGN_DOC, 'utf8'))
     expect(diffs).toEqual([])
+  })
+
+  it('every registered milestone/design-doc pair currently agrees', () => {
+    const results = checkAllTaskDocs()
+    expect(results.map((result) => result.label)).toEqual(TASK_DOC_PAIRS.map((pair) => pair.label))
+    for (const { label, diffs } of results) {
+      expect(diffs, label).toEqual([])
+    }
   })
 })

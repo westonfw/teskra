@@ -55,6 +55,12 @@ docs/decisions/  = 已裁决的架构问题
 | [0006](decisions/0006-workflow-run-task-optional.md) | WorkflowRun 独立于 Task（`workflow_runs.task_id` 可空） |
 | [0007](decisions/0007-persist-agent-run-mode.md) | AgentRun 持久化启动模式（`agent_runs.mode`），resume 复用原模式 |
 | [0008](decisions/0008-criteria-set-task-nullable.md) | Criteria Set 可脱离 Task（`acceptance_criteria_sets.task_id` 可空） |
+| [0009](decisions/0009-account-profile-is-a-full-cli-home.md) | AccountProfile = 完整 CLI Home（账号即环境） |
+| [0010](decisions/0010-rate-limit-is-a-failure-reason-not-a-run-status.md) | 限额是失败原因，**不是 Run 状态** |
+| [0011](decisions/0011-workflow-references-profile-aliases.md) | Workflow 引用可移植的 Profile alias |
+| [0012](decisions/0012-agent-progress-file-contract.md) | Agent 运行中的进度 / 阻塞走追加式文件契约（`progress.jsonl`） |
+| [0013](decisions/0013-structured-output-stream-is-observation-only.md) | exec 模式的结构化输出流只观测不控制 |
+| [0014](decisions/0014-pending-decisions-are-one-persisted-inbox.md) | 所有人工决策进同一个持久化收件箱（`pending_decisions`） |
 
 > ADR-0007 与 ADR-0008 曾一度都写作 0007，已按落地时间先后重排
 > （0007 对应 migration 009，0008 对应 migration 010）。旧文档里的「ADR-0007：
@@ -4426,6 +4432,620 @@ repo-local executable override 禁止
 - TASK-098 / TASK-099 的 WSL2 隔离端到端：目前只有 mock 级单测；主机已装 Ubuntu-24.04，
   但未做应用级 WSL 实机跑通（账号 Home 创建、runtime-aware 所有权校验、登录终端）。
 - Playwright E2E 套件（软件渲染）本批次未运行。
+
+---
+
+# Milestone 25 — Run Observability & Decision Inbox
+
+Run 可观测性与人工决策收件箱。设计说明与「为什么这么定」见
+`docs/teskra-run-observability-and-decisions-implementation.md`（下称「设计文档」），
+本 Milestone 是 TASK-119～133 编号、优先级、依赖与验收标准的**唯一权威**
+（设计文档 §16 只是带设计理由的副本）。相关裁决：ADR-0012 / ADR-0013 / ADR-0014。
+借鉴来源与 License 约束见设计文档 §1 / §20（Multica **仅行为参考**，禁止复制源码）。
+
+**数据库 Schema 权威在 plan §139.1。** 本 Milestone 涉及
+`017_agent_run_queue_and_retry.sql`（`agent_runs` 两列）、`018_agent_run_usage.sql`、
+`019_pending_decisions.sql` 三个 migration，表结构以设计文档 §12 为准，已同步进 plan §139.1。
+
+一致性校验：改 Task 集合 / 优先级 / 依赖时先改本文档，再跑
+`npm run check:task-docs`（`scripts/check-task-docs.mjs`）核对设计文档 §16 是否同步。
+
+推荐实施顺序（Phase A～E）见设计文档 §17；要点：**TASK-119 必须先于 TASK-128**
+（Decision 过期复用它的 tick），**TASK-129 必须在 TASK-131 之前**（先切数据源再做页面），
+**TASK-121 最后做**。
+
+硬约束（每个 Task 都适用）：不新增 `AgentRunStatus` 取值（ADR-0010）；结构化流与进度
+文件只观测不控制（ADR-0012 / 0013）；Runtime 层不 import `electron`；所有周期任务
+只允许存在于 RunWatchdogService 一个定时器上。
+
+---
+
+## TASK-119 — RunWatchdogService：preparing 超时与静默看门狗
+
+**优先级：P0**
+
+**依赖：TASK-085, TASK-107**
+
+### 实施内容
+
+```text
+apps/desktop/src/main/agents/run-watchdog-service.ts
+config: watchdog.preparingTimeoutMs (默认 300_000)
+        watchdog.idleTimeoutMs      (默认 7_200_000；0 = 关闭)
+        watchdog.idleAction         ('ask' | 'stop'，默认 'ask')
+events: agent.watchdog { runId, check, silentForMs }
+        agent.stalled  { runId, silentForMs, action }
+```
+
+主进程唯一的周期任务（`WATCHDOG_TICK_MS = 15_000`）。判定复用 `packages/shared` 的
+`inspectRunWatchdog()`，动作只走 `failAndStop()` / `cancel()`，自己不碰进程。
+`idleAction === 'ask'` 在本 Task 只发 `agent.stalled` 事件；开 Decision 由 TASK-130 接入。
+
+### 验收标准
+
+- [x] `status === 'preparing'` 且 `now - updatedAt >= preparingTimeoutMs` 时调用
+      `failAndStop(runId, { kind: 'process-crash', retryable: true, evidence })`。
+- [x] `failAndStop` 返回 `CONFLICT`（launch 进行中）时不写 failed；连续 3 次后改发
+      `agent.stalled`，不再重试强停（有测试：`adapter.start` 挂起期间 tick 三次）。
+- [x] `created` / `queued` 不计入 preparing 超时。
+- [x] 静默判定输入 `idleTimeoutMs`，与既有 `stalledThresholdMs`（UI 提示）互不影响；`0` 关闭。
+- [x] `idleAction === 'stop'` → `failAndStop(runId, { kind: 'unknown', retryable: true, evidence })`；
+      `'ask'` → 只发 `agent.stalled`，Run 状态不变。
+- [x] `lastOutputAt` 由 PTY 输出、`agent.progress`（TASK-126）、`agent.observation`（TASK-123）
+      共同刷新（本 Task 先定义刷新入口，后两者接入时复用）。
+- [x] 用户对同一 Run 选择「继续等待」后，以 `last_input_at` 为新基线（本 Task 提供
+      `acknowledgeIdle(runId)` 入口）。
+- [x] tick 重入被跳过（上一 tick 未完成则不排队）；`dispose()` 后不再触发。
+- [x] 假时钟单测覆盖以上全部分支；不 import `electron`。
+- [x] Settings → General 增加三项配置（i18n）。
+
+---
+
+## TASK-120 — 持久化 queued_reason 并在 UI 展示
+
+**优先级：P2**
+
+**依赖：TASK-084**
+
+### 实施内容
+
+migration `017_agent_run_queue_and_retry.sql` 的 `agent_runs.queued_reason`
+（`capacity | directory_busy | worktree_busy | fifo`，可空）；`AgentRun.queuedReason?`。
+
+### 验收标准
+
+- [x] `start()` 入队时写原因：已有 queued 行 → `fifo`；容量不足 → `capacity`。
+- [x] `advanceQueue()` 跳过候选时按跳过原因更新（`directory_busy` / `worktree_busy` / `capacity`），
+      值不变不写库。
+- [x] 离开 `queued` 时置 NULL；migration CHECK 拒绝非法取值（有「让它失败」的测试）。
+- [x] Run 列表对 `queued` 显示原因标签（i18n）。
+- [x] `attended` 模式同目录写冲突仍在 `start()` 直接拒绝（TASK-084 硬限制不变，有测试）。
+
+---
+
+## TASK-121 — 瞬时故障自动重试（仅 network）
+
+**优先级：P2**
+
+**依赖：TASK-105, TASK-107, TASK-119**
+
+### 实施内容
+
+```text
+config: retry.transientAttempts (int 0..3，默认 1)
+column: agent_runs.retry_of_run_id (migration 017)
+```
+
+复用 TASK-107 Continuation：源 Run 退出后创建同 worktree / 同 Profile 的目标 Run，
+`providerSession` 存在则 `resume`。
+
+### 验收标准
+
+- [ ] 仅当 `failureClassification.kind === 'network' && retryable` 且 `handoff.parseStatus !== 'ok'`
+      且 Run 不属于 Workflow 步骤且链上尝试次数 < `transientAttempts` 时触发；四个条件各有反例测试。
+- [ ] `rate-limited` / `authentication-*` / `permission` / `unknown` / `process-crash` 不自动重试。
+- [ ] 目标 Run 写 `retry_of_run_id`；链回溯计数正确（三次失败停在上限）。
+- [ ] 目标 Run 只在源进程确认退出后创建（复用 §19.3 survivor 判定，不新写）。
+- [ ] `transientAttempts = 0` 时行为与现在完全一致。
+- [ ] 持久事件 `agent.retry_scheduled { sourceRunId, targetRunId, attempt }`。
+
+---
+
+## TASK-122 — AgentDefinition 输出协议族声明
+
+**优先级：P1**
+
+**依赖：TASK-022, TASK-025**
+
+### 实施内容
+
+```ts
+output?: { structured: 'none' | 'claude-stream-json' | 'codex-exec-json'; structuredArgs?: string[] }
+config: observability.structuredStream (boolean，默认 true)
+```
+
+claude → `['--output-format', 'stream-json', '--verbose']`；codex → `['--json']`
+（位于 `exec` 之后、prompt 之前）；kimi / fake → `none`。
+
+### 验收标准
+
+- [ ] `agentDefinitionSchema` 接受缺省（视为 `none`）；`structured !== 'none'` 时
+      `structuredArgs` 必填（superRefine）。
+- [ ] 仅 `mode === 'exec'` 且配置开启时把 `structuredArgs` 拼进命令行；interactive 不变；
+      配置关闭时命令行与现在逐字相同（快照测试）。
+- [ ] Codex 的 `-c sandbox_workspace_write.writable_roots=[...]` 仍先于 `exec`，`--json` 在其后（参数顺序测试）。
+- [ ] Claude 的 `--session-id` / `--permission-mode` / `--settings` / `--add-dir` 与新参数共存。
+- [ ] `AgentStartRequest` 带上解析后的 `structuredOutput` 供 TASK-123 使用。
+
+---
+
+## TASK-123 — StructuredOutputParser 与观测事件
+
+**优先级：P1**
+
+**依赖：TASK-122, TASK-031, TASK-039**
+
+### 实施内容
+
+```text
+apps/desktop/src/main/agents/observation/
+  line-splitter.ts
+  claude-stream-json.ts
+  codex-exec-json.ts
+  observation-recorder.ts
+contracts: agent-observation.ts (AgentObservation 判别联合)
+events:    agent.observation, agent.observation_summary
+IPC:       teskra:agent:list-observations { runId, afterSeq?, limit? }
+```
+
+### 验收标准
+
+- [ ] 只对 `structuredOutput !== 'none'` 的 Run 挂 Parser；数据源是 `process.output` chunk，
+      在 32 ms 批处理之前；`terminal.log` 与 `readOutput` 语义不变。
+- [ ] `\r` 去除、按 `\n` 切行、半行跨 chunk 正确拼接；单行 > 64 KiB 丢弃计数。
+- [ ] 每协议 ≥ 3 份来自真实 CLI 的 fixture（文件头记录 CLI 版本），覆盖 session /
+      assistant_text / tool_call / tool_result / usage / error / result。
+- [ ] 未知 `type` 与非 JSON 行忽略并计数；Run 结束写 `agent.observation_summary { parsed, ignored }`。
+- [ ] 观测持久化前 `redactSecrets`；`tool_call.input` / `tool_result.output` 截断到 4 KiB，
+      `assistant_text` 到 8 KiB。
+- [ ] 命令类 tool_call（Claude `Bash`、Codex `command_execution`）追加 `agent.command`，
+      且该 Run 的 `auditCommandPatterns` 正则被关闭（不重复，有测试）。
+- [ ] `providerSession` 缺失时用 `session` 观测补写；已存在不覆盖。
+- [ ] `error` 观测作为 `structuredError` 传给 FailureClassifier（只在进程退出后分类，ADR-0010 §4）。
+- [ ] Parser 任何异常不改变 Run 状态、不终止进程（有 fuzz 风格测试：随机字节流）。
+- [ ] `agent.observation` 刷新 `lastOutputAt`（TASK-119 入口）。
+
+---
+
+## TASK-124 — Usage 计量与聚合
+
+**优先级：P1**
+
+**依赖：TASK-123, TASK-006**
+
+### 实施内容
+
+migration `018_agent_run_usage.sql`；`UsageRepository`（`upsertAdd` / `getByRun` / `summarize`）；
+IPC `teskra:usage:summary` / `teskra:usage:get-by-run`；事件 `usage.updated`。
+
+### 验收标准
+
+- [ ] `usage` 观测到达时累加（Claude 一次 `result`；Codex 每个 `turn.completed`）；累加语义测试。
+- [ ] `cost_usd_micros` 只在 provider 报告时写，缺失存 NULL；**不**自行估价（有断言无价目表常量）。
+- [ ] `summarize` 通过 join `agent_runs` 按 workspace / agentType / accountProfileId 分组，
+      `since` 过滤；无冗余维度列。
+- [ ] 表 CHECK 拒绝负数（有「让它失败」的测试）；`ON DELETE CASCADE` 随 Run 删除。
+- [ ] UI：Run 详情头部 tokens / cost（NULL 显示「未报告」）；账号卡片最近 24h / 7d；
+      Dashboard `usage` 卡片。
+- [ ] 用量不进入限额判定（ADR-0010）；Repository 无 SQL 外泄到 Manager。
+
+---
+
+## TASK-125 — Activity / Progress 视图
+
+**优先级：P2**
+
+**依赖：TASK-123, TASK-126, TASK-030**
+
+### 验收标准
+
+- [ ] Run 详情新增 `Activity` Tab：观测事件时间线，tool call 可折叠展示 input / result。
+- [ ] 新增 `Progress` Tab：进度事件列表与百分比。
+- [ ] exec 且有结构化流的 Run 默认落在 Activity；`Terminal` Tab 仍显示原始输出。
+- [ ] 通过 `list-observations` / `list-progress` 分页加载，订阅 `agent.observation` / `agent.progress` 增量追加。
+- [ ] 全部文案 i18n；E2E（软件渲染）用 Fake Agent `structured-stream` 场景断言 Activity 出现 tool call。
+
+---
+
+## TASK-126 — Progress 文件契约与 follower
+
+**优先级：P1**
+
+**依赖：TASK-051, TASK-078, TASK-039**
+
+### 实施内容
+
+```text
+env:       TESKRA_PROGRESS_PATH=<dataRoot>/runs/<runId>/progress.jsonl
+contracts: agent-progress.ts (agentProgressEventSchema)
+main:      apps/desktop/src/main/agents/progress-follower.ts
+events:    agent.progress, agent.progress_summary
+IPC:       teskra:agent:list-progress { runId, afterSeq?, limit? }
+```
+
+### 验收标准
+
+- [ ] `paths.runFiles()` 增加 `progress`；`runLogFiles()` 纳入 `progress.jsonl`；
+      `RunLogStore.initialize()` **不**预创建它。
+- [ ] `cli-agent-adapter` 作为系统层最后写入 `TESKRA_PROGRESS_PATH`，WSL 路径经 `runtimeScopedPaths` 转换。
+- [ ] 轮询 1 秒（不用 `fs.watch`），只读新增字节，半行保留；终态后最后 drain 一次再停止。
+- [ ] 坏行跳过并计数（每 Run WARN 一次）；单行 > 8 KiB 跳过；文件 > 4 MiB 停止跟随并写
+      `agent.progress_summary { truncated: true }`。
+- [ ] 通过的行 `redactSecrets` 后持久化为 `agent.progress`（`events.jsonl` + `agent_events`）并广播。
+- [ ] 每条进度事件刷新 `lastOutputAt`（TASK-119 入口）。
+- [ ] `blocker` / `question` 通过回调暴露给 TASK-130（本 Task 只发事件）；Run 状态不变。
+- [ ] 文件不存在不是错误、不记 WARN。
+- [ ] Fake Agent 新增场景 `progress-blocker`（写两条 progress + 一条 blocker 后等待）。
+
+---
+
+## TASK-127 — Agent 协议说明与文档一致性测试
+
+**优先级：P1**
+
+**依赖：TASK-126, TASK-079**
+
+### 实施内容
+
+`resources/prompts/teskra-agent-protocol.md`（`{{protocol}}` 变量）；五个内置模板增加
+「Progress (optional)」段；`prompt-protocol-consistency.test.ts`。
+
+### 验收标准
+
+- [ ] 协议文档列出 `TESKRA_RUN_ID` / `TESKRA_HANDOFF_PATH` / `TESKRA_ARTIFACT_DIR` /
+      `TESKRA_PROGRESS_PATH`、Handoff 必填字段、进度事件四种 `kind`、以及「stdout 不会被当作结果」。
+- [ ] 一致性测试：`cli-agent-adapter.ts` 注入的 `TESKRA_*` 变量集合 == 文档提及集合；
+      文档中的 `kind` 列表 == `agentProgressEventSchema` 枚举；任一漂移测试失败。
+- [ ] `buildVariables` 增加 `env.TESKRA_PROGRESS_PATH` 与 `protocol`；未提供时 `VALIDATION_FAILED`（沿用既有规则）。
+- [ ] `{{protocol}}` 位于 memory 之后、Handoff 段之前，纳入 ContextBuilder 预算统计。
+- [ ] 仓库本地覆盖模板（受 Workspace Trust 门控）未包含 `{{protocol}}` 时记 WARN，不阻塞。
+
+---
+
+## TASK-128 — PendingDecision 领域模型、Repository 与 Migration
+
+**优先级：P0**
+
+**依赖：TASK-007, TASK-090, TASK-119**
+
+### 实施内容
+
+```text
+migration: 019_pending_decisions.sql
+contracts: decision.ts (PendingDecision, DecisionKind, DecisionOption, detail 判别联合)
+main:      apps/desktop/src/main/decisions/decision-repository.ts
+           apps/desktop/src/main/decisions/decision-service.ts
+events:    decision.opened, decision.resolved
+IPC:       teskra:decision:list, teskra:decision:resolve
+config:    decisions.shellConfirmationTimeoutMs, decisions.stalledRunTimeoutMs (int ≥ 0，默认 0)
+```
+
+### 验收标准
+
+- [ ] DDL 与 plan §139.1 逐列一致；partial unique index、三个 CHECK、`SET NULL` FK 各有
+      「让它失败」的测试；workspace 删除级联。
+- [ ] `open()` 按 `dedupeKey` 幂等：真并发（两个并行 `open`）只产生一行、只发一次 `decision.opened`。
+- [ ] `resolve()` CAS：只有 `open → resolved` 成功一次，第二次返回 `CONFLICT`；
+      解决动作由 `onResolved(kind, handler)` 订阅方执行，Service 不依赖 Git / AgentManager。
+- [ ] `expire()` 由 TASK-119 的 tick 调用，按 kind 默认动作：shell 确认 = 拒绝、
+      stalled_run = 继续等待、agent_blocker = 无动作；超时 `0` 永不过期。
+- [ ] `cancelBySource(runId | workflowRunId)` 把来源的 open 行置 `cancelled`。
+- [ ] 启动 reconciliation：open 的 `shell_confirmation` → `expired` 并写审计（有重启模拟测试）。
+- [ ] `options` 中不允许「记住选择」类选项（Schema 层没有该字段，文档写明）。
+- [ ] `detail_json` 按 kind 的 Zod 判别联合校验；`resolution_json` 含 `decidedBy: user | timeout | system`。
+- [ ] IPC 请求 `strictObject`；`list` 支持 `workspaceId? / kind? / status?`。
+
+---
+
+## TASK-129 — Shell 确认迁移到 Decision Inbox
+
+**优先级：P0**
+
+**依赖：TASK-128, TASK-058**
+
+### 验收标准
+
+- [ ] `shell-confirmation.ts` 的 `request()` 先 `decisionService.open({ kind: 'shell_confirmation', dedupeKey: stepId, ... })`
+      再挂内存 settle；`resolve` / `cancel` 经 Decision 通道。
+- [ ] 既有 `shell-confirmation.test.ts` 全部通过；批准仍记入 step result（`confirmationRecord`）。
+- [ ] `decisions.shellConfirmationTimeoutMs > 0` 时超时 → `expired` → step 拒绝并记审计。
+- [ ] 重启后 open 的 shell 确认不可再批准（`resolve` 返回 `VALIDATION_FAILED`），步骤走
+      reconciliation 失败路径。
+- [ ] `workflowShellConfirmation` / `workflowListPendingShellConfirmations` 通道保留为兼容别名，
+      内部转到 decision 通道；`workflow.shell_confirmation_required` 事件继续发出。
+- [ ] `ShellConfirmationHost` 数据源改为 `decision.list({ kind: 'shell_confirmation', status: 'open' })`。
+- [ ] 无「always allow」；命令与 cwd 完整展示（不变）。
+
+---
+
+## TASK-130 — 其它决策来源接入
+
+**优先级：P1**
+
+**依赖：TASK-128, TASK-119, TASK-126, TASK-045, TASK-108**
+
+### 验收标准
+
+- [ ] `stalled_run`：TASK-119 `idleAction === 'ask'` 时开 Decision（选项 `keep_waiting` / `stop`），
+      同一 Run 只一条 open；`keep_waiting` → `acknowledgeIdle`，`stop` → `failAndStop`。
+- [ ] `agent_blocker`：TASK-126 的 `blocker` / `question` 开 Decision（`question` 为 `info`）；
+      选项 `acknowledge` / `stop`；`stop` → `cancel(runId)`；Run 状态在开 Decision 时不变。
+- [ ] `merge_blocked`：`merge-service.ts` 仅含可覆盖 blocker 时开 Decision（`force_merge` 为 danger），
+      硬 blocker 仍直接 `MERGE_BLOCKED`；`force_merge` → `merge({ force: true })`。
+- [ ] `rate_limit`：`settleFailedStop` / `stopExited` 分类为 `rate-limited` 时开 Decision，
+      选项与 TASK-108 Alert 一致（`continue_with_account` / `retry` / `wait`）；Alert 保留。
+- [ ] `handoff_degraded`：`handoff-collector` 产出 `degraded` 时开 Decision（`open_raw` / `dismiss`）。
+- [ ] Run / Workflow 终结时 `cancelBySource`（`stopExited`、`cancel`、`settleFailedStop` 各一处，有测试）。
+- [ ] 每种来源各有「开 → 解决 → 动作执行」的端到端单测。
+
+---
+
+## TASK-131 — Inbox UI 与 Dashboard 接入
+
+**优先级：P1**
+
+**依赖：TASK-128, TASK-071, TASK-092**
+
+### 验收标准
+
+- [ ] 新页面 Inbox：按 severity 分组，展示来源上下文链接与选项按钮；`danger` 选项二次确认。
+- [ ] 导航常驻 open 计数角标，订阅 `decision.opened` / `decision.resolved` 增量更新。
+- [ ] Dashboard `waitingForYou` = `decision.list({ status: 'open' })` ∪ 原 `needs_review` Task；
+      `recentFailures` 对 `rate_limit` 项给「继续」入口。
+- [ ] `severity === 'blocking'` 打开时发一次桌面通知（仅 RendererEventBridge 层，可在 Settings 关闭）。
+- [ ] 全部文案 i18n；E2E：Fake Agent `progress-blocker` 场景 → Inbox 出现 → 选 `stop` → Run `cancelled`。
+
+---
+
+## TASK-132 — 安全模型文档与 Doctor 凭据暴露检查
+
+**优先级：P1**
+
+**依赖：TASK-041, TASK-088**
+
+### 验收标准
+
+- [x] `docs/security-model.md` 覆盖设计文档 §10.1 四点；AGENTS.md 文档树收录。
+- [x] Doctor 新增 `credential-exposure`（warning，只读）：列出 Teskra `process.env` 与当前
+      Workspace `env` 中 `looksLikeSecretKey()` 命中的**键名**；测试断言输出不含任何值。
+- [x] 存在 `approvalMode === 'full-auto' && worktreeId === undefined` 的活动 Run 时给出提示。
+- [ ] `[Windows 验证]` 大小写不敏感的 env 不重复列出同一键。
+- [x] 检查项 `detail` 指向 `docs/security-model.md`；Doctor 页面渲染。
+
+---
+
+## TASK-133 — Retention 回收 worktree 构建产物
+
+**优先级：P2**
+
+**依赖：TASK-069, TASK-044**
+
+### 实施内容
+
+```text
+config: retention.worktreeArtifactPatterns (默认 ['node_modules', '.next', '.turbo'])
+        retention.worktreeArtifactIdleDays (默认 7)
+kind:   worktree-artifacts
+```
+
+### 验收标准
+
+- [ ] 仅匹配 worktree 顶层与一级子目录名（不做 glob）；只处理状态 ∈ `{merged, discarded, archived}`，
+      或 `ready` / `dirty` 且无非终态 Run 且空闲超过 `worktreeArtifactIdleDays`。
+- [ ] `conflict` 状态永不处理；有活动 Run 的 worktree 不处理；主工作区永不处理。
+- [ ] `ownsWorktreePath` 守卫：`realpath` 后必须位于 worktree 之下，符号链接逃逸跳过并审计。
+- [ ] `plan()` 不写；列出估算大小（超时 10 秒显示未知）；`run()` 逐项可中断。
+- [ ] 审计条目沿用 `RetentionAuditEntry`；`dispose()` 等待进行中的 run。
+
+---
+
+## Milestone 25 验证记录
+
+（实施后填写；`[Windows 验证]` 项未实测不得勾选。）
+
+---
+
+# Milestone 26 — Thread-first Interaction
+
+线程优先交互：零配置启动、从消息建 Task、对话式续聊、消息指令、Workflow 一键启动。
+设计说明与「为什么这么定」见 `docs/teskra-thread-first-interaction-implementation.md`
+（下称「设计文档」），本 Milestone 是 TASK-134～140 编号、优先级、依赖与验收标准的
+**唯一权威**（设计文档 §14 只是带设计理由的副本）。
+
+**没有新的 migration，不新增 ADR。** 线程是 Run / Handoff / 观测 / 进度 / Decision 的只读投影，
+建立在 ADR-0004 / 0012 / 0013 / 0014 之上。
+
+一致性校验：改 Task 集合 / 优先级 / 依赖时先改本文档，再跑
+`npm run check:task-docs`（`scripts/check-task-docs.mjs`）核对设计文档 §14 是否同步。
+
+推荐实施顺序见设计文档 §15：Phase 1（TASK-134～137）不依赖 Milestone 25，可先做；
+Phase 2（TASK-138～140）依赖 Milestone 25 的 TASK-123 / 126 / 128 / 130。
+
+硬约束（每个 Task 都适用）：线程模式只走 `mode: 'exec'`，不与 CLI 的 TUI 对话（ADR-0004）；
+不做 stdin 协议，一轮 = 一个 Run；线程模式不允许 `attended + manual` 组合（ADR-0002）；
+不新增表；Renderer 只组装现有的 `StartAgentRunRequest` / `StartReviewRunRequest` /
+`FullWorkflowStartRequest`。
+
+---
+
+## TASK-134 — DefaultSelectionService：可解释的运行默认值
+
+**优先级：P0**
+
+**依赖：TASK-089, TASK-101, TASK-024**
+
+### 实施内容
+
+```text
+apps/desktop/src/main/agents/default-selection-service.ts
+contracts: run-defaults.ts (ResolvedRunDefaults)
+IPC:       teskra:agent:resolve-defaults { workspaceId, role? }
+config:    agents.defaultAgent (string | null，global / workspace 层可写)
+```
+
+### 验收标准
+
+- [ ] `agentType` 按五级回退选择：`agents.defaultAgent` → 本 Workspace 最近一次成功 Run 的 Agent →
+      按 role 匹配 `defaults.role` 的已安装且健康 Agent 中 `routing.priority` 最高者 →
+      任意已安装 Agent 中 `routing.priority` 最高者 → `VALIDATION_FAILED`；每级各有测试。
+- [ ] 健康过滤排除 `unavailable` / `rate-limited`（AgentHealth，TASK-024）。
+- [ ] `accountProfileId` 来自 `AccountProfileManager.getDefault(agentType)`；`executionProfileId`
+      来自 `config.agents.defaultExecutionProfiles`。
+- [ ] 固定默认：`mode: 'exec'`、`executionMode: 'orchestrated'`、`approvalMode: 'safe-auto'`、`isolation: 'worktree'`。
+- [ ] `reasons[]` 对每个字段给出 i18n key + 参数，与实际选择一致（测试断言）。
+- [ ] 同一服务提供 Workflow 用的 implementer / reviewers 默认（reviewers = role `reviewer` 的健康 Agent 去掉 implementer）。
+- [ ] Agent id 一律来自 AgentRegistry，不硬编码。
+
+---
+
+## TASK-135 — 快速启动 UI 与从消息建 Task
+
+**优先级：P0**
+
+**依赖：TASK-134, TASK-034, TASK-092**
+
+### 实施内容
+
+Tasks 列表页顶部输入框；Task 页底部常驻输入框；默认值灰字行可展开修改；
+`teskra:task:send-message { taskId?, workspaceId, text }`（本 Task 先实现 `kind: 'run'` 分支）。
+
+### 验收标准
+
+- [ ] Tasks 页输入多行文本发送：首行（trim，≤ `IPC_NAME_MAX`）为标题，其余为描述，创建 Task 并启动首轮 Run。
+- [ ] Task 页输入框发送：以 `ResolvedRunDefaults` 组装 `StartAgentRunRequest`（`taskId` 绑定），
+      worktree 由 FullWorkflowService 同款逻辑预建。
+- [ ] 默认值行显示「agent · 账号 · 模式 · 审批」及 `reasons` tooltip；展开后可改，改动只影响本次发送。
+- [ ] 无可用 Agent 时输入框禁用并链接到 Settings → Agents。
+- [ ] `attended + manual` 组合在此入口不可选；「在终端中启动」按钮保留原启动卡片路径。
+- [ ] 原启动卡片与 Runs 列表移到 Task 页 `Runs` Tab，功能不变（既有测试通过）。
+- [ ] 请求 `strictObject`；所有文案 i18n；E2E：Tasks 页输入两行文本 → Task 创建 → 首轮 Run 启动。
+
+---
+
+## TASK-136 — 消息指令解析与映射
+
+**优先级：P1**
+
+**依赖：TASK-135, TASK-052, TASK-063, TASK-111**
+
+### 实施内容
+
+```text
+packages/shared: parseMessageDirectives(text) 纯函数
+指令: /agent /account /mode /approval /model /workflow full [--test "<cmd>"] /@<agentId>
+```
+
+### 验收标准
+
+- [ ] 指令只允许在消息开头的连续行；其余文本为 prompt；解析结果为结构化对象（无 IO，单测覆盖全部指令）。
+- [ ] 未知指令 / 非法取值 → `VALIDATION_FAILED` 带行号，不启动任何 Run。
+- [ ] `/account` 接受 alias 或 id，alias 经 ProfileAliasManager 解析（ADR-0011）。
+- [ ] `/mode attended` 且 `/approval manual` → 拒绝并解释；其余组合映射到 `executionMode` / `approvalMode`。
+- [ ] `/workflow full` → `FullWorkflowStartRequest`（`--test` 覆盖 `testCommand`）。
+- [ ] `@<agentId> <text>` → `StartReviewRunRequest`（`taskId`、reviewer 角色、`prompt = text`）。
+- [ ] 输入框对 `/` 与 `@` 提供来自 AgentRegistry / 账号列表的自动补全；不做自由文本猜测。
+- [ ] `send-message` 返回 `kind: 'run' | 'review' | 'workflow'` 与对应 id。
+
+---
+
+## TASK-137 — Workflow 启动器默认值与两态弹窗
+
+**优先级：P1**
+
+**依赖：TASK-134, TASK-063, TASK-118**
+
+### 验收标准
+
+- [ ] 弹窗默认态显示一句话摘要（implementer / reviewers / testCommand）与「启动」；「修改」展开原三项。
+- [ ] 摘要来源：DefaultSelectionService + 仓库 `full.yaml`（仅 Trusted Workspace 读取，TASK-118）。
+- [ ] 无任何输入时以默认值启动成功（测试）；三项在 UI 层全部可选，与契约一致。
+- [ ] 仓库 YAML 覆盖的 test command 仍走 `requireConfirmation` 打标（TASK-118 行为不变，有测试）。
+- [ ] 文案 i18n。
+
+---
+
+## TASK-138 — ThreadProjection：Task 线程只读投影
+
+**优先级：P0**
+
+**依赖：TASK-123, TASK-126, TASK-128, TASK-032, TASK-051**
+
+### 实施内容
+
+```text
+apps/desktop/src/main/tasks/thread-projection.ts
+contracts: thread.ts (ThreadItem 判别联合、taskThreadRequestSchema)
+IPC:       teskra:task:thread { taskId, afterCursor?, limit? } → { items, nextCursor? }
+```
+
+### 验收标准
+
+- [ ] 五类线程项：`user_message`（`run.prompt`）、`agent_reply`、`agent_progress`、`decision`、`system`
+      （Review / Workflow / 状态变化）；各有测试。
+- [ ] `agent_reply` 正文 = 该 Run 的 `assistant_text` 观测按 seq 拼接（上限 32 KiB，截断标记）；
+      无结构化流回退 Handoff `summary`；再回退 `terminal.log` 尾部 2000 字符并标记 `source: 'terminal'`。
+- [ ] 游标 `(createdAt, id)` 稳定分页；`limit` 上限 200。
+- [ ] 只读：Repository 只提供批量读取；测试用只读连接断言无写入。
+- [ ] Manager 不写 SQL；请求 `strictObject`。
+
+---
+
+## TASK-139 — 线程续聊：user-message Continuation
+
+**优先级：P0**
+
+**依赖：TASK-138, TASK-107, TASK-042, TASK-130**
+
+### 实施内容
+
+`continueAgentRunRequestSchema.reason` 增加 `'user-message'`；`buildContinuationPrompt` 增加
+`userMessage` 段；`send-message` 的续聊分支；`question` Decision 回答接回下一轮。
+
+### 验收标准
+
+- [ ] 续用条件四项全部满足才 resume：最近 exec Run 已终态、`providerSession` 存在、
+      worktree `ready` / `dirty` 且无其它非终态 Run 占用、Agent / 账号 / 模式未变；每项各有反例测试。
+- [ ] 最近 Run 仍在运行 → `CONFLICT`，不创建行，UI 保留输入。
+- [ ] 不满足续用条件 → 普通 `start` 新一轮（同 Task、预建 worktree）。
+- [ ] `user-message` 在流程 B（源仍在运行）被拒绝且不跑分类器（延续 P1-2 原则）。
+- [ ] `userMessage` 段位于 Handoff 上下文之后，受 `CONTINUATION_PROMPT_MAX` 约束。
+- [ ] `question` Decision 的回答写入 `resolution.note` 并作为下一条消息进入本流程（端到端单测）。
+- [ ] 线程模式强制 `mode: 'exec'`；`attended + manual` 被拒（测试断言无此启动路径）。
+
+---
+
+## TASK-140 — 线程 UI 与 E2E
+
+**优先级：P1**
+
+**依赖：TASK-138, TASK-139, TASK-136, TASK-125**
+
+### 验收标准
+
+- [ ] Task 页默认视图为 Thread；`Runs` / `Terminal` 为并列 Tab；interactive Run 在线程里显示
+      「在终端中运行」系统项并链接。
+- [ ] 订阅 `agent.*` / `decision.*` / `workflow.run_updated` 后按 Run id 局部刷新，不整页重拉。
+- [ ] Decision 项可在线程内直接解决（复用 Inbox 的选项组件）；Workflow 项可展开步骤。
+- [ ] Runs 页 Run 卡片增加「在线程中查看」。
+- [ ] 所有文案 i18n。
+- [ ] E2E（软件渲染，Fake Agent）：建 Task → 首轮回复出现 → 第二条消息以 resume 启动 →
+      `/workflow full` 出现 Workflow 卡片 → `@fake review` 出现 Review 系统项。
+
+---
+
+## Milestone 26 验证记录
+
+（实施后填写；`[Windows 验证]` 项未实测不得勾选。）
 
 ---
 

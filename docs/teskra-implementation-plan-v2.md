@@ -5651,6 +5651,82 @@ Manager 同款规则归一（`normalizeWindowsConfigHome`，单点实现在
 `agents/accounts/external-config-home.ts`）；归一后撞唯一索引时按 `created_at, id`
 先建行胜出，后建行保持原字节存储并记 WARN，迁移不得因存量数据崩溃。
 
+## 017_agent_run_queue_and_retry.sql — 排队原因与重试链（TASK-120 / TASK-121）
+
+Milestone 25 设计文档 §12.1。纯 `ADD COLUMN`，不需要表重建，不设 `foreignKeysOff`。
+不新增 `AgentRunStatus` 取值（ADR-0010）：等待原因与重试关系都是 `queued` / `failed` 的附加信息。
+
+```sql
+ALTER TABLE agent_runs
+  ADD COLUMN queued_reason TEXT
+  CHECK (queued_reason IS NULL OR queued_reason IN ('capacity', 'directory_busy', 'worktree_busy', 'fifo'));
+
+ALTER TABLE agent_runs
+  ADD COLUMN retry_of_run_id TEXT REFERENCES agent_runs(id) ON DELETE SET NULL;
+
+CREATE INDEX idx_agent_runs_retry_of ON agent_runs(retry_of_run_id);
+```
+
+`queued_reason` 只在 `status = 'queued'` 期间非空，离开该状态时置 NULL；
+`retry_of_run_id` 指向被自动重试的源 Run（仅 `network` 类瞬时失败，设计文档 §5.4）。
+
+## 018_agent_run_usage.sql — Run 用量（TASK-124）
+
+设计文档 §7 / §12.2。每 Run 一行，由结构化观测流的 `usage` 事件累加（ADR-0013）。
+聚合维度（workspace / agent / account profile）通过 join `agent_runs` 获得，不冗余存列。
+
+```sql
+CREATE TABLE agent_run_usage (
+  run_id             TEXT PRIMARY KEY REFERENCES agent_runs(id) ON DELETE CASCADE,
+  source             TEXT NOT NULL,               -- 'claude-stream-json' | 'codex-exec-json'
+  model              TEXT,
+  input_tokens       INTEGER NOT NULL DEFAULT 0,
+  output_tokens      INTEGER NOT NULL DEFAULT 0,
+  cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
+  cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+  cost_usd_micros    INTEGER,                     -- provider 报告才写；NULL = 未报告，不自行估价
+  turns              INTEGER NOT NULL DEFAULT 0,
+  updated_at         TEXT NOT NULL,
+  CHECK (input_tokens >= 0 AND output_tokens >= 0 AND cache_read_tokens >= 0 AND cache_write_tokens >= 0)
+);
+CREATE INDEX idx_agent_run_usage_updated ON agent_run_usage(updated_at DESC);
+```
+
+## 019_pending_decisions.sql — 人工决策收件箱（TASK-128）
+
+设计文档 §9 / §12.3，ADR-0014。`dedupe_key` 上的 partial unique index 是 `open()`
+幂等的并发守卫；来源引用一律 `ON DELETE SET NULL`——决策记录属于 ADR-0002 的事后审计，
+不随 Run / Worktree 的 Retention 删除而消失，只随 Workspace 级联。
+
+```sql
+CREATE TABLE pending_decisions (
+  id               TEXT PRIMARY KEY,
+  workspace_id     TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  kind             TEXT NOT NULL CHECK (kind IN (
+                     'shell_confirmation', 'agent_blocker', 'stalled_run',
+                     'merge_blocked', 'rate_limit', 'handoff_degraded')),
+  status           TEXT NOT NULL CHECK (status IN ('open', 'resolved', 'expired', 'cancelled')),
+  severity         TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'blocking')),
+  run_id           TEXT REFERENCES agent_runs(id) ON DELETE SET NULL,
+  workflow_run_id  TEXT REFERENCES workflow_runs(id) ON DELETE SET NULL,
+  workflow_step_id TEXT REFERENCES workflow_steps(id) ON DELETE SET NULL,
+  worktree_id      TEXT REFERENCES worktrees(id) ON DELETE SET NULL,
+  dedupe_key       TEXT NOT NULL,
+  title            TEXT NOT NULL,
+  detail_json      TEXT NOT NULL,
+  options_json     TEXT NOT NULL,
+  resolution_json  TEXT,
+  expires_at       TEXT,
+  created_at       TEXT NOT NULL,
+  resolved_at      TEXT
+);
+CREATE UNIQUE INDEX idx_pending_decisions_open_dedupe
+  ON pending_decisions(dedupe_key) WHERE status = 'open';
+CREATE INDEX idx_pending_decisions_workspace_open
+  ON pending_decisions(workspace_id, created_at DESC) WHERE status = 'open';
+CREATE INDEX idx_pending_decisions_run ON pending_decisions(run_id);
+```
+
 ## 外键与删除策略（全表汇总）
 
 原文有 4 处关联缺少显式 FK 与删除策略，此处补齐：
