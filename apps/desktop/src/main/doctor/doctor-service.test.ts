@@ -120,6 +120,9 @@ function setup(overrides: Partial<DoctorServiceDeps> = {}) {
     pathExists: () => true,
     canAccessDataDirectory: () => true,
     now: () => '2026-09-10T01:00:00.000Z',
+    // Keep the host process.env out of tests: the credential-exposure check
+    // would otherwise see whatever secrets the dev machine exports.
+    processEnv: () => ({ PATH: '/usr/bin', HOME: '/home/demo' }),
     ...overrides,
   }
   return { service: createDoctorService(deps), deps }
@@ -369,6 +372,108 @@ describe('DoctorService (TASK-041)', () => {
     expect(result.data.checks.find(({ id }) => id === 'worktree')).toMatchObject({
       outcome: 'skipped',
       severity: 'info',
+    })
+  })
+
+  describe('credential-exposure (TASK-132)', () => {
+    function fullAutoRun(id: string): AgentRun {
+      return {
+        id,
+        workspaceId: workspace.id,
+        agentType: 'codex',
+        approvalMode: 'full-auto',
+        status: 'preparing',
+        executionMode: 'attended',
+        runDir: `/runs/${id}`,
+        createdAt: '2026-09-10T00:00:00.000Z',
+        updatedAt: '2026-09-10T00:00:00.000Z',
+      }
+    }
+
+    it('lists only key names and never any value', async () => {
+      const { service } = setup({
+        processEnv: () => ({ GITHUB_TOKEN: 'ghp_value123456', PATH: '/usr/bin' }),
+        workspaces: {
+          getById: vi.fn(() => ({
+            ok: true as const,
+            data: { ...workspace, env: { API_SECRET: 'sk-secretvalue999' } },
+          })),
+        },
+      })
+
+      const result = await service.run({ workspaceId: workspace.id })
+
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      const check = result.data.checks.find(({ id }) => id === 'credential-exposure')
+      expect(check).toMatchObject({ outcome: 'issue', severity: 'warning' })
+      expect(check?.detail).toContain('GITHUB_TOKEN')
+      expect(check?.detail).toContain('API_SECRET')
+      expect(check?.detail).toContain('docs/security-model.md')
+      // The whole serialized check (summary + detail + relatedIds) must be
+      // free of every secret value.
+      const serialized = JSON.stringify(check)
+      expect(serialized).not.toContain('ghp_value123456')
+      expect(serialized).not.toContain('sk-secretvalue999')
+      // No full-auto Run is active, so no such hint appears.
+      expect(serialized).not.toContain('full-auto')
+    })
+
+    it('dedupes environment keys case-insensitively (Windows semantics)', async () => {
+      const { service } = setup({
+        processEnv: () => ({ API_KEY: 'value-one', api_key: 'value-two' }),
+      })
+
+      const result = await service.run({ workspaceId: workspace.id })
+
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      const check = result.data.checks.find(({ id }) => id === 'credential-exposure')
+      expect(check?.summary).toContain('1 secret-looking environment variable(s)')
+      const occurrences = check?.detail?.match(/api_key/gi) ?? []
+      expect(occurrences).toHaveLength(1)
+    })
+
+    it('warns about active full-auto Runs without worktree isolation', async () => {
+      const run = fullAutoRun('run-full-auto')
+      const { service } = setup({
+        runs: {
+          listActive: vi.fn(() => ({ ok: true as const, data: [run] })),
+          listByWorkspace: vi.fn(() => ({ ok: true as const, data: [run] })),
+        },
+      })
+
+      const result = await service.run({ workspaceId: workspace.id })
+
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.data.checks.find(({ id }) => id === 'credential-exposure')).toMatchObject({
+        outcome: 'issue',
+        severity: 'warning',
+        relatedIds: ['run-full-auto'],
+      })
+      expect(result.data.checks.find(({ id }) => id === 'credential-exposure')?.detail).toContain(
+        'full-auto',
+      )
+    })
+
+    it('scopes the full-auto hint to the requested workspace', async () => {
+      const run: AgentRun = { ...fullAutoRun('run-elsewhere'), workspaceId: 'workspace-other' }
+      const { service } = setup({
+        runs: {
+          listActive: vi.fn(() => ({ ok: true as const, data: [run] })),
+          listByWorkspace: vi.fn(() => ({ ok: true as const, data: [] })),
+        },
+      })
+
+      const result = await service.run({ workspaceId: workspace.id })
+
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.data.checks.find(({ id }) => id === 'credential-exposure')).toMatchObject({
+        outcome: 'pass',
+        severity: 'info',
+      })
     })
   })
 })

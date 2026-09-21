@@ -11,7 +11,7 @@ Teskra 是一个 **Windows-first、Task-first、Agent-first** 的桌面端多 Ag
 用于在同一个 GUI 内统一调度 Codex CLI、Claude Code 等 Coding Agent，并提供 Workspace、
 PTY Terminal、Git Worktree 隔离、Review、Crash Recovery 与 Workflow 编排能力。
 
-**当前仓库状态：TASK-001~093 的功能主体均已实现并有测试覆盖。** npm workspaces
+**当前仓库状态：TASK-001～118 的功能主体均已实现并有测试覆盖；Milestone 25 / 26（TASK-119～140）已立项未实施。** npm workspaces
 monorepo（`apps/desktop` + `packages/contracts` + `packages/shared`），Electron +
 React + TypeScript + electron-vite 可构建可打包；main 进程约 60 个模块（Agent /
 Process / Terminal / Workspace / Git / Workflow / Permission / Memory / Recovery /
@@ -19,17 +19,22 @@ DB 等）齐备，Vitest 单测 1100+ 用例，Playwright E2E 已接入 CI（暂
 
 **不要把本仓库当成空骨架**：新增功能前先读对应模块的现有实现与测试，不要重建已有能力。
 
-已知的待修问题（含 4 项阻塞级）见 `docs/code-review-2026-09-12.md`，
-动相关模块前请先读该文档对应条目。
+已知的待修问题见 `docs/code-review-2026-09-12.md` 与 `docs/code-review-2026-09-21.md`
+（后者的 P0-1 / P0-2 / P0-3 / P1-1 已修），动相关模块前请先读对应条目。
 
 设计文档在 `docs/` 下：
 
 ```text
 docs/
 ├─ teskra-implementation-plan-v2.md   # 总体实现方案（V2）
-├─ teskra-tasks.md                    # TASK 编号与验收标准的唯一权威（TASK-001~093）
+├─ teskra-tasks.md                    # TASK 编号与验收标准的唯一权威（TASK-001～140）
 ├─ code-review-2026-09-12.md          # 全量 Code Review 结论与待修项清单
+├─ code-review-2026-09-21.md          # Milestone 24 Code Review（多账号）
+├─ teskra-multi-account-subscription-implementation.md   # Milestone 24 设计文档（TASK-094~118）
+├─ teskra-run-observability-and-decisions-implementation.md # Milestone 25 设计文档（TASK-119~133）
+├─ teskra-thread-first-interaction-implementation.md        # Milestone 26 设计文档（TASK-134~140）
 ├─ release.md                         # 签名与发布流程
+├─ security-model.md                  # 面向用户的安全模型说明（TASK-132）
 └─ decisions/                         # ADR（架构决策记录）
    ├─ 0001-v2-supersedes-v1-definitions.md
    ├─ 0002-permission-system-policy-and-audit.md
@@ -41,7 +46,10 @@ docs/
    ├─ 0008-criteria-set-task-nullable.md
    ├─ 0009-account-profile-is-a-full-cli-home.md
    ├─ 0010-rate-limit-is-a-failure-reason-not-a-run-status.md
-   └─ 0011-workflow-references-profile-aliases.md
+   ├─ 0011-workflow-references-profile-aliases.md
+   ├─ 0012-agent-progress-file-contract.md
+   ├─ 0013-structured-output-stream-is-observation-only.md
+   └─ 0014-pending-decisions-are-one-persisted-inbox.md
 ```
 
 ## 文档权威性（实现任何功能前必读）

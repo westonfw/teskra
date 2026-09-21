@@ -20,6 +20,7 @@ import type { GitManager } from '../git/git-manager'
 import type { TeskraPaths } from '../paths'
 import type { CommandRunner } from '../process/command-runner'
 import type { ProcessManager } from '../process/process-manager'
+import { looksLikeSecretKey } from '../redact'
 import type { WorkspaceRuntime } from '../workspace/runtime'
 import type { WslManager } from '../workspace/wsl-manager'
 
@@ -47,6 +48,8 @@ export interface DoctorServiceDeps {
   readonly pathExists?: (path: string) => boolean
   readonly canAccessDataDirectory?: (path: string) => boolean
   readonly now?: () => string
+  /** Defaults to `() => process.env`; injectable so tests never see the host env. */
+  readonly processEnv?: () => NodeJS.ProcessEnv
 }
 
 function check(
@@ -113,6 +116,71 @@ function isConflictCode(code: string): boolean {
   return code.includes('U') || code === 'AA' || code === 'DD'
 }
 
+const SECURITY_MODEL_DOC = 'docs/security-model.md'
+
+/**
+ * TASK-132: names (never values) of the secret-looking variables a Run
+ * inherits. Windows environment keys are case-insensitive, so entries that
+ * differ only by casing are listed once — the first-seen spelling wins.
+ */
+function collectSecretEnvKeys(
+  ...sources: readonly (Record<string, unknown> | undefined)[]
+): string[] {
+  const seen = new Set<string>()
+  const keys: string[] = []
+  for (const source of sources) {
+    if (source === undefined) continue
+    for (const key of Object.keys(source)) {
+      const folded = key.toLocaleLowerCase()
+      if (seen.has(folded) || !looksLikeSecretKey(key)) continue
+      seen.add(folded)
+      keys.push(key)
+    }
+  }
+  return keys
+}
+
+/**
+ * TASK-132 (design doc §10.2): read-only inventory of the credentials any Run
+ * can read. Only key names ever appear in the report — values are neither
+ * read nor printed.
+ */
+function credentialExposureCheck(
+  secretEnvKeys: readonly string[],
+  unisolatedFullAutoRuns: readonly { readonly id: string }[],
+): DoctorCheck {
+  const docRef = `See ${SECURITY_MODEL_DOC} for Teskra's security model and hardening recommendations.`
+  if (secretEnvKeys.length === 0 && unisolatedFullAutoRuns.length === 0) {
+    return pass(
+      'credential-exposure',
+      'Credential exposure',
+      'No secret-looking environment variables are inherited by Runs.',
+      docRef,
+    )
+  }
+  const summary =
+    secretEnvKeys.length > 0
+      ? `${String(secretEnvKeys.length)} secret-looking environment variable(s) will be inherited by Runs.`
+      : 'Active full-auto Run(s) without worktree isolation can read every inherited credential.'
+  const parts: string[] = []
+  if (secretEnvKeys.length > 0) {
+    parts.push(`Keys (values are never read or shown): ${secretEnvKeys.join(', ')}.`)
+  }
+  if (unisolatedFullAutoRuns.length > 0) {
+    parts.push(
+      `${String(unisolatedFullAutoRuns.length)} active full-auto Run(s) are executing without worktree isolation; every inherited credential is readable by them.`,
+    )
+  }
+  return issue(
+    'credential-exposure',
+    'Credential exposure',
+    'warning',
+    summary,
+    `${parts.join(' ')} ${docRef}`,
+    unisolatedFullAutoRuns.map(({ id }) => id),
+  )
+}
+
 /** TASK-041 diagnostic aggregation. It observes state and never repairs or mutates it. */
 export function createDoctorService(deps: DoctorServiceDeps): DoctorService {
   const pathExists = deps.pathExists ?? existsSync
@@ -127,6 +195,7 @@ export function createDoctorService(deps: DoctorServiceDeps): DoctorService {
       }
     })
   const now = deps.now ?? (() => new Date().toISOString())
+  const processEnv = deps.processEnv ?? (() => process.env)
 
   return {
     async run(request = {}) {
@@ -510,6 +579,21 @@ export function createDoctorService(deps: DoctorServiceDeps): DoctorService {
               ),
         )
       }
+
+      const unisolatedFullAutoRuns = !activeRuns.ok
+        ? []
+        : activeRuns.data.filter(
+            (run) =>
+              (request.workspaceId === undefined || run.workspaceId === request.workspaceId) &&
+              run.approvalMode === 'full-auto' &&
+              run.worktreeId === undefined,
+          )
+      checks.push(
+        credentialExposureCheck(
+          collectSecretEnvKeys(processEnv(), workspace?.env),
+          unisolatedFullAutoRuns,
+        ),
+      )
 
       const severity = overallSeverity(checks)
       return {
