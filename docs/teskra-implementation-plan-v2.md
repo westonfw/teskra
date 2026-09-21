@@ -5628,6 +5628,29 @@ CREATE TABLE agent_execution_profiles (
 );
 ```
 
+## 015_workspace_trust.sql — Workspace Trust 级别（TASK-118）
+
+设计文档 §43。纯 `ADD COLUMN`，不需要表重建，不设 `foreignKeysOff`。
+
+```sql
+ALTER TABLE workspaces
+  ADD COLUMN trust_level TEXT NOT NULL DEFAULT 'restricted'
+  CHECK (trust_level IN ('trusted', 'restricted'));
+```
+
+`'trusted'` 才加载 repo-local workflows / prompts / config / memory；存量行默认
+`'restricted'`（显式信任才放行，与 VS Code Workspace Trust 一致）。
+
+## 016_external_config_home_normalize — external config_home 存量归一（数据迁移）
+
+纯数据迁移，无 DDL 变更（SQL 步骤为占位注释，工作在迁移事务内的 `run` 钩子中完成）。
+背景见 code-review-2026-09-21 §11（P2-2 不追溯）：`normalizeExternalConfigHome` 只作用于
+新建行，存量 windows external 行保留混合大小写 / 尾斜杠原始输入，可绕过 per-runtime
+`config_home` 唯一索引。迁移把 `runtime_kind = 'windows' AND auth_type = 'external'` 的行按
+Manager 同款规则归一（`normalizeWindowsConfigHome`，单点实现在
+`agents/accounts/external-config-home.ts`）；归一后撞唯一索引时按 `created_at, id`
+先建行胜出，后建行保持原字节存储并记 WARN，迁移不得因存量数据崩溃。
+
 ## 外键与删除策略（全表汇总）
 
 原文有 4 处关联缺少显式 FK 与删除策略，此处补齐：

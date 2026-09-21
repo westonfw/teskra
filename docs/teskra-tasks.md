@@ -3740,12 +3740,12 @@ Zod schemas
 
 ### 验收标准
 
-- [ ] Main / Renderer 共用 contracts。
-- [ ] 无重复类型。
-- [ ] typecheck 通过。
-- [ ] `configHome` 的 Zod 校验拒绝 `~` 开头、含环境变量引用、非绝对的路径（设计文档 §5.3）。
-- [ ] `runtime.kind` 第一阶段只接受 `windows` / `wsl`。
-- [ ] `runtime.kind === "wsl"` 时 `distro` 必填——不允许留空去跟随以后可能变化的默认 distro。
+- [x] Main / Renderer 共用 contracts。
+- [x] 无重复类型。
+- [x] typecheck 通过。
+- [x] `configHome` 的 Zod 校验拒绝 `~` 开头、含环境变量引用、非绝对的路径（设计文档 §5.3）。
+- [x] `runtime.kind` 第一阶段只接受 `windows` / `wsl`。
+- [x] `runtime.kind === "wsl"` 时 `distro` 必填——不允许留空去跟随以后可能变化的默认 distro。
 
 ---
 
@@ -3773,14 +3773,14 @@ Zod schemas
 
 ### 验收标准
 
-- [ ] 老数据库自动升级。
-- [ ] 历史 Run 不丢失。
-- [ ] migration 可重复验证。
-- [ ] `migrations.ts` 已注册，且 012 排在 013 之前。
-- [ ] `foreign_key_check` 通过。
-- [ ] `config_home` 部分唯一索引生效（NULL 可重复，非 NULL 不可重复）。
-- [ ] `max_concurrent_runs` 的 `CHECK` 生效。
-- [ ] `profile_aliases` 的 `(agent_id, kind, alias)` 主键生效。
+- [x] 老数据库自动升级。
+- [x] 历史 Run 不丢失。
+- [x] migration 可重复验证。
+- [x] `migrations.ts` 已注册，且 012 排在 013 之前。
+- [x] `foreign_key_check` 通过。
+- [x] `config_home` 部分唯一索引生效（NULL 可重复，非 NULL 不可重复）。
+- [x] `max_concurrent_runs` 的 `CHECK` 生效。
+- [x] `profile_aliases` 的 `(agent_id, kind, alias)` 主键生效。
 
 ---
 
@@ -3803,8 +3803,8 @@ setStatus
 
 ### 验收标准
 
-- [ ] 单元测试。
-- [ ] 不在 Manager 写 SQL。
+- [x] 单元测试。
+- [x] 不在 Manager 写 SQL。
 
 ---
 
@@ -3826,20 +3826,20 @@ login descriptor
 
 ### 验收标准
 
-- [ ] Manager 不依赖 Renderer。
-- [ ] Typed EventBus。
-- [ ] Adapter 可插拔。
-- [ ] create 拒绝 `authType: "api-key"`（第一阶段不做，设计文档 §35）——在 IPC/Manager 层拒绝，不能只靠 UI 隐藏入口。
-- [ ] create 拒绝未注册的 `agentId`。
-- [ ] managed Profile 的 `configHome` 由 Manager 生成，update 不接受该字段（设计文档 §48.1）。
-- [ ] slug 重复时报错并要求改名，不自动加后缀；slug 入库前 `toLowerCase()`（Windows 路径大小写不敏感）。
-- [ ] 并发创建同 slug 时只有一个成功——先插库再建目录，靠 `config_home` 唯一索引挡住，不留孤儿目录。
-- [ ] `maxConcurrentRuns` 只接受 `undefined` 或 `>= 1` 的整数。
-- [ ] `remove` 是 soft disable，不执行 DELETE（设计文档 §47.1）。
-- [ ] 禁用默认 Profile 时同时清除 `defaultAccountProfileId`（设计文档 §47.2）。
-- [ ] 有非终态 Run 时拒绝禁用。
-- [ ] `enable` 时 Home 不存在 → 重建并置 `login-required`。
-- [ ] Resolver 遇到 disabled 的默认 Profile 报错，不回退 legacy。
+- [x] Manager 不依赖 Renderer。
+- [x] Typed EventBus。
+- [x] Adapter 可插拔。
+- [x] create 拒绝 `authType: "api-key"`（第一阶段不做，设计文档 §35）——在 IPC/Manager 层拒绝，不能只靠 UI 隐藏入口。
+- [x] create 拒绝未注册的 `agentId`。
+- [x] managed Profile 的 `configHome` 由 Manager 生成，update 不接受该字段（设计文档 §48.1）。
+- [x] slug 重复时报错并要求改名，不自动加后缀；slug 入库前 `toLowerCase()`（Windows 路径大小写不敏感）。
+- [x] 并发创建同 slug 时只有一个成功——先插库再建目录，靠 `config_home` 唯一索引挡住，不留孤儿目录。
+- [x] `maxConcurrentRuns` 只接受 `undefined` 或 `>= 1` 的整数。
+- [x] `remove` 是 soft disable，不执行 DELETE（设计文档 §47.1）。
+- [x] 禁用默认 Profile 时同时清除 `defaultAccountProfileId`（设计文档 §47.2）。
+- [x] 有非终态 Run 时拒绝禁用。
+- [x] `enable` 时 Home 不存在 → 重建并置 `login-required`。
+- [x] Resolver 遇到 disabled 的默认 Profile 报错，不回退 legacy。
 
 ---
 
@@ -3860,9 +3860,9 @@ runtime env
 
 ### 验收标准
 
-- [ ] 两个 Profile 可独立启动。
-- [ ] 不复制认证文件。
-- [ ] Windows / WSL 测试覆盖。
+- [x] 两个 Profile 可独立启动。
+- [x] 不复制认证文件。
+- [x] Windows / WSL 测试覆盖。
 
 ---
 
@@ -3883,8 +3883,8 @@ runtime env
 
 ### 验收标准
 
-- [ ] 两个 Profile 可独立启动。
-- [ ] Windows / WSL 测试覆盖。
+- [x] 两个 Profile 可独立启动。
+- [x] Windows / WSL 测试覆盖。
 
 ---
 
@@ -3908,14 +3908,14 @@ Run snapshot
 
 ### 验收标准
 
-- [ ] legacy start 仍工作。
-- [ ] 显式 Profile 正确。
-- [ ] Profile env 进入 ProcessManager。
-- [ ] 跨对象约束（每条都要有失败用例，否则错的 Profile id 会一路走到错的 Adapter）：
-  - [ ] `accountProfile.agentId === request.agentType`，否则报错。
-  - [ ] 传入 `executionProfileId` 时返回「尚未支持」的结构化错误，不静默忽略（TASK-110 之前的临时行为）。
-  - [ ] 显式指定的 Profile 不存在 / `enabled === false` / runtime 不兼容时一律报错，不静默降级到默认或 legacy（设计文档 §37.1）。
-  - [ ] 以上每种失败都返回可区分的错误码，不是笼统的 VALIDATION_FAILED。
+- [x] legacy start 仍工作。
+- [x] 显式 Profile 正确。
+- [x] Profile env 进入 ProcessManager。
+- [x] 跨对象约束（每条都要有失败用例，否则错的 Profile id 会一路走到错的 Adapter）：
+  - [x] `accountProfile.agentId === request.agentType`，否则报错。
+  - [x] 传入 `executionProfileId` 时返回「尚未支持」的结构化错误，不静默忽略（TASK-110 之前的临时行为）。
+  - [x] 显式指定的 Profile 不存在 / `enabled === false` / runtime 不兼容时一律报错，不静默降级到默认或 legacy（设计文档 §37.1）。
+  - [x] 以上每种失败都返回可区分的错误码，不是笼统的 VALIDATION_FAILED。
 
 ---
 
@@ -3933,8 +3933,8 @@ per-agent default account
 
 ### 验收标准
 
-- [ ] Codex / Claude 分别有默认 Profile。
-- [ ] 默认变更不影响历史 Run。
+- [x] Codex / Claude 分别有默认 Profile。
+- [x] 默认变更不影响历史 Run。
 
 ---
 
@@ -3970,14 +3970,14 @@ TASK-111，否则会出现「Phase C 暴露了 IPC，Phase E 才有仓储」的�
 
 ### 验收标准
 
-- [ ] 所有请求 Zod 校验。
-- [ ] IPC 返回 `IpcResult<T>`。
-- [ ] `login:start` 立即返回 `AccountLoginSession`，不等 OAuth 完成。
-- [ ] Renderer 只提交 `profileId` / `sessionId`，argv 与 env 全部在 Main 侧生成。
-- [ ] 同一 profileId 重复 `login:start` 返回既有 sessionId，不起第二个进程。
-- [ ] `login:cancel` 停止进程，且 Profile 状态保持登录前的值。
-- [ ] 会话超时后自动清理（Main 侧自管，不依赖 Renderer 发 cancel）。
-- [ ] 应用退出时登录会话随 `disposeAll()` 一起停止，不留孤儿进程。
+- [x] 所有请求 Zod 校验。
+- [x] IPC 返回 `IpcResult<T>`。
+- [x] `login:start` 立即返回 `AccountLoginSession`，不等 OAuth 完成。
+- [x] Renderer 只提交 `profileId` / `sessionId`，argv 与 env 全部在 Main 侧生成。
+- [x] 同一 profileId 重复 `login:start` 返回既有 sessionId，不起第二个进程。
+- [x] `login:cancel` 停止进程，且 Profile 状态保持登录前的值。
+- [x] 会话超时后自动清理（Main 侧自管，不依赖 Renderer 发 cancel）。
+- [x] 应用退出时登录会话随 `disposeAll()` 一起停止，不留孤儿进程。
 
 ---
 
@@ -3997,12 +3997,12 @@ Settings → Agents → Accounts
 
 ### 验收标准
 
-- [ ] List。
-- [ ] Status。
-- [ ] Add。
-- [ ] Login。
-- [ ] Default。
-- [ ] Disable。
+- [x] List。
+- [x] Status。
+- [x] Add。
+- [x] Login。
+- [x] Default。
+- [x] Disable。
 
 ---
 
@@ -4025,12 +4025,12 @@ Verify
 
 ### 验收标准
 
-- [ ] Codex。
-- [ ] Claude。
-- [ ] WSL（必须选定具体 distro）。
-- [ ] Windows。
-- [ ] Config Home 为只读：managed Profile 不允许用户填写或编辑（设计文档 §48.1）。
-- [ ] 只提交 slug，路径由 Main 侧生成。
+- [x] Codex。
+- [x] Claude。
+- [x] WSL（必须选定具体 distro）。
+- [x] Windows。
+- [x] Config Home 为只读：managed Profile 不允许用户填写或编辑（设计文档 §48.1）。
+- [x] 只提交 slug，路径由 Main 侧生成。
 
 ---
 
@@ -4050,11 +4050,11 @@ Claude classifier
 
 ### 验收标准
 
-- [ ] rate-limit / auth / network / unknown 四类分类正确。
-- [ ] Fake Agent tests。
-- [ ] 分类结果写入 `agent_runs.failure_classification_json`，Run 状态仍为 `failed`（不新增状态，ADR-0010 / 设计文档 §17.2）。
-- [ ] `evidence` 已脱敏且截断到 512 字符（设计文档 §17.3）。
-- [ ] 重启后能从库里读回 `kind` 与 `resetAt`。
+- [x] rate-limit / auth / network / unknown 四类分类正确。
+- [x] Fake Agent tests。
+- [x] 分类结果写入 `agent_runs.failure_classification_json`，Run 状态仍为 `failed`（不新增状态，ADR-0010 / 设计文档 §17.2）。
+- [x] `evidence` 已脱敏且截断到 512 字符（设计文档 §17.3）。
+- [x] 重启后能从库里读回 `kind` 与 `resetAt`。
 
 ---
 
@@ -4076,12 +4076,12 @@ successful Run → ready
 
 ### 验收标准
 
-- [ ] 状态事件。
-- [ ] persisted。
-- [ ] restart 后保留。
-- [ ] `limitedUntil <= now` 的恢复有明确触发者（设计文档 §18.0）：读取状态时惰性降级为 `unknown` 并清空 `limitedUntil`；应用启动与 Settings → Accounts 打开时各批量清扫一次。
-- [ ] 降级目标是 `unknown` 而非 `ready`。
-- [ ] 不引入常驻定时器。
+- [x] 状态事件。
+- [x] persisted。
+- [x] restart 后保留。
+- [x] `limitedUntil <= now` 的恢复有明确触发者（设计文档 §18.0）：读取状态时惰性降级为 `unknown` 并清空 `limitedUntil`；应用启动与 Settings → Accounts 打开时各批量清扫一次。
+- [x] 降级目标是 `unknown` 而非 `ready`。
+- [x] 不引入常驻定时器。
 
 ---
 
@@ -4100,14 +4100,14 @@ ContinuationBuilder
 
 ### 验收标准
 
-- [ ] 新 Run。
-- [ ] 同 Task。
-- [ ] 同 Worktree。
-- [ ] 新 Profile。
-- [ ] Handoff/Context 继承。
-- [ ] 原子性（设计文档 §19.3）：source process 已确认退出、source Run 已落终态，之后才创建 target Run。
-- [ ] 新增不变式：同一 worktree 上不允许存在两个非终态 Run（现有 `unisolatedWriteConflict()` 对带 worktree 的 Run 直接放行，拦不住这种情况）。
-- [ ] source process 超时未退出时，Continuation 整体失败并报错。
+- [x] 新 Run。
+- [x] 同 Task。
+- [x] 同 Worktree。
+- [x] 新 Profile。
+- [x] Handoff/Context 继承。
+- [x] 原子性（设计文档 §19.3）：source process 已确认退出、source Run 已落终态，之后才创建 target Run。
+- [x] 新增不变式：同一 worktree 上不允许存在两个非终态 Run（现有 `unisolatedWriteConflict()` 对带 worktree 的 Run 直接放行，拦不住这种情况）。
+- [x] source process 超时未退出时，Continuation 整体失败并报错。
 
 ---
 
@@ -4125,10 +4125,10 @@ Continue with another account
 
 ### 验收标准
 
-- [ ] 只列 runtime 兼容且当前可用（ready / unknown）的 Profile。
-- [ ] `limitedUntil` 已过期的 Profile 必须重新出现在列表里（经 TASK-106 的惰性降级），不能因为状态还写着 limited 就被永久排除。
-- [ ] 显示同 Agent Profile。
-- [ ] 可选跨 Agent continuation。
+- [x] 只列 runtime 兼容且当前可用（ready / unknown）的 Profile。
+- [x] `limitedUntil` 已过期的 Profile 必须重新出现在列表里（经 TASK-106 的惰性降级），不能因为状态还写着 limited 就被永久排除。
+- [x] 显示同 Agent Profile。
+- [x] 可选跨 Agent continuation。
 
 ---
 
@@ -4160,8 +4160,8 @@ updatedAt
 
 ### 验收标准
 
-- [ ] 字段与设计文档 §6.1 / §8.2 同形。
-- [ ] 不包含 permission / tools / skills / env 的 Profile ID——这四类实体在仓库里不存在（设计文档 §6.1），要加回来见设计文档 §6.2。
+- [x] 字段与设计文档 §6.1 / §8.2 同形。
+- [x] 不包含 permission / tools / skills / env 的 Profile ID——这四类实体在仓库里不存在（设计文档 §6.1），要加回来见设计文档 §6.2。
 
 ---
 
@@ -4178,14 +4178,14 @@ updatedAt
 
 ### 验收标准
 
-- [ ] migration 014 已注册并可重复验证。
-- [ ] CRUD。
-- [ ] Default。
-- [ ] Resolve（只解析设计文档 §6.1 收窄后的字段；不引用 tool / skill / env / permission Profile ID——它们没有对应实体）。
-- [ ] Snapshot。
-- [ ] `executionProfile.agentId === request.agentType`，否则报错。
-- [ ] `executionProfile.accountProfileId` 指向的 Profile 其 `agentId` 相同。
-- [ ] 同时传 `accountProfileId` 与 `executionProfileId` 时，account 维度以显式的 `accountProfileId` 为准（设计文档 §14），其余字段仍整体取自 ExecutionProfile。
+- [x] migration 014 已注册并可重复验证。
+- [x] CRUD。
+- [x] Default。
+- [x] Resolve（只解析设计文档 §6.1 收窄后的字段；不引用 tool / skill / env / permission Profile ID——它们没有对应实体）。
+- [x] Snapshot。
+- [x] `executionProfile.agentId === request.agentType`，否则报错。
+- [x] `executionProfile.accountProfileId` 指向的 Profile 其 `agentId` 相同。
+- [x] 同时传 `accountProfileId` 与 `executionProfileId` 时，account 维度以显式的 `accountProfileId` 为准（设计文档 §14），其余字段仍整体取自 ExecutionProfile。
 
 ---
 
@@ -4224,13 +4224,13 @@ DefinitionLoader 只取 alias 字符串，解析在 Runtime Service
 
 ### 验收标准
 
-- [ ] 未绑定的 alias → 报错并提示绑定，不回退到默认账号。
-- [ ] 绑定指向的 Profile 已删除 / disabled → 同样报错。
-- [ ] `accountProfile` 与 `profile` 两种 alias 各自解析正确（`kind` 区分）。
-- [ ] repo 里写 Profile id 被拒绝（设计文档 §55）。
-- [ ] 同名 alias 在不同 agentId 下互不干扰。
-- [ ] 同名 alias 在不同 `kind` 下互不干扰（`work` 可同时是两种）。
-- [ ] bind 校验 profileId 存在于 kind 对应的表，且 `profile.agentId` 相符。
+- [x] 未绑定的 alias → 报错并提示绑定，不回退到默认账号。
+- [x] 绑定指向的 Profile 已删除 / disabled → 同样报错。
+- [x] `accountProfile` 与 `profile` 两种 alias 各自解析正确（`kind` 区分）。
+- [x] repo 里写 Profile id 被拒绝（设计文档 §55）。
+- [x] 同名 alias 在不同 agentId 下互不干扰。
+- [x] 同名 alias 在不同 `kind` 下互不干扰（`work` 可同时是两种）。
+- [x] bind 校验 profileId 存在于 kind 对应的表，且 `profile.agentId` 相符。
 
 ---
 
@@ -4246,8 +4246,8 @@ DefinitionLoader 只取 alias 字符串，解析在 Runtime Service
 
 ### 验收标准
 
-- [ ] Recovery 使用历史 Runtime Identity。
-- [ ] 不使用当前默认账号。
+- [x] Recovery 使用历史 Runtime Identity。
+- [x] 不使用当前默认账号。
 
 ---
 
@@ -4261,10 +4261,10 @@ DefinitionLoader 只取 alias 字符串，解析在 Runtime Service
 
 ### 验收标准
 
-- [ ] 升级后行为与升级前逐字节一致（不投射任何 config dir 环境变量）。
-- [ ] Settings → Accounts 首次展示引导文案。
-- [ ] External Profile 的导入路径（用户显式动作，按具体 runtime 逐个创建）。
-- [ ] 无需重新登录。
+- [x] 升级后行为与升级前逐字节一致（不投射任何 config dir 环境变量）。
+- [x] Settings → Accounts 首次展示引导文案。
+- [x] External Profile 的导入路径（用户显式动作，按具体 runtime 逐个创建）。
+- [x] 无需重新登录。
 
 ---
 
@@ -4289,8 +4289,8 @@ WSL env isolation
 
 ### 验收标准
 
-- [ ] 上述五类场景各有自动化测试。
-- [ ] untrusted workspace 自动执行受限（依赖 TASK-118）。
+- [x] 上述五类场景各有自动化测试。
+- [x] untrusted workspace 自动执行受限（依赖 TASK-118）。
 
 ---
 
@@ -4302,8 +4302,8 @@ WSL env isolation
 
 ### 验收标准
 
-- [ ] Fake Agent 场景可跑通：A Ready → A Limited → B Ready → A → B Continue。
-- [ ] 每个测试用例使用独立的 `TESKRA_HOME` 临时目录，结束后清理。
+- [x] Fake Agent 场景可跑通：A Ready → A Limited → B Ready → A → B Continue。
+- [x] 每个测试用例使用独立的 `TESKRA_HOME` 临时目录，结束后清理。
 
 ---
 
@@ -4324,10 +4324,10 @@ AccountProfileManager 与 AgentManager 的事件写入点
 
 ### 验收标准
 
-- [ ] 不在 Manager 里写 SQL。
-- [ ] 账号生命周期事件（created / login\_\* / status_changed）不依赖 Run 存在。
-- [ ] `agent.account_switched` 能关联 source / target Run。
-- [ ] 单元测试。
+- [x] 不在 Manager 里写 SQL。
+- [x] 账号生命周期事件（created / login\_\* / status_changed）不依赖 Run 存在。
+- [x] `agent.account_switched` 能关联 source / target Run。
+- [x] 单元测试。
 
 ---
 
@@ -4350,10 +4350,10 @@ hasCapacity() 的 candidate 增加 accountProfileId
 
 ### 验收标准
 
-- [ ] managed profile 默认 `maxConcurrentRuns = 1` 时，第二个 Run 排队。
-- [ ] legacy fallback（没有 `accountProfileId`、也没有 Profile 记录）不受 per-profile 限制，仅受 `maxRunsPerAgent` 约束。
-- [ ] 不新造等待机制，复用既有排队调度。
-- [ ] `0` 与负数在 Zod 与 SQL `CHECK` 两层都被拒绝（写进去会让该 Profile 的 Run 永久排队）。
+- [x] managed profile 默认 `maxConcurrentRuns = 1` 时，第二个 Run 排队。
+- [x] legacy fallback（没有 `accountProfileId`、也没有 Profile 记录）不受 per-profile 限制，仅受 `maxRunsPerAgent` 约束。
+- [x] 不新造等待机制，复用既有排队调度。
+- [x] `0` 与负数在 Zod 与 SQL `CHECK` 两层都被拒绝（写进去会让该 Profile 的 Run 永久排队）。
 
 ---
 
@@ -4403,12 +4403,28 @@ repo-local executable override 禁止
 
 ### 验收标准
 
-- [ ] workspace 层配置的 `agents` 组一律剥离并告警（与信任级别无关）。
-- [ ] Restricted 下不加载 repo-local workflows / prompts / config（含 `<repo>/.teskra/config.json` 的 `agents.executableOverrides` 与 `<repo>/.teskra/prompts/` 两条路径）。
-- [ ] repo 定义的 shell 步骤执行前展示完整命令行确认。
-- [ ] Trusted / Restricted 两级可用，信任级别可持久化。
-- [ ] untrusted workspace 不能通过 repo-local workflow 自动执行 shell、自动配置 Agent runtime、自动启动 Delegation。
-- [ ] migration 015 已注册，且在 014（TASK-110）之后应用。
+- [x] workspace 层配置的 `agents` 组一律剥离并告警（与信任级别无关）。
+- [x] Restricted 下不加载 repo-local workflows / prompts / config（含 `<repo>/.teskra/config.json` 的 `agents.executableOverrides` 与 `<repo>/.teskra/prompts/` 两条路径）。
+- [x] repo 定义的 shell 步骤执行前展示完整命令行确认。
+- [x] Trusted / Restricted 两级可用，信任级别可持久化。
+- [x] untrusted workspace 不能通过 repo-local workflow 自动执行 shell、自动配置 Agent runtime、自动启动 Delegation。
+- [x] migration 015 已注册，且在 014（TASK-110）之后应用。
+
+## Milestone 24 验证记录（2026-09-21 / 2026-09-22，Windows 11 主机）
+
+**已实机验证：**
+
+- 保留 env key 大小写防御（code-review-2026-09-21 P0-1）：`process-manager-env.test.ts`
+  的 `[Windows 验证]` node-pty 用例在 Windows 11 主机真实复现了「插入序在前的小写变体
+  遮蔽 `CODEX_HOME`」的平台行为，并验证修复后 ProcessManager 端到端只有正确写法生效。
+- 全量单元测试（186 文件 / 2048 用例）、typecheck、lint、format:check、build、
+  check:task-docs 在 Windows 11 主机全部通过。
+
+**未实机验证（沿用单测覆盖，不得视为已完成实机项）：**
+
+- TASK-098 / TASK-099 的 WSL2 隔离端到端：目前只有 mock 级单测；主机已装 Ubuntu-24.04，
+  但未做应用级 WSL 实机跑通（账号 Home 创建、runtime-aware 所有权校验、登录终端）。
+- Playwright E2E 套件（软件渲染）本批次未运行。
 
 ---
 

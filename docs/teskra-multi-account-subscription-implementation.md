@@ -1656,11 +1656,25 @@ Ready / Limited / Login Required / Expired / Unknown 五个状态。
     limitedUntil 存在且 <= now
       → 视为 stale，当场把 status 降级为 unknown 并清空 limitedUntil
       → 该 Profile 重新进入候选，下一次实际启动 Run 即是探测
+    limitedUntil 缺失（limited 但无到期时间）
+      → lastFailureAt + 默认窗口（1 小时）<= now 时同样视为 stale 并降级
+      → lastFailureAt 也缺失时立即降级（unknown 只表示「可以再试」，永远安全）
 
 轻量清扫（辅助）
   应用启动时与 Settings → Accounts 打开时各扫一次，
-  把所有 limitedUntil <= now 的行批量降级
+  把所有到期（含上述默认窗口规则判定到期）的 limited 行批量降级
 ```
+
+**写入侧兜底（limited 但无 limitedUntil 的预防）：** §18 投射把一次失败
+分类为 rate-limited 时，如果 CLI 没有给出可解析的 resetAt
+（"resets in 3 hours" / "reset at 11pm" 等模糊措辞不做猜测——猜错的
+limitedUntil 比没有更糟），写入 `limitedUntil = lastFailureAt + 1 小时`
+的保守默认值，而不是保留旧值或留空。否则没有 `limitedUntil` 的
+`limited` 行永远无法被上面的惰性规则命中，Profile 会被 §37 候选过滤和
+§26 切换列表永久排除，只能靠手动改状态恢复。默认窗口常量为
+`ACCOUNT_LIMITED_DEFAULT_DURATION_MS`（contracts），Main 侧
+（`isLimitedExpired` / 投射）与 Renderer 侧（continuation 候选过滤）
+共用同一份语义，两处判定结果一致。
 
 降级到 `unknown` 而不是直接 `ready`：额度是否真的恢复了，
 只有官方 CLI 说了算。`unknown` 表示「可以再试」，
@@ -3629,6 +3643,20 @@ profile: high-work            # kind = 'execution'
 IPC 见 §28 的 `teskra:account:alias:*`。绑定关系**不入仓库**。
 
 repo-local workflow 只能引用 alias，这一条与 §55 一致。
+
+**review-panel 节点不携带 alias 字段——这是显式设计，不是静默回退。**
+`review-panel` 节点的 schema 只有 `agents`（AgentRegistry id 列表），
+没有 `accountProfile` / `profile` / `env`：评审是多人并行、互相隔离的
+只读环节，每个 reviewer 始终使用该 agent 的 per-agent 默认账号
+（§37 的 selector 规则 3；未设默认则走 legacy 环境，规则 4）。
+想让某个 reviewer 用指定账号，就在 Settings 里把那个账号设为该 agent
+的默认账号——而不是在 workflow 里逐节点点名。这与 §37.1 同一条原则：
+账号切换必须来自用户的显式动作，绝不来自「刚好写了 / 没写某个字段」。
+因此 Full Workflow 的仓库覆盖（`<repo>/.teskra/workflows/full.yaml`）
+只能约束 implementer / fixer 两个 agent 节点的 alias；即使启动弹窗
+显式指定了 implementer 与 reviewers，覆盖里的 alias / env / testCommand
+仍然照常合并加载（agent 身份以请求为准），不存在「显式指定就跳过
+整个仓库覆盖」的路径。
 
 ---
 
