@@ -127,6 +127,8 @@ export interface UpdateAgentRunInput {
   readonly status?: AgentRunStatus
   /** TASK-120: updated as the skip reason changes; null when leaving `queued`. */
   readonly queuedReason?: QueuedReason | null
+  /** TASK-121 (migration 017): written once when the run is an automatic retry. */
+  readonly retryOfRunId?: string | null
   readonly processId?: string | null
   readonly pid?: number | null
   readonly pidIdentity?: string | null
@@ -157,6 +159,12 @@ export interface AgentRunRepository {
   listByTask(taskId: string): IpcResult<AgentRun[]>
   listByWorkflowRun(workflowRunId: string): IpcResult<AgentRun[]>
   listByWorkspace(workspaceId: string): IpcResult<AgentRun[]>
+  /**
+   * TASK-134 (Milestone 26 §6): the most recent `completed` run of a
+   * workspace — the "last successful run" fallback of run-default
+   * resolution. Null when the workspace has no completed run.
+   */
+  findLastSuccessfulByWorkspace(workspaceId: string): IpcResult<AgentRun | null>
   /** TASK-097: every run that references an account profile (any status). */
   listByAccountProfile(accountProfileId: string): IpcResult<AgentRun[]>
   /** Statuses matching the idx_agent_runs_active partial index. */
@@ -221,6 +229,7 @@ function toDomain(row: AgentRunRow): IpcResult<AgentRun> {
     approvalMode: row.approval_mode ?? undefined,
     status: row.status,
     queuedReason: row.queued_reason ?? undefined,
+    retryOfRunId: row.retry_of_run_id ?? undefined,
     processId: row.process_id ?? undefined,
     pid: row.pid ?? undefined,
     pidIdentity: row.pid_identity ?? undefined,
@@ -365,6 +374,10 @@ export function createAgentRunRepository(connection: Database.Database): AgentRu
           patch.failureClassification === null ? null : encodeJson(patch.failureClassification),
         )
       }
+      if (patch.retryOfRunId !== undefined) {
+        sets.push('retry_of_run_id = ?')
+        values.push(patch.retryOfRunId)
+      }
       if (sets.length === 0) {
         return repository.getById(id)
       }
@@ -406,6 +419,24 @@ export function createAgentRunRepository(connection: Database.Database): AgentRu
         'SELECT * FROM agent_runs WHERE workspace_id = ? ORDER BY created_at DESC',
         workspaceId,
       )
+    },
+
+    findLastSuccessfulByWorkspace(workspaceId) {
+      const row = execute(ENTITY, 'findLastSuccessfulByWorkspace', () => {
+        return connection
+          .prepare(
+            `SELECT * FROM agent_runs WHERE workspace_id = ? AND status = 'completed'
+             ORDER BY created_at DESC, id DESC LIMIT 1`,
+          )
+          .get(workspaceId) as AgentRunRow | undefined
+      })
+      if (!row.ok) {
+        return row
+      }
+      if (row.data === undefined) {
+        return { ok: true, data: null }
+      }
+      return toDomain(row.data)
     },
 
     listByAccountProfile(accountProfileId) {

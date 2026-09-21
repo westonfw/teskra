@@ -26,6 +26,7 @@ import {
   type QueuedReason,
   type ResizeAgentRunRequest,
   type ResumeAgentRunRequest,
+  type RetryConfig,
   type SendAgentRunInputRequest,
   type StartAgentRunRequest,
   type TaskStatus,
@@ -44,6 +45,7 @@ import type { ArtifactRepository } from '../db/repositories/artifact-repository'
 import type { CriteriaRepository } from '../db/repositories/criteria-repository'
 import type { HandoffRepository } from '../db/repositories/handoff-repository'
 import type { TaskRepository } from '../db/repositories/task-repository'
+import type { WorkflowRunRepository } from '../db/repositories/workflow-run-repository'
 import type { WorkspaceRepository } from '../db/repositories/workspace-repository'
 import type { WorktreeRepository } from '../db/repositories/worktree-repository'
 import type { DecisionService } from '../decisions/decision-service'
@@ -148,6 +150,19 @@ export interface AgentManagerDeps {
    * (structuredStream on) applies.
    */
   readonly resolveObservability?: (workspaceId: string) => IpcResult<ObservabilityConfig>
+  /**
+   * TASK-121 (Milestone 25 §5.4): resolves the retry config group for the
+   * transient-failure auto-retry. Without it, DEFAULT_CONFIG.retry
+   * (transientAttempts 1) applies.
+   */
+  readonly resolveRetry?: (workspaceId: string) => IpcResult<RetryConfig>
+  /**
+   * TASK-121 (§5.4): workflow membership probe — a run referenced by a
+   * workflow step's result is never auto-retried (the Iterate primitive owns
+   * Workflow retries). Without it, only the run row's own workflow link
+   * columns gate the retry.
+   */
+  readonly workflows?: Pick<WorkflowRunRepository, 'hasStepWithAgentRun'>
   /**
    * TASK-065: when injected, the PermissionManager resolves the layered rules
    * into the Run's profile before projection. Without it, the profile is the
@@ -443,6 +458,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     deps.resolveConcurrency ?? (() => ({ ok: true, data: DEFAULT_CONFIG.concurrency }))
   const resolveObservability =
     deps.resolveObservability ?? (() => ({ ok: true, data: DEFAULT_CONFIG.observability }))
+  const resolveRetry = deps.resolveRetry ?? (() => ({ ok: true, data: DEFAULT_CONFIG.retry }))
 
   /**
    * TASK-122 (§6.1): resolves the structured-output protocol for one launch.
@@ -780,6 +796,9 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     if (updated.data === null) return missing('Agent run', runId)
     auditRateLimited(updated.data)
     synchronizeTaskStatus(updated.data)
+    // TASK-121 (§5.4): a launch-time failure classified as a transient
+    // network error is retryable like a post-exit one.
+    scheduleTransientRetry(updated.data)
     return { ok: true, data: updated.data }
   }
 
@@ -1038,6 +1057,144 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     void advanceQueue().catch((cause: unknown) => {
       logger.error({ cause }, 'Unexpected Agent queue advancement failure.')
     })
+  }
+
+  /**
+   * TASK-121 (Milestone 25 §5.4): pending transient-retry evaluations, tracked
+   * so dispose() can cancel a timer that has not fired yet.
+   */
+  const retryTimers = new Set<ReturnType<typeof setTimeout>>()
+
+  /**
+   * TASK-121 (§5.4): count the automatic retries already taken along the
+   * `retry_of_run_id` chain leading to this run, bounded by `limit` (the walk
+   * is pointless past it). A missing/deleted ancestor ends the chain — the
+   * self-FK clears the link ON DELETE SET NULL (migration 017).
+   */
+  const countRetryChain = (run: AgentRun, limit: number): number => {
+    let attempts = 0
+    let cursor = run.retryOfRunId
+    while (cursor !== undefined && attempts < limit) {
+      attempts += 1
+      const parent = deps.runs.getById(cursor)
+      if (!parent.ok || parent.data === null) break
+      cursor = parent.data.retryOfRunId
+    }
+    return attempts
+  }
+
+  /**
+   * TASK-121 (§5.4): the narrow auto-retry — ONLY a failed run whose terminal
+   * classification is a retryable `network` error, whose handoff did not
+   * parse cleanly (a valid handoff is the Agent's own conclusion, §5.4), that
+   * no Workflow step claims (the Iterate primitive owns Workflow retries),
+   * and whose retry chain is still below `retry.transientAttempts`. The retry
+   * itself reuses the TASK-107 continuation mechanism end-to-end (§19.3 flow
+   * A survivor judgment, same task/worktree/profile, continuation prompt) —
+   * there is no second process-launch path. All gates fail closed: any read
+   * error is logged and the run simply stays failed.
+   */
+  const evaluateTransientRetry = (runId: string): void => {
+    const found = deps.runs.getById(runId)
+    if (!found.ok) {
+      logger.error(
+        { runId, error: found.error },
+        'Transient-retry evaluation could not read the run.',
+      )
+      return
+    }
+    const run = found.data
+    if (run === null || run.status !== 'failed') return
+    const classification = run.failureClassification
+    if (classification?.kind !== 'network' || !classification.retryable) return
+    const retry = resolveRetry(run.workspaceId)
+    if (!retry.ok) {
+      logger.error(
+        { runId, error: retry.error },
+        'Failed to resolve the retry config; the transient failure is not retried.',
+      )
+      return
+    }
+    const maxAttempts = retry.data.transientAttempts
+    if (maxAttempts === 0) return
+    const handoff = deps.handoffs.getByRunId(run.id)
+    if (!handoff.ok) {
+      logger.error(
+        { runId, error: handoff.error },
+        'Transient-retry evaluation could not read the handoff.',
+      )
+      return
+    }
+    if (handoff.data?.parseStatus === 'ok') return
+    if (run.workflowRunId !== undefined || run.workflowStepId !== undefined) return
+    if (deps.workflows !== undefined) {
+      const claimed = deps.workflows.hasStepWithAgentRun(run.id)
+      if (!claimed.ok) {
+        logger.error(
+          { runId, error: claimed.error },
+          'Transient-retry evaluation could not check Workflow membership.',
+        )
+        return
+      }
+      if (claimed.data) return
+    }
+    const attempt = countRetryChain(run, maxAttempts)
+    if (attempt >= maxAttempts) return
+    void manager
+      .continueWithProfile({
+        sourceRunId: run.id,
+        targetAgentId: run.agentType,
+        // Same identity as the source: a transient network failure is not a
+        // reason to switch accounts (§5.4).
+        ...(run.accountProfileId === undefined
+          ? {}
+          : { targetAccountProfileId: run.accountProfileId }),
+        ...(run.executionProfileId === undefined
+          ? {}
+          : { targetExecutionProfileId: run.executionProfileId }),
+      })
+      .then(
+        (continued) => {
+          if (!continued.ok) {
+            logger.warn(
+              { runId, error: continued.error },
+              'The transient-failure retry could not create the continuation run.',
+            )
+            return
+          }
+          const target = continued.data
+          const linked = deps.runs.update(target.id, { retryOfRunId: run.id }, now())
+          if (!linked.ok) {
+            logger.error(
+              { runId, targetRunId: target.id, error: linked.error },
+              'Failed to record the retry link on the continuation run.',
+            )
+            return
+          }
+          const payload = { sourceRunId: run.id, targetRunId: target.id, attempt: attempt + 1 }
+          appendEvent(target.id, 'agent.retry_scheduled', payload)
+          deps.events.emit('agent.retry_scheduled', payload)
+        },
+        (cause: unknown) => {
+          logger.error({ runId, cause }, 'Unexpected transient-retry continuation failure.')
+        },
+      )
+  }
+
+  /**
+   * TASK-121 (§5.4): defer the evaluation to a macrotask so every microtask
+   * the terminal settle triggered has drained first — in particular the
+   * Workflow engine's agent-step settlement, which writes the step result
+   * (the run→step link the membership gate reads) from a promise
+   * continuation of the very `agent.failed` emit above.
+   */
+  const scheduleTransientRetry = (run: AgentRun): void => {
+    if (run.status !== 'failed' || run.failureClassification?.kind !== 'network') return
+    const timer = setTimeout(() => {
+      retryTimers.delete(timer)
+      evaluateTransientRetry(run.id)
+    }, 0)
+    retryTimers.add(timer)
   }
 
   const readOutput = (runId: string, tailBytes?: number): IpcResult<string> => {
@@ -1370,6 +1527,11 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     } else if (error !== undefined) {
       deps.events.emit('agent.failed', { runId: agentRunId, error })
     }
+    // TASK-121 (§5.4): schedule AFTER collectHandoff (the handoff gate reads
+    // the collected parseStatus) and after the agent.failed emit (the
+    // Workflow engine settles its step off that emit; the deferred
+    // evaluation then sees the run→step link).
+    if (updated.ok && updated.data !== null) scheduleTransientRetry(updated.data)
     scheduleQueueAdvance()
   })
 
@@ -2626,6 +2788,10 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       adapterlessCancels.clear()
       failStopInFlights.clear()
       inFlightLaunches.clear()
+      // TASK-121: a retry timer that has not fired yet must not evaluate
+      // against closed handles after shutdown.
+      for (const timer of retryTimers) clearTimeout(timer)
+      retryTimers.clear()
       // Drain the output the cancels produced only AFTER unsubscribing: the
       // subscription is the batcher's only push source, so from here no 32ms
       // batch timer can fire past the log close below.

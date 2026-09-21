@@ -18,7 +18,8 @@ import { ipcIdSchema } from './limits'
  * apps/desktop/src/main/config/.
  *
  * The schema covers the keys current Tasks already need (TASK-004 logging,
- * TASK-084 concurrency, TASK-085 watchdog, TASK-122 observability). New Tasks extend it by adding a
+ * TASK-084 concurrency, TASK-085 watchdog, TASK-122 observability, TASK-121
+ * retry). New Tasks extend it by adding a
  * field to a group schema (or a new group) plus a default — nothing else
  * changes.
  */
@@ -94,6 +95,14 @@ export const agentsConfigSchema = z.strictObject({
    * global-only.
    */
   defaultExecutionProfiles: z.record(z.string().min(1), z.string().min(1).nullable()),
+  /**
+   * TASK-134 (Milestone 26 §6): the configured default Agent for run
+   * default resolution (AgentDefinition.id); null = no configured default.
+   * Unlike the rest of the agents group this is a plain Agent id (no path /
+   * no secret), so it is the one agents field the workspace layer may set
+   * (see WORKSPACE_SAFE_AGENT_FIELDS in config-service.ts).
+   */
+  defaultAgent: z.string().min(1).nullable(),
 })
 export type AgentsConfig = z.infer<typeof agentsConfigSchema>
 
@@ -137,12 +146,27 @@ export const observabilityConfigSchema = z.strictObject({
 export type ObservabilityConfig = z.infer<typeof observabilityConfigSchema>
 
 /**
+ * TASK-121 (Milestone 25 §5.4): `transientAttempts` bounds the automatic
+ * retry of transient `network`-classified failures (0 = never retry; the
+ * ceiling of 3 matches the design's narrow scope).
+ */
+export const retryConfigSchema = z.strictObject({
+  transientAttempts: z.number().int().min(0).max(3),
+})
+export type RetryConfig = z.infer<typeof retryConfigSchema>
+
+/**
  * TASK-128 (Milestone 25 §9.1, ADR-0014 §4): PendingDecision expiry timeouts,
  * in milliseconds. `0` (the default) means the kind never expires on its own.
  */
 export const decisionsConfigSchema = z.strictObject({
   shellConfirmationTimeoutMs: z.number().int().min(0),
   stalledRunTimeoutMs: z.number().int().min(0),
+  /**
+   * TASK-131 (Milestone 25 §9.3): fire one desktop notification when a
+   * `blocking` decision opens. Renderer-side only; default on.
+   */
+  desktopNotifications: z.boolean(),
 })
 export type DecisionsConfig = z.infer<typeof decisionsConfigSchema>
 
@@ -156,6 +180,7 @@ export const teskraConfigSchema = z.strictObject({
   retention: retentionConfigSchema,
   observability: observabilityConfigSchema,
   decisions: decisionsConfigSchema,
+  retry: retryConfigSchema,
 })
 export type TeskraConfig = z.infer<typeof teskraConfigSchema>
 
@@ -174,6 +199,7 @@ export const teskraConfigLayerSchema = z.strictObject({
   retention: retentionConfigSchema.partial().optional(),
   observability: observabilityConfigSchema.partial().optional(),
   decisions: decisionsConfigSchema.partial().optional(),
+  retry: retryConfigSchema.partial().optional(),
 })
 export type TeskraConfigLayer = z.infer<typeof teskraConfigLayerSchema>
 
@@ -188,7 +214,12 @@ export const DEFAULT_CONFIG: TeskraConfig = {
     idleAction: 'ask',
   },
   environment: { defaultDistro: null },
-  agents: { executableOverrides: {}, defaultAccountProfiles: {}, defaultExecutionProfiles: {} },
+  agents: {
+    executableOverrides: {},
+    defaultAccountProfiles: {},
+    defaultExecutionProfiles: {},
+    defaultAgent: null,
+  },
   review: { mediumBlockThreshold: 0 },
   // plan §135: merged worktrees are collected quickly; run logs and discarded
   // runs get a longer window for post-hoc audit (ADR-0002).
@@ -203,7 +234,9 @@ export const DEFAULT_CONFIG: TeskraConfig = {
   },
   observability: { structuredStream: true },
   // ADR-0014 §4: decisions never expire unless the user opts into a timeout.
-  decisions: { shellConfirmationTimeoutMs: 0, stalledRunTimeoutMs: 0 },
+  decisions: { shellConfirmationTimeoutMs: 0, stalledRunTimeoutMs: 0, desktopNotifications: true },
+  // TASK-121 (§5.4): one automatic retry of a transient network failure.
+  retry: { transientAttempts: 1 },
 }
 
 /**

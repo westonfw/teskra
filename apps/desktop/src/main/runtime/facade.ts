@@ -109,8 +109,10 @@ import type {
   ResolveDecisionRequest,
   ResolvePermissionDecisionRequest,
   ResolvePermissionProfileRequest,
+  ResolveRunDefaultsRequest,
   ResolvedConfig,
   ResolvedPermissionProfile,
+  ResolvedRunDefaults,
   ResumeAgentRunRequest,
   ResizeAgentRunRequest,
   RetentionPlan,
@@ -455,6 +457,8 @@ export interface AgentCatalogPort {
   listObservations(
     request: ListAgentObservationsRequest,
   ): IpcResult<readonly AgentObservationRecord[]>
+  /** TASK-134 (Milestone 26 §6): explainable run defaults for quick-start. */
+  resolveDefaults(request: ResolveRunDefaultsRequest): Promise<IpcResult<ResolvedRunDefaults>>
 }
 
 export interface WorktreePort {

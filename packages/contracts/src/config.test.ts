@@ -39,10 +39,41 @@ describe('config contracts (TASK-080)', () => {
     // TASK-122 (Milestone 25 §6.1): structured streams on by default.
     expect(DEFAULT_CONFIG.observability).toEqual({ structuredStream: true })
     // TASK-128 (ADR-0014 §4): decisions never expire unless opted in.
+    // TASK-131 (§9.3): blocking decisions desktop-notify by default.
     expect(DEFAULT_CONFIG.decisions).toEqual({
       shellConfirmationTimeoutMs: 0,
       stalledRunTimeoutMs: 0,
+      desktopNotifications: true,
     })
+    // TASK-121 (Milestone 25 §5.4): one transient network retry by default.
+    expect(DEFAULT_CONFIG.retry).toEqual({ transientAttempts: 1 })
+  })
+
+  it('retry transientAttempts is an integer in 0..3 (TASK-121)', () => {
+    expect(teskraConfigLayerSchema.safeParse({ retry: { transientAttempts: 0 } }).success).toBe(
+      true,
+    )
+    expect(teskraConfigLayerSchema.safeParse({ retry: { transientAttempts: 3 } }).success).toBe(
+      true,
+    )
+    expect(teskraConfigLayerSchema.safeParse({ retry: { transientAttempts: 4 } }).success).toBe(
+      false,
+    )
+    expect(teskraConfigLayerSchema.safeParse({ retry: { transientAttempts: -1 } }).success).toBe(
+      false,
+    )
+    expect(teskraConfigLayerSchema.safeParse({ retry: { transientAttempts: 1.5 } }).success).toBe(
+      false,
+    )
+  })
+
+  it('decisions desktopNotifications is a boolean toggle (TASK-131)', () => {
+    expect(
+      teskraConfigLayerSchema.safeParse({ decisions: { desktopNotifications: false } }).success,
+    ).toBe(true)
+    expect(
+      teskraConfigLayerSchema.safeParse({ decisions: { desktopNotifications: 'yes' } }).success,
+    ).toBe(false)
   })
 
   it('decisions timeouts are integers >= 0 (0 = never expire)', () => {

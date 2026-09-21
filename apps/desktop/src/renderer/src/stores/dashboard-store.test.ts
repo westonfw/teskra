@@ -3,6 +3,7 @@ import type {
   AgentRun,
   IpcResult,
   ListTasksRequest,
+  PendingDecision,
   Task,
   WorkbenchEventName,
   WorkbenchEvents,
@@ -83,6 +84,22 @@ function workflowRun(overrides: Partial<WorkflowRun> = {}): WorkflowRun {
     totalIterations: 3,
     criteriaIteration: 1,
     createdAt: '2026-09-10T00:30:00.000Z',
+    ...overrides,
+  }
+}
+
+function decision(overrides: Partial<PendingDecision> = {}): PendingDecision {
+  return {
+    id: 'decision-1',
+    workspaceId: WORKSPACE_ID,
+    kind: 'stalled_run',
+    status: 'open',
+    severity: 'blocking',
+    dedupeKey: 'stalled_run:run-1',
+    title: 'Run is stalled',
+    detail: { kind: 'stalled_run', silentForMs: 60_000 },
+    options: [{ id: 'keep_waiting', label: 'Keep waiting' }],
+    createdAt: '2026-09-10T00:45:00.000Z',
     ...overrides,
   }
 }
@@ -169,6 +186,9 @@ function createBridge() {
         ]),
       ),
     },
+    decision: {
+      list: vi.fn(async () => ok([decision({ id: 'decision-1' })])),
+    },
     events: {
       subscribe: vi.fn((name: WorkbenchEventName, handler: (payload: never) => void) => {
         let listeners = handlers.get(name)
@@ -212,10 +232,13 @@ describe('dashboard store (TASK-071)', () => {
     expect(state.activeTasks.data?.total).toBe(1)
     expect(state.activeTasks.data?.items[0]?.id).toBe('task-1')
 
-    expect(state.waitingForYou.data?.total).toBe(2)
+    // TASK-131: waitingForYou = open decisions ∪ needs_review tasks ∪
+    // needs_user_review workflow runs.
+    expect(state.waitingForYou.data?.total).toBe(3)
     expect(state.waitingForYou.data?.tasks.map(({ id }) => id)).toEqual(['task-2'])
     // Scoped through the workspace's tasks: other-workspace and task-less runs excluded.
     expect(state.waitingForYou.data?.workflowRuns.map(({ id }) => id)).toEqual(['wfr-1'])
+    expect(state.waitingForYou.data?.decisions.map(({ id }) => id)).toEqual(['decision-1'])
 
     expect(state.interruptedRuns.data?.total).toBe(1)
     expect(state.interruptedRuns.data?.items[0]?.id).toBe('run-interrupted')
@@ -236,6 +259,10 @@ describe('dashboard store (TASK-071)', () => {
     ])
 
     expect(bridge.task.list).toHaveBeenCalledWith({ workspaceId: WORKSPACE_ID, status: 'running' })
+    expect(bridge.decision.list).toHaveBeenCalledWith({
+      workspaceId: WORKSPACE_ID,
+      status: 'open',
+    })
     expect(bridge.agent.listHealth).toHaveBeenCalledWith({
       runtime: workspace.runtime,
       refresh: true,
@@ -330,11 +357,13 @@ describe('dashboard store (TASK-071)', () => {
 
     emit('task.updated', { taskId: 'task-1' })
     emit('workflow.run_updated', { runId: 'wfr-1', status: 'needs_user_review' })
-    await vi.waitFor(() => expect(bridge.task.list).toHaveBeenCalledTimes(6))
+    emit('decision.opened', { decision: decision({ id: 'decision-2' }) })
+    emit('decision.resolved', { decision: decision({ id: 'decision-1', status: 'resolved' }) })
+    await vi.waitFor(() => expect(bridge.task.list).toHaveBeenCalledTimes(10))
 
     stop()
     emit('git.changed', { workspaceId: WORKSPACE_ID })
     await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(bridge.task.list).toHaveBeenCalledTimes(6)
+    expect(bridge.task.list).toHaveBeenCalledTimes(10)
   })
 })

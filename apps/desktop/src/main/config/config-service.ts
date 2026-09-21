@@ -161,8 +161,32 @@ function setSourceForLeaves(
  * paths, so loading it from `<repo>/.teskra/config.json` would be RCE on
  * "open repo + run agent" (docs/code-review-2026-09-12.md P0-3). Other
  * groups carry no executable/path references, so they stay workspace-writable.
+ * Exception: WORKSPACE_SAFE_AGENT_FIELDS names the individual agents fields
+ * the workspace layer may still set (TASK-134).
  */
 const GLOBAL_ONLY_GROUPS = ['agents'] as const
+
+/**
+ * TASK-134 (Milestone 26 §6): fields inside a global-only group that the
+ * workspace layer may still set. `agents.defaultAgent` is a plain
+ * AgentDefinition.id — no executable path, no secret — so a committable
+ * repo config naming the team's default Agent carries no RCE risk, unlike
+ * `agents.executableOverrides` (P0-3).
+ */
+const WORKSPACE_SAFE_AGENT_FIELDS = ['defaultAgent'] as const
+
+/**
+ * Picks the workspace-safe fields out of an `agents` group object; anything
+ * else is stripped by the caller with a warning.
+ */
+function pickWorkspaceSafeAgentFields(value: unknown): Record<string, unknown> {
+  if (!isPlainObject(value)) return {}
+  const kept: Record<string, unknown> = {}
+  for (const field of WORKSPACE_SAFE_AGENT_FIELDS) {
+    if (field in value) kept[field] = value[field]
+  }
+  return kept
+}
 
 /**
  * Strips secret-looking fields from raw repo-local config JSON (plan §152:
@@ -204,6 +228,7 @@ function stripSecrets(layer: Record<string, unknown>): {
  * config JSON. Runs alongside stripSecrets on the workspace layer so the
  * resolved config can never take `agents.*` from a committable file — even
  * if a future caller passes `resolve({ workspaceId })` to agent detection.
+ * Workspace-safe fields (WORKSPACE_SAFE_AGENT_FIELDS) survive the strip.
  */
 function stripGlobalOnlyGroups(layer: Record<string, unknown>): {
   sanitized: Record<string, unknown>
@@ -213,11 +238,22 @@ function stripGlobalOnlyGroups(layer: Record<string, unknown>): {
   const clean: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(layer)) {
     if ((GLOBAL_ONLY_GROUPS as readonly string[]).includes(key)) {
-      warnings.push({
-        layer: 'workspace',
-        fieldPath: key,
-        message: `Group "${key}" is global-only and was not loaded from the repo-local config (it can point Agent executables at arbitrary paths; set it in the private global config instead).`,
-      })
+      // TASK-134: workspace-safe fields of the agents group survive; the rest
+      // of the group stays global-only.
+      const kept = key === 'agents' ? pickWorkspaceSafeAgentFields(value) : {}
+      const stripped = isPlainObject(value)
+        ? Object.keys(value).filter((field) => !(field in kept))
+        : []
+      if (stripped.length > 0 || !isPlainObject(value)) {
+        warnings.push({
+          layer: 'workspace',
+          fieldPath: key,
+          message: `Group "${key}" is global-only and was not loaded from the repo-local config (it can point Agent executables at arbitrary paths; set it in the private global config instead).`,
+        })
+      }
+      if (Object.keys(kept).length > 0) {
+        clean[key] = kept
+      }
       continue
     }
     clean[key] = value
@@ -314,9 +350,18 @@ export function createConfigService(deps: ConfigServiceDeps): ConfigService {
     patch: unknown,
   ): IpcResult<void> => {
     if (layer === 'workspace' && isPlainObject(patch)) {
-      const globalOnly = Object.keys(patch).filter((key) =>
-        (GLOBAL_ONLY_GROUPS as readonly string[]).includes(key),
-      )
+      const globalOnly = Object.keys(patch).filter((key) => {
+        if (!(GLOBAL_ONLY_GROUPS as readonly string[]).includes(key)) return false
+        // TASK-134: an agents patch carrying only workspace-safe fields
+        // (defaultAgent) is allowed; any other agents field stays rejected.
+        if (key === 'agents') {
+          const value: unknown = patch[key]
+          if (!isPlainObject(value)) return true
+          const kept = pickWorkspaceSafeAgentFields(value)
+          return Object.keys(value).some((field) => !(field in kept))
+        }
+        return true
+      })
       if (globalOnly.length > 0) {
         return {
           ok: false,

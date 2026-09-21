@@ -146,7 +146,12 @@ describe('ConfigService.resolve — layer order', () => {
         idleAction: 'ask',
       },
       environment: { defaultDistro: null },
-      agents: { executableOverrides: {}, defaultAccountProfiles: {}, defaultExecutionProfiles: {} },
+      agents: {
+        executableOverrides: {},
+        defaultAccountProfiles: {},
+        defaultExecutionProfiles: {},
+        defaultAgent: null,
+      },
       review: { mediumBlockThreshold: 0 }, // default untouched
       retention: {
         mergedWorktreeDays: 1,
@@ -156,7 +161,13 @@ describe('ConfigService.resolve — layer order', () => {
         worktreeArtifactIdleDays: 7,
       },
       observability: { structuredStream: true }, // default untouched
-      decisions: { shellConfirmationTimeoutMs: 0, stalledRunTimeoutMs: 0 }, // default untouched
+      // default untouched
+      decisions: {
+        shellConfirmationTimeoutMs: 0,
+        stalledRunTimeoutMs: 0,
+        desktopNotifications: true,
+      },
+      retry: { transientAttempts: 1 }, // default untouched
     })
     expect(sources).toEqual({
       'logging.level': 'global',
@@ -168,6 +179,7 @@ describe('ConfigService.resolve — layer order', () => {
       'watchdog.idleTimeoutMs': 'default',
       'watchdog.idleAction': 'default',
       'environment.defaultDistro': 'default',
+      'agents.defaultAgent': 'default',
       'review.mediumBlockThreshold': 'default',
       'retention.mergedWorktreeDays': 'default',
       'retention.completedRunLogsDays': 'default',
@@ -177,6 +189,8 @@ describe('ConfigService.resolve — layer order', () => {
       'observability.structuredStream': 'default',
       'decisions.shellConfirmationTimeoutMs': 'default',
       'decisions.stalledRunTimeoutMs': 'default',
+      'decisions.desktopNotifications': 'default',
+      'retry.transientAttempts': 'default',
     })
   })
 
@@ -396,6 +410,62 @@ describe('ConfigService — global-only groups (P0-3)', () => {
     )
     const result = service.updateWorkspace('ws1', {
       agents: { executableOverrides: { 'codex:wsl': '/evil/codex' } },
+    })
+    expect(result).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    expect(writes).toEqual([])
+  })
+
+  it('loads agents.defaultAgent from the workspace layer (TASK-134)', () => {
+    const service = createConfigService(
+      makeDeps({
+        [`${REPO_ROOT}/.teskra/config.json`]: JSON.stringify({
+          agents: { defaultAgent: 'codex', executableOverrides: { 'codex:wsl': '/evil/codex' } },
+        }),
+      }),
+    )
+    const resolved = service.resolve({ workspaceId: 'ws1' })
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) return
+    // The safe field applies and is attributed to the workspace layer...
+    expect(resolved.data.config.agents.defaultAgent).toBe('codex')
+    expect(resolved.data.sources['agents.defaultAgent']).toBe('workspace')
+    // ...while the executable override stays stripped, with one group warning.
+    expect(resolved.data.config.agents.executableOverrides).toEqual({})
+    expect(resolved.data.warnings).toHaveLength(1)
+    expect(resolved.data.warnings[0]).toMatchObject({
+      layer: 'workspace',
+      fieldPath: 'agents',
+    })
+  })
+
+  it('accepts a workspace patch carrying only agents.defaultAgent (TASK-134)', () => {
+    const files: Record<string, string> = {}
+    const service = createConfigService(
+      makeDeps(files, {
+        writeFile: (path, contents) => {
+          files[path] = contents
+        },
+      }),
+    )
+    const result = service.updateWorkspace('ws1', { agents: { defaultAgent: 'claude' } })
+    expect(result).toMatchObject({ ok: true })
+    if (!result.ok) return
+    expect(result.data.config.agents.defaultAgent).toBe('claude')
+    expect(result.data.sources['agents.defaultAgent']).toBe('workspace')
+    const written = JSON.parse(files[`${REPO_ROOT}/.teskra/config.json`] ?? '{}') as Record<
+      string,
+      unknown
+    >
+    expect(written).toEqual({ agents: { defaultAgent: 'claude' } })
+  })
+
+  it('still rejects a workspace patch mixing defaultAgent with other agents fields', () => {
+    const writes: string[] = []
+    const service = createConfigService(
+      makeDeps({}, { writeFile: (path) => void writes.push(path) }),
+    )
+    const result = service.updateWorkspace('ws1', {
+      agents: { defaultAgent: 'codex', defaultAccountProfiles: { codex: 'acct-1' } },
     })
     expect(result).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
     expect(writes).toEqual([])

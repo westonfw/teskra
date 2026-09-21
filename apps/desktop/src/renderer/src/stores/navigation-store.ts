@@ -5,6 +5,7 @@ export const WORKBENCH_PAGES = [
   'workspace',
   'tasks',
   'runs',
+  'inbox',
   'git',
   'terminal',
   'doctor',

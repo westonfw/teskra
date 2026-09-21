@@ -126,6 +126,13 @@ export interface WorkflowRunRepository {
   getStepById(id: string): IpcResult<WorkflowStep | null>
   updateStep(id: string, patch: UpdateWorkflowStepInput): IpcResult<WorkflowStep | null>
   listSteps(workflowRunId: string): IpcResult<WorkflowStep[]>
+  /**
+   * TASK-121 (§5.4): whether any step's settled result references the Agent
+   * run (`result_json.agentRunId` is the run→step link — the engine records
+   * it when the step settles). Workflow-owned runs are excluded from the
+   * transient-failure auto-retry (the Iterate primitive owns those retries).
+   */
+  hasStepWithAgentRun(agentRunId: string): IpcResult<boolean>
   deleteRun(id: string): IpcResult<boolean>
 }
 
@@ -403,6 +410,20 @@ export function createWorkflowRunRepository(connection: Database.Database): Work
         return rows
       }
       return mapRows(rows.data, stepToDomain)
+    },
+
+    hasStepWithAgentRun(agentRunId) {
+      return execute(STEP_ENTITY, 'hasStepWithAgentRun', () => {
+        const row = connection
+          .prepare(
+            `SELECT EXISTS(
+               SELECT 1 FROM workflow_steps
+               WHERE json_extract(result_json, '$.agentRunId') = ?
+             ) AS found`,
+          )
+          .get(agentRunId) as { found: number }
+        return row.found === 1
+      })
     },
 
     deleteRun(id) {

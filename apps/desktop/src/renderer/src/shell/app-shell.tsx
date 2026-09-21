@@ -5,6 +5,7 @@ import {
   GitlabOutlined,
   GlobalOutlined,
   HomeOutlined,
+  InboxOutlined,
   MedicineBoxOutlined,
   MoonOutlined,
   PlayCircleOutlined,
@@ -13,11 +14,14 @@ import {
   SettingOutlined,
   SunOutlined,
 } from '@ant-design/icons'
-import { Button, Empty, Layout, Menu, Select, Space, Tag, Typography } from 'antd'
+import { Badge, Button, Empty, Layout, Menu, Select, Space, Tag, Typography } from 'antd'
 import { useEffect } from 'react'
 
 import { SettingsPage } from '../settings/settings-page'
 import { ChangesPage } from '../git/changes-page'
+import { startDecisionNotifications } from '../decisions/decision-notifications'
+import { InboxPage } from '../decisions/inbox-page'
+import { useInboxStore } from '../decisions/inbox-store'
 import { DoctorPage } from '../doctor/doctor-page'
 import { HomePage } from '../home/home-page'
 import { RecoveryPage } from '../recovery/recovery-page'
@@ -38,6 +42,7 @@ const navigation = [
   { key: 'workspace', labelKey: 'nav.workspace', icon: <FolderOutlined /> },
   { key: 'tasks', labelKey: 'nav.tasks', icon: <ProjectOutlined /> },
   { key: 'runs', labelKey: 'nav.runs', icon: <PlayCircleOutlined /> },
+  { key: 'inbox', labelKey: 'nav.inbox', icon: <InboxOutlined /> },
   { key: 'git', labelKey: 'nav.git', icon: <GitlabOutlined /> },
   { key: 'terminal', labelKey: 'nav.terminal', icon: <CodeOutlined /> },
   { key: 'doctor', labelKey: 'nav.doctor', icon: <SafetyCertificateOutlined /> },
@@ -86,6 +91,12 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
   const setTheme = useThemeStore((state) => state.setTheme)
   const gitBranch = useGitStore((state) => state.status?.branch)
   const refreshGit = useGitStore((state) => state.refresh)
+  const openDecisionCount = useInboxStore((state) => state.decisions.length)
+
+  // TASK-131: the Inbox badge + blocking-decision desktop notifications live
+  // off these syncs, so they run from the shell regardless of the page.
+  useEffect(() => useInboxStore.getState().startSynchronization(), [])
+  useEffect(() => startDecisionNotifications(() => window.teskra, t), [t])
 
   // The persisted workspace.defaultBranch is a snapshot from open time (an
   // empty repo has no branch yet); keep the topbar on the live branch.
@@ -119,7 +130,20 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
           selectedKeys={[page]}
           items={navigation.map((item) => ({
             key: item.key,
-            label: t(item.labelKey),
+            label:
+              item.key === 'inbox' ? (
+                // TASK-131: persistent open-decision count badge.
+                <Badge
+                  count={openDecisionCount}
+                  size="small"
+                  offset={[6, -2]}
+                  className="inbox-nav-badge"
+                >
+                  {t(item.labelKey)}
+                </Badge>
+              ) : (
+                t(item.labelKey)
+              ),
             icon: item.icon,
           }))}
           onSelect={({ key }) => navigate(key as WorkbenchPage)}
@@ -186,6 +210,7 @@ export function AppShell({ settingsRegistry }: AppShellProps) {
             {page === 'workspace' && <WorkspacePage />}
             {page === 'tasks' && needsWorkspace(t('nav.tasks'), <TaskPage />)}
             {page === 'runs' && needsWorkspace(t('nav.runs'), <AgentCatalogPage />)}
+            {page === 'inbox' && <InboxPage />}
             {page === 'git' && needsWorkspace(t('nav.git'), <ChangesPage />)}
             {page === 'doctor' && <DoctorPage />}
             {page === 'recovery' && needsWorkspace(t('nav.recovery'), <RecoveryPage />)}

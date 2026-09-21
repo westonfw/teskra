@@ -230,4 +230,27 @@ describe('WorkflowRunRepository', () => {
     expect(repo.deleteRun('wf-1')).toEqual({ ok: true, data: true })
     expect(repo.getStepById('step-1')).toEqual({ ok: true, data: null })
   })
+
+  it('hasStepWithAgentRun matches only steps whose result references the run (TASK-121)', () => {
+    setup()
+    repo.createRun({
+      id: 'wf-1',
+      taskId: 'task-1',
+      workflowDefinitionId: 'd',
+      definition: DEFINITION,
+    })
+    repo.createStep({ id: 'step-1', workflowRunId: 'wf-1', nodeId: 'n', nodeType: 'agent' })
+    // A pending step has no result yet — nothing references the run.
+    expect(repo.hasStepWithAgentRun('run-1')).toEqual({ ok: true, data: false })
+
+    const settled = repo.updateStep('step-1', {
+      status: 'failed',
+      result: { outcome: 'failure', agentRunId: 'run-1', error: 'boom' },
+    })
+    expect(settled.ok).toBe(true)
+    expect(repo.hasStepWithAgentRun('run-1')).toEqual({ ok: true, data: true })
+    expect(repo.hasStepWithAgentRun('run-2')).toEqual({ ok: true, data: false })
+    // A result without an agentRunId does not match either.
+    expect(repo.hasStepWithAgentRun('failure')).toEqual({ ok: true, data: false })
+  })
 })

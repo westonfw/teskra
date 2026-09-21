@@ -879,6 +879,37 @@ body {
   flex: 1;
 }
 
+/* TASK-131: Decision Inbox. */
+.inbox-page .inbox-group {
+  margin-bottom: 16px;
+  background: var(--surface-card);
+  border-color: var(--surface-card-border);
+}
+
+.inbox-item .inbox-item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.inbox-item-detail .ant-typography {
+  margin-bottom: 2px;
+}
+
+.inbox-detail-code {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.inbox-empty {
+  margin-top: 48px;
+}
+
+.inbox-nav-badge .ant-badge-count {
+  box-shadow: none;
+}
+
 .doctor-check-list .ant-list-item {
   padding: 6px 0;
   border: 0;

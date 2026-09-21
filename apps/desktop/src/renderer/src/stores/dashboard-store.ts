@@ -4,8 +4,10 @@ import type {
   IpcResult,
   ListAgentDetectionsRequest,
   ListAgentRunsRequest,
+  ListDecisionsRequest,
   ListTasksRequest,
   ListWorkflowRunsRequest,
+  PendingDecision,
   PublicAppError,
   SummarizeUsageRequest,
   Task,
@@ -50,6 +52,8 @@ export interface WaitingForYouSummary {
   readonly total: number
   readonly tasks: readonly Task[]
   readonly workflowRuns: readonly WorkflowRun[]
+  /** TASK-131: open Decision Inbox entries for this workspace (§9.3). */
+  readonly decisions: readonly PendingDecision[]
 }
 
 export interface DashboardStoreBridge {
@@ -65,6 +69,9 @@ export interface DashboardStoreBridge {
   }
   readonly workflow: {
     listRuns(request?: ListWorkflowRunsRequest): Promise<IpcResult<WorkflowRun[]>>
+  }
+  readonly decision: {
+    list(request?: ListDecisionsRequest): Promise<IpcResult<PendingDecision[]>>
   }
   readonly usage: {
     summary(request: SummarizeUsageRequest): Promise<IpcResult<UsageSummaryBucket[]>>
@@ -84,7 +91,9 @@ export interface DashboardStoreBridge {
         | 'worktree.merged'
         | 'worktree.merge_conflict'
         | 'git.changed'
-        | 'usage.updated',
+        | 'usage.updated'
+        | 'decision.opened'
+        | 'decision.resolved',
     >(
       name: Name,
       handler: (payload: WorkbenchEvents[Name]) => void,
@@ -174,9 +183,10 @@ export function createDashboardStore(getBridge: () => DashboardStoreBridge) {
     const loadWaitingForYou = async (workspaceId: string): Promise<void> => {
       const generation = begin('waitingForYou')
       try {
-        const [tasksResult, workflowResult] = await Promise.all([
+        const [tasksResult, workflowResult, decisionResult] = await Promise.all([
           getBridge().task.list({ workspaceId }),
           getBridge().workflow.listRuns({ status: 'needs_user_review' }),
+          getBridge().decision.list({ workspaceId, status: 'open' }),
         ])
         if (!tasksResult.ok) {
           fail('waitingForYou', generation, tasksResult.error)
@@ -184,6 +194,10 @@ export function createDashboardStore(getBridge: () => DashboardStoreBridge) {
         }
         if (!workflowResult.ok) {
           fail('waitingForYou', generation, workflowResult.error)
+          return
+        }
+        if (!decisionResult.ok) {
+          fail('waitingForYou', generation, decisionResult.error)
           return
         }
         const tasks = tasksResult.data
@@ -196,10 +210,16 @@ export function createDashboardStore(getBridge: () => DashboardStoreBridge) {
         const workflowRuns = workflowResult.data.filter(
           (run) => run.taskId !== undefined && taskIds.has(run.taskId),
         )
+        // TASK-131 (§9.3): waitingForYou = open decisions ∪ needs_review
+        // tasks ∪ needs_user_review workflow runs.
+        const decisions = [...decisionResult.data].sort((left, right) =>
+          right.createdAt.localeCompare(left.createdAt),
+        )
         succeed('waitingForYou', generation, {
-          total: tasks.length + workflowRuns.length,
+          total: tasks.length + workflowRuns.length + decisions.length,
           tasks: tasks.slice(0, DASHBOARD_PREVIEW_LIMIT),
           workflowRuns: workflowRuns.slice(0, DASHBOARD_PREVIEW_LIMIT),
+          decisions: decisions.slice(0, DASHBOARD_PREVIEW_LIMIT),
         } satisfies WaitingForYouSummary)
       } catch {
         fail('waitingForYou', generation, transportError())
@@ -348,6 +368,8 @@ export function createDashboardStore(getBridge: () => DashboardStoreBridge) {
           getBridge().events.subscribe('worktree.merge_conflict', reload),
           getBridge().events.subscribe('git.changed', reload),
           getBridge().events.subscribe('usage.updated', reload),
+          getBridge().events.subscribe('decision.opened', reload),
+          getBridge().events.subscribe('decision.resolved', reload),
         ]
         loadAll(workspace)
 

@@ -7,10 +7,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type {
   AgentDefinition,
+  AgentFailureClassification,
   ConcurrencyConfig,
   IpcResult,
   ObservabilityConfig,
   ProviderSessionRef,
+  RetryConfig,
   WorkbenchEvents,
 } from '@teskra/contracts'
 
@@ -124,6 +126,9 @@ function setup(
     failureClassifiers?: NonNullable<AgentManagerDeps['failureClassifiers']>
     /** TASK-130: wire a real DecisionService (same connection + bus) into the manager. */
     withDecisions?: boolean
+    /** TASK-121: retry config group and Workflow membership probe. */
+    retry?: RetryConfig
+    workflows?: NonNullable<AgentManagerDeps['workflows']>
   },
 ): TestContext {
   const connection = new Database(':memory:')
@@ -212,6 +217,10 @@ function setup(
     ...(extras?.failureClassifiers === undefined
       ? {}
       : { failureClassifiers: extras.failureClassifiers }),
+    ...(extras?.retry === undefined
+      ? {}
+      : { resolveRetry: () => ({ ok: true as const, data: extras.retry as RetryConfig }) }),
+    ...(extras?.workflows === undefined ? {} : { workflows: extras.workflows }),
     ...(decisions === undefined ? {} : { decisions }),
   })
   const context = {
@@ -2298,5 +2307,291 @@ describe('AgentManager decision integration (TASK-130, ADR-0014)', () => {
     const cancelled = await context.manager.cancel('run-1')
     expect(cancelled).toMatchObject({ ok: true, data: { status: 'cancelled' } })
     expect(decisions.get(stalledId)).toMatchObject({ ok: true, data: { status: 'cancelled' } })
+  })
+})
+
+describe('AgentManager transient retry (TASK-121, Milestone 25 §5.4)', () => {
+  const NETWORK = { kind: 'network' as const, retryable: true }
+  const ONE_ATTEMPT: RetryConfig = { transientAttempts: 1 }
+  /** Real-timer wait: the retry evaluation is deferred to a macrotask. */
+  const settle = (ms = 50): Promise<void> =>
+    new Promise((resolve) => {
+      setTimeout(resolve, ms)
+    })
+
+  function retrySetup(
+    classification: AgentFailureClassification,
+    options?: {
+      retry?: RetryConfig
+      workflows?: NonNullable<AgentManagerDeps['workflows']>
+      hostProcesses?: Pick<HostProcessControl, 'probe' | 'identity' | 'terminate'>
+    },
+  ): TestContext {
+    return setup(undefined, false, undefined, options?.hostProcesses, undefined, {
+      failureClassifiers: [{ agentId: 'codex', classify: () => classification }],
+      ...(options?.retry === undefined ? {} : { retry: options.retry }),
+      ...(options?.workflows === undefined ? {} : { workflows: options.workflows }),
+    })
+  }
+
+  function failRun(context: TestContext, runId: string): void {
+    context.events.emit('process.exited', {
+      processId: `codex:${runId}`,
+      agentRunId: runId,
+      exitCode: 1,
+    })
+  }
+
+  /** Waits until the retry link on `runId` is visible (post-continuation write). */
+  async function waitForRetryLink(context: TestContext, runId: string, sourceRunId: string) {
+    await vi.waitFor(() => {
+      const run = context.manager.get(runId)
+      expect(run.ok && run.data?.retryOfRunId === sourceRunId).toBe(true)
+    })
+  }
+
+  it('retries a transient network failure through the continuation mechanism and persists agent.retry_scheduled', async () => {
+    const workflows = { hasStepWithAgentRun: vi.fn(() => ({ ok: true as const, data: false })) }
+    const context = retrySetup(NETWORK, { retry: ONE_ATTEMPT, workflows })
+    const scheduled: WorkbenchEvents['agent.retry_scheduled'][] = []
+    context.events.subscribe('agent.retry_scheduled', (payload) => {
+      scheduled.push(payload)
+    })
+    const sourceStatesAtTargetStart: string[] = []
+    context.events.subscribe('agent.started', ({ runId }) => {
+      if (runId !== 'run-1') {
+        const source = context.manager.get('run-1')
+        sourceStatesAtTargetStart.push(source.ok ? (source.data?.status ?? 'missing') : 'error')
+      }
+    })
+    const worktree = context.worktrees.create({
+      id: 'worktree-1',
+      workspaceId: 'workspace-1',
+      branch: 'agent/run-1',
+      baseBranch: 'main',
+      path: '/worktrees/run-1',
+      state: 'ready',
+      isolation: 'worktree',
+    })
+    if (!worktree.ok) throw new Error(worktree.error.message)
+    await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      worktreeId: 'worktree-1',
+      executionMode: 'orchestrated',
+      prompt: 'Implement',
+    })
+
+    failRun(context, 'run-1')
+    expect(context.manager.get('run-1')).toMatchObject({
+      ok: true,
+      data: { status: 'failed', failureClassification: { kind: 'network' } },
+    })
+
+    await waitForRetryLink(context, 'run-2', 'run-1')
+    expect(context.adapters.codex.start).toHaveBeenCalledTimes(2)
+    // The Workflow membership probe ran and did not claim the source run.
+    expect(workflows.hasStepWithAgentRun).toHaveBeenCalledWith('run-1')
+    // The target run continues the source: same worktree, and it was created
+    // only after the source was terminal (§19.3 flow A).
+    expect(context.manager.get('run-2')).toMatchObject({
+      ok: true,
+      data: {
+        status: 'running',
+        worktreeId: 'worktree-1',
+        retryOfRunId: 'run-1',
+        executionMode: 'orchestrated',
+      },
+    })
+    expect(sourceStatesAtTargetStart).toEqual(['failed'])
+    // Live event plus durable event on the TARGET run (events.jsonl + agent_events).
+    expect(scheduled).toEqual([{ sourceRunId: 'run-1', targetRunId: 'run-2', attempt: 1 }])
+    const persisted = context.agentEvents.listByRun('run-2')
+    expect(persisted.ok).toBe(true)
+    if (!persisted.ok) return
+    const retryEvents = persisted.data.filter(
+      (event) => event.eventType === 'agent.retry_scheduled',
+    )
+    expect(retryEvents).toHaveLength(1)
+    expect(retryEvents[0]?.payload).toMatchObject({
+      sourceRunId: 'run-1',
+      targetRunId: 'run-2',
+      attempt: 1,
+    })
+  })
+
+  it('does not retry when the classification is network but not retryable', async () => {
+    const context = retrySetup({ kind: 'network', retryable: false }, { retry: ONE_ATTEMPT })
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    failRun(context, 'run-1')
+    await settle()
+    expect(context.adapters.codex.start).toHaveBeenCalledTimes(1)
+    expect(context.manager.get('run-2')).toEqual({ ok: true, data: null })
+  })
+
+  it('does not retry when the handoff parsed cleanly (parseStatus ok)', async () => {
+    const context = retrySetup(NETWORK, { retry: ONE_ATTEMPT })
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    const files = context.paths.runFiles('run-1')
+    if (!files.ok) throw new Error(files.error.message)
+    writeFileSync(
+      files.data.handoff,
+      JSON.stringify({ runId: 'run-1', type: 'implementation', summary: 'Partial but valid.' }),
+      'utf8',
+    )
+    failRun(context, 'run-1')
+    expect(context.handoffs.getByRunId('run-1')).toMatchObject({
+      ok: true,
+      data: { parseStatus: 'ok' },
+    })
+    await settle()
+    expect(context.adapters.codex.start).toHaveBeenCalledTimes(1)
+    expect(context.manager.get('run-2')).toEqual({ ok: true, data: null })
+  })
+
+  it('does not retry a run claimed by a Workflow step', async () => {
+    const context = retrySetup(NETWORK, {
+      retry: ONE_ATTEMPT,
+      workflows: { hasStepWithAgentRun: vi.fn(() => ({ ok: true as const, data: true })) },
+    })
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    failRun(context, 'run-1')
+    await settle()
+    expect(context.adapters.codex.start).toHaveBeenCalledTimes(1)
+    expect(context.manager.get('run-2')).toEqual({ ok: true, data: null })
+  })
+
+  it('stops at the transientAttempts chain limit (three retries, then no more)', async () => {
+    const context = retrySetup(NETWORK, { retry: { transientAttempts: 3 } })
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+
+    failRun(context, 'run-1')
+    await waitForRetryLink(context, 'run-2', 'run-1')
+    failRun(context, 'run-2')
+    await waitForRetryLink(context, 'run-3', 'run-2')
+    failRun(context, 'run-3')
+    await waitForRetryLink(context, 'run-4', 'run-3')
+    expect(context.adapters.codex.start).toHaveBeenCalledTimes(4)
+    // The chain reads back correctly: each retry links to its source.
+    expect(context.manager.get('run-2')).toMatchObject({
+      ok: true,
+      data: { retryOfRunId: 'run-1' },
+    })
+    expect(context.manager.get('run-3')).toMatchObject({
+      ok: true,
+      data: { retryOfRunId: 'run-2' },
+    })
+    expect(context.manager.get('run-4')).toMatchObject({
+      ok: true,
+      data: { retryOfRunId: 'run-3' },
+    })
+    const attempts = context.agentEvents.listByRun('run-4')
+    expect(attempts.ok).toBe(true)
+    if (!attempts.ok) return
+    expect(
+      attempts.data.find((event) => event.eventType === 'agent.retry_scheduled')?.payload,
+    ).toMatchObject({ sourceRunId: 'run-3', targetRunId: 'run-4', attempt: 3 })
+
+    // The fourth network failure is the third retry on the chain: no run-5.
+    failRun(context, 'run-4')
+    await settle()
+    expect(context.adapters.codex.start).toHaveBeenCalledTimes(4)
+    expect(context.manager.get('run-5')).toEqual({ ok: true, data: null })
+  })
+
+  it('transientAttempts 0 keeps the current behavior exactly', async () => {
+    const context = retrySetup(NETWORK, { retry: { transientAttempts: 0 } })
+    const scheduled: unknown[] = []
+    context.events.subscribe('agent.retry_scheduled', (payload) => {
+      scheduled.push(payload)
+    })
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    failRun(context, 'run-1')
+    await settle()
+    expect(context.manager.get('run-1')).toMatchObject({
+      ok: true,
+      data: { status: 'failed', failureClassification: { kind: 'network' } },
+    })
+    expect(context.adapters.codex.start).toHaveBeenCalledTimes(1)
+    expect(context.manager.get('run-2')).toEqual({ ok: true, data: null })
+    expect(scheduled).toEqual([])
+    const persisted = context.agentEvents.listByRun('run-1')
+    expect(persisted.ok).toBe(true)
+    if (!persisted.ok) return
+    expect(
+      persisted.data.filter((event) => event.eventType === 'agent.retry_scheduled'),
+    ).toHaveLength(0)
+  })
+
+  it.each([
+    [{ kind: 'rate-limited', retryable: true }],
+    [{ kind: 'authentication-required', retryable: false }],
+    [{ kind: 'authentication-expired', retryable: false }],
+    [{ kind: 'permission', retryable: false }],
+    [{ kind: 'unknown', retryable: true }],
+    [{ kind: 'process-crash', retryable: true }],
+  ] satisfies [AgentFailureClassification][])(
+    'never auto-retries the %s classification',
+    async (classification) => {
+      const context = retrySetup(classification, { retry: { transientAttempts: 3 } })
+      await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+      failRun(context, 'run-1')
+      await settle()
+      expect(context.adapters.codex.start).toHaveBeenCalledTimes(1)
+      expect(context.manager.get('run-2')).toEqual({ ok: true, data: null })
+    },
+  )
+
+  it('retries a launch-time failure classified as a transient network error', async () => {
+    const context = retrySetup(NETWORK, { retry: ONE_ATTEMPT })
+    context.adapters.codex.start = vi.fn(async () => ({
+      ok: false as const,
+      error: {
+        code: 'UNKNOWN' as const,
+        message: 'fetch failed: ECONNRESET',
+        retryable: true,
+      },
+    }))
+    const started = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      prompt: 'Implement',
+    })
+    expect(started).toMatchObject({ ok: true, data: { id: 'run-1', status: 'failed' } })
+
+    // The continuation's launch must succeed for the retry to materialize.
+    const codex = mockAdapter(CODEX_AGENT)
+    context.adapters.codex.start = codex.start
+    await waitForRetryLink(context, 'run-2', 'run-1')
+    expect(context.manager.get('run-2')).toMatchObject({
+      ok: true,
+      data: { status: 'running', retryOfRunId: 'run-1' },
+    })
+  })
+
+  it('creates the target only after the source process is confirmed gone (§19.3 survivor judgment)', async () => {
+    // The launch records pidIdentity 'tok-1'; the survivor probe later reads
+    // the same token, but termination FAILS — the process is alive, so the
+    // continuation (and with it the retry) must abort.
+    const hostProcesses = {
+      identity: vi.fn(async () => ({ ok: true as const, data: 'tok-1' })),
+      terminate: vi.fn(async () => ({
+        ok: false as const,
+        error: { code: 'UNKNOWN' as const, message: 'kill failed', retryable: true },
+      })),
+      probe: vi.fn(async () => ({ ok: true as const, data: true })),
+    }
+    const context = retrySetup(NETWORK, { retry: ONE_ATTEMPT, hostProcesses })
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    failRun(context, 'run-1')
+    // Race the deferred evaluation: strip the exit code so the §19.3 flow-A
+    // survivor probe (not the recorded exit) has to prove the process is gone.
+    const stripped = context.runs.update('run-1', { exitCode: null })
+    expect(stripped.ok).toBe(true)
+
+    await settle()
+    expect(hostProcesses.terminate).toHaveBeenCalled()
+    expect(context.adapters.codex.start).toHaveBeenCalledTimes(1)
+    expect(context.manager.get('run-2')).toEqual({ ok: true, data: null })
   })
 })

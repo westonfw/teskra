@@ -4541,13 +4541,13 @@ column: agent_runs.retry_of_run_id (migration 017)
 
 ### 验收标准
 
-- [ ] 仅当 `failureClassification.kind === 'network' && retryable` 且 `handoff.parseStatus !== 'ok'`
+- [x] 仅当 `failureClassification.kind === 'network' && retryable` 且 `handoff.parseStatus !== 'ok'`
       且 Run 不属于 Workflow 步骤且链上尝试次数 < `transientAttempts` 时触发；四个条件各有反例测试。
-- [ ] `rate-limited` / `authentication-*` / `permission` / `unknown` / `process-crash` 不自动重试。
-- [ ] 目标 Run 写 `retry_of_run_id`；链回溯计数正确（三次失败停在上限）。
-- [ ] 目标 Run 只在源进程确认退出后创建（复用 §19.3 survivor 判定，不新写）。
-- [ ] `transientAttempts = 0` 时行为与现在完全一致。
-- [ ] 持久事件 `agent.retry_scheduled { sourceRunId, targetRunId, attempt }`。
+- [x] `rate-limited` / `authentication-*` / `permission` / `unknown` / `process-crash` 不自动重试。
+- [x] 目标 Run 写 `retry_of_run_id`；链回溯计数正确（三次失败停在上限）。
+- [x] 目标 Run 只在源进程确认退出后创建（复用 §19.3 survivor 判定，不新写）。
+- [x] `transientAttempts = 0` 时行为与现在完全一致。
+- [x] 持久事件 `agent.retry_scheduled { sourceRunId, targetRunId, attempt }`。
 
 ---
 
@@ -4798,12 +4798,12 @@ config:    decisions.shellConfirmationTimeoutMs, decisions.stalledRunTimeoutMs (
 
 ### 验收标准
 
-- [ ] 新页面 Inbox：按 severity 分组，展示来源上下文链接与选项按钮；`danger` 选项二次确认。
-- [ ] 导航常驻 open 计数角标，订阅 `decision.opened` / `decision.resolved` 增量更新。
-- [ ] Dashboard `waitingForYou` = `decision.list({ status: 'open' })` ∪ 原 `needs_review` Task；
+- [x] 新页面 Inbox：按 severity 分组，展示来源上下文链接与选项按钮；`danger` 选项二次确认。
+- [x] 导航常驻 open 计数角标，订阅 `decision.opened` / `decision.resolved` 增量更新。
+- [x] Dashboard `waitingForYou` = `decision.list({ status: 'open' })` ∪ 原 `needs_review` Task；
       `recentFailures` 对 `rate_limit` 项给「继续」入口。
-- [ ] `severity === 'blocking'` 打开时发一次桌面通知（仅 RendererEventBridge 层，可在 Settings 关闭）。
-- [ ] 全部文案 i18n；E2E：Fake Agent `progress-blocker` 场景 → Inbox 出现 → 选 `stop` → Run `cancelled`。
+- [x] `severity === 'blocking'` 打开时发一次桌面通知（仅 RendererEventBridge 层，可在 Settings 关闭）。
+- [x] 全部文案 i18n；E2E：Fake Agent `progress-blocker` 场景 → Inbox 出现 → 选 `stop` → Run `cancelled`。
 
 ---
 
@@ -4895,16 +4895,16 @@ config:    agents.defaultAgent (string | null，global / workspace 层可写)
 
 ### 验收标准
 
-- [ ] `agentType` 按五级回退选择：`agents.defaultAgent` → 本 Workspace 最近一次成功 Run 的 Agent →
+- [x] `agentType` 按五级回退选择：`agents.defaultAgent` → 本 Workspace 最近一次成功 Run 的 Agent →
       按 role 匹配 `defaults.role` 的已安装且健康 Agent 中 `routing.priority` 最高者 →
       任意已安装 Agent 中 `routing.priority` 最高者 → `VALIDATION_FAILED`；每级各有测试。
-- [ ] 健康过滤排除 `unavailable` / `rate-limited`（AgentHealth，TASK-024）。
-- [ ] `accountProfileId` 来自 `AccountProfileManager.getDefault(agentType)`；`executionProfileId`
+- [x] 健康过滤排除 `unavailable` / `rate-limited`（AgentHealth，TASK-024）。
+- [x] `accountProfileId` 来自 `AccountProfileManager.getDefault(agentType)`；`executionProfileId`
       来自 `config.agents.defaultExecutionProfiles`。
-- [ ] 固定默认：`mode: 'exec'`、`executionMode: 'orchestrated'`、`approvalMode: 'safe-auto'`、`isolation: 'worktree'`。
-- [ ] `reasons[]` 对每个字段给出 i18n key + 参数，与实际选择一致（测试断言）。
-- [ ] 同一服务提供 Workflow 用的 implementer / reviewers 默认（reviewers = role `reviewer` 的健康 Agent 去掉 implementer）。
-- [ ] Agent id 一律来自 AgentRegistry，不硬编码。
+- [x] 固定默认：`mode: 'exec'`、`executionMode: 'orchestrated'`、`approvalMode: 'safe-auto'`、`isolation: 'worktree'`。
+- [x] `reasons[]` 对每个字段给出 i18n key + 参数，与实际选择一致（测试断言）。
+- [x] 同一服务提供 Workflow 用的 implementer / reviewers 默认（reviewers = role `reviewer` 的健康 Agent 去掉 implementer）。
+- [x] Agent id 一律来自 AgentRegistry，不硬编码。
 
 ---
 

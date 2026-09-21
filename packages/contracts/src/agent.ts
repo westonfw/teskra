@@ -405,6 +405,11 @@ export const agentRunSchema = z.strictObject({
   status: agentRunStatusSchema,
   /** TASK-120 (migration 017): why a `queued` run is waiting; absent otherwise. */
   queuedReason: queuedReasonSchema.optional(),
+  /**
+   * TASK-121 (migration 017): the run this one automatically retries (a
+   * transient `network` failure, design §5.4); absent on non-retry runs.
+   */
+  retryOfRunId: z.string().optional(),
   processId: z.string().optional(),
   pid: z.number().int().optional(),
   /**

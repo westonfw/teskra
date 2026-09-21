@@ -297,6 +297,10 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.agent.listObservations(request)),
   )
   register(
+    ipcChannelDefinitions.agentResolveDefaults,
+    withRuntime((runtime, request) => runtime.agent.resolveDefaults(request)),
+  )
+  register(
     ipcChannelDefinitions.accountList,
     withRuntime((runtime, request) => runtime.account.list(request)),
   )

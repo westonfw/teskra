@@ -1,4 +1,4 @@
-import { Card, InputNumber, Select, Space, Typography } from 'antd'
+import { Card, InputNumber, Select, Space, Switch, Typography } from 'antd'
 
 import { LOG_LEVELS, type LogLevel, type WatchdogConfig } from '@teskra/contracts'
 
@@ -151,6 +151,20 @@ export function GeneralSettingsSection() {
               label: t(`settings.general.watchdog.idleAction.${value}`),
             }))}
             onChange={(idleAction) => void save({ watchdog: { idleAction } })}
+          />
+        </ConfigField>
+      </Card>
+
+      <Card title={t('settings.general.notifications.title')} variant="borderless">
+        <ConfigField
+          path="decisions.desktopNotifications"
+          label={t('settings.general.notifications.desktop.label')}
+          description={t('settings.general.notifications.desktop.description')}
+        >
+          <Switch
+            checked={config.decisions.desktopNotifications}
+            disabled={saving}
+            onChange={(desktopNotifications) => void save({ decisions: { desktopNotifications } })}
           />
         </ConfigField>
       </Card>

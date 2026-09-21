@@ -4,6 +4,8 @@ import { useEffect } from 'react'
 
 import type { AgentHealth, AgentRun, Task, WorkflowRun, Worktree } from '@teskra/contracts'
 
+import { ContinueWithAccountModal } from '../agents/continue-with-account-modal'
+import { useContinuationStore } from '../agents/continuation-store'
 import { AppErrorAlert } from '../components/app-error-alert'
 import { useTranslation } from '../i18n'
 import { useDashboardStore, type DashboardBlock } from '../stores/dashboard-store'
@@ -94,10 +96,13 @@ function RunList({
   runs,
   statusTag,
   empty,
+  action,
 }: {
   readonly runs: readonly AgentRun[]
   readonly statusTag: (run: AgentRun) => { color: string; label: string }
   readonly empty: string
+  /** TASK-131: optional per-row action (recentFailures' rate-limit Continue). */
+  readonly action?: (run: AgentRun) => React.ReactNode
 }) {
   const navigate = useNavigationStore((state) => state.navigate)
   return (
@@ -112,9 +117,12 @@ function RunList({
             <Typography.Text ellipsis className="dashboard-item-label">
               {item.agentType} · {item.id}
             </Typography.Text>
-            <Tag bordered={false} color={tag.color}>
-              {tag.label}
-            </Tag>
+            <Space size={4}>
+              {action?.(item)}
+              <Tag bordered={false} color={tag.color}>
+                {tag.label}
+              </Tag>
+            </Space>
           </List.Item>
         )
       }}
@@ -136,6 +144,7 @@ export function HomePage() {
   const load = useDashboardStore((state) => state.load)
   const reloadBlock = useDashboardStore((state) => state.reloadBlock)
   const startSynchronization = useDashboardStore((state) => state.startSynchronization)
+  const openContinuation = useContinuationStore((state) => state.openFor)
 
   useEffect(() => {
     if (workspace === undefined) return
@@ -156,6 +165,7 @@ export function HomePage() {
 
   const waitingTasks = waitingForYou.data?.tasks ?? []
   const waitingWorkflowRuns = waitingForYou.data?.workflowRuns ?? []
+  const waitingDecisions = waitingForYou.data?.decisions ?? []
   const availability = agentAvailability.data ?? []
 
   return (
@@ -192,12 +202,37 @@ export function HomePage() {
           onRetry={() => reloadBlock(workspace, 'waitingForYou')}
         >
           <TaskList tasks={waitingTasks} empty="" />
+          {/* TASK-131: open Decision Inbox entries merge into Waiting For You. */}
+          <List
+            size="small"
+            dataSource={[...waitingDecisions]}
+            locale={{ emptyText: null }}
+            renderItem={(decision) => (
+              <List.Item className="dashboard-item" onClick={() => navigate('inbox')}>
+                <Typography.Text ellipsis className="dashboard-item-label">
+                  {decision.title}
+                </Typography.Text>
+                <Tag
+                  bordered={false}
+                  color={
+                    decision.severity === 'blocking'
+                      ? 'red'
+                      : decision.severity === 'warning'
+                        ? 'gold'
+                        : 'blue'
+                  }
+                >
+                  {t(`inbox.kind.${decision.kind}`)}
+                </Tag>
+              </List.Item>
+            )}
+          />
           <List
             size="small"
             dataSource={[...waitingWorkflowRuns]}
             locale={{
               emptyText:
-                waitingTasks.length === 0 ? (
+                waitingTasks.length === 0 && waitingDecisions.length === 0 ? (
                   <Empty
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
                     description={t('home.empty.waitingForYou')}
@@ -325,6 +360,23 @@ export function HomePage() {
             runs={recentFailures.data?.items ?? []}
             statusTag={() => ({ color: 'red', label: t('home.run.failed') })}
             empty={t('home.empty.recentFailures')}
+            action={(run) =>
+              // TASK-131 (§9.3): rate-limited failures get a direct Continue
+              // entry — the same TASK-108 account-pick flow the Inbox uses.
+              run.failureClassification?.kind === 'rate-limited' ? (
+                <Button
+                  size="small"
+                  type="link"
+                  className="dashboard-rate-limit-continue"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    openContinuation(run)
+                  }}
+                >
+                  {t('home.failures.continue')}
+                </Button>
+              ) : null
+            }
           />
         </DashboardSection>
 
@@ -355,6 +407,8 @@ export function HomePage() {
           />
         </DashboardSection>
       </div>
+
+      <ContinueWithAccountModal onContinued={(run) => navigate('runs', { openRunId: run.id })} />
     </div>
   )
 }

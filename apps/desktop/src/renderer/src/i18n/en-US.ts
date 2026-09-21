@@ -16,6 +16,7 @@ export const enUS = {
   'nav.workspace': 'Workspace',
   'nav.tasks': 'Tasks',
   'nav.runs': 'Runs',
+  'nav.inbox': 'Inbox',
   'nav.git': 'Git',
   'nav.terminal': 'Terminal',
   'nav.doctor': 'Doctor',
@@ -628,6 +629,51 @@ export const enUS = {
     'What the watchdog does when a run stays silent past the idle timeout.',
   'settings.general.watchdog.idleAction.ask': 'Ask me',
   'settings.general.watchdog.idleAction.stop': 'Stop the run',
+  'settings.general.notifications.title': 'Notifications',
+  'settings.general.notifications.desktop.label': 'Desktop notifications',
+  'settings.general.notifications.desktop.description':
+    'Show one desktop notification when a blocking decision opens in the Inbox.',
+
+  'inbox.eyebrow': 'DECISION INBOX',
+  'inbox.title': 'Inbox',
+  'inbox.subtitle': '{count} open decision(s) waiting for your input.',
+  'inbox.refresh': 'Refresh',
+  'inbox.empty': 'No open decisions — nothing is waiting for you.',
+  'inbox.severity.blocking': 'Blocking',
+  'inbox.severity.warning': 'Warning',
+  'inbox.severity.info': 'Info',
+  'inbox.kind.shell_confirmation': 'Shell confirmation',
+  'inbox.kind.agent_blocker': 'Agent blocker',
+  'inbox.kind.stalled_run': 'Stalled run',
+  'inbox.kind.merge_blocked': 'Merge blocked',
+  'inbox.kind.rate_limit': 'Rate limit',
+  'inbox.kind.handoff_degraded': 'Degraded handoff',
+  'inbox.context.run': 'Open run',
+  'inbox.context.workflow': 'Open workflow',
+  'inbox.context.worktree': 'Open changes',
+  'inbox.detail.cwd': 'Working directory: {cwd}',
+  'inbox.detail.silentFor': 'Silent for {duration}',
+  'inbox.detail.rateLimitResetUnknown': 'The provider did not report a reset time.',
+  'inbox.detail.rateLimitResetAt': 'Limit resets at {time}.',
+  'inbox.confirm.dangerTitle': 'Are you sure?',
+  'inbox.confirm.dangerBody': '"{action}" cannot be undone. Confirm to proceed.',
+  'inbox.confirm.dangerOk': 'Confirm',
+  'inbox.confirm.cancel': 'Cancel',
+  'inbox.notification.blockingBody': 'A blocking decision is waiting in the Inbox.',
+  'inbox.option.approve': 'Run once',
+  'inbox.option.reject': 'Reject',
+  'inbox.option.acknowledge': 'Acknowledge',
+  'inbox.option.stop': 'Stop the run',
+  'inbox.option.keep_waiting': 'Keep waiting',
+  'inbox.option.force_merge': 'Force merge',
+  'inbox.option.cancel': 'Cancel',
+  'inbox.option.continue_with_account': 'Continue with another account',
+  'inbox.option.retry': 'Retry',
+  'inbox.option.wait': 'Wait',
+  'inbox.option.open_raw': 'Open raw file',
+  'inbox.option.dismiss': 'Dismiss',
+
+  'home.failures.continue': 'Continue',
 
   'settings.environment.subtitle':
     'Choose the default WSL distribution used when a workspace does not specify one.',
@@ -876,6 +922,23 @@ export const enUS = {
   'continueModal.confirm': 'Continue',
   'continueModal.error.sourceNotStopped':
     'The source process could not be stopped. Wait a moment and try again.',
+
+  'runDefaults.reason.agent.configured': 'Default Agent from configuration: {agent}',
+  'runDefaults.reason.agent.lastSuccessfulRun':
+    'The last successful run in this workspace used {agent}',
+  'runDefaults.reason.agent.roleMatch':
+    'Highest-priority healthy Agent for the {role} role: {agent}',
+  'runDefaults.reason.agent.installedFallback': 'Highest-priority installed Agent: {agent}',
+  'runDefaults.reason.accountProfile.default': 'Default account for {agent}: {profileId}',
+  'runDefaults.reason.accountProfile.none':
+    'No default account for {agent}; the CLI environment is used',
+  'runDefaults.reason.executionProfile.default':
+    'Default execution profile for {agent}: {profileId}',
+  'runDefaults.reason.executionProfile.none': 'No default execution profile for {agent}',
+  'runDefaults.reason.mode.fixed': 'Thread runs always launch in exec mode',
+  'runDefaults.reason.executionMode.fixed': 'Thread runs are orchestrated (isolated)',
+  'runDefaults.reason.approvalMode.fixed': 'Approval defaults to safe-auto',
+  'runDefaults.reason.isolation.fixed': 'Runs in an isolated Git worktree',
 } as const
 
 export type TranslationKey = keyof typeof enUS

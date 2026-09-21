@@ -341,6 +341,16 @@ function fakeRuntime(): TeskraRuntime {
       getOutput: vi.fn(() => ok('')),
       listProgress: vi.fn(() => ok([])),
       listObservations: vi.fn(() => ok([])),
+      resolveDefaults: vi.fn(async () =>
+        ok({
+          agentType: 'codex',
+          mode: 'exec' as const,
+          executionMode: 'orchestrated' as const,
+          approvalMode: 'safe-auto' as const,
+          isolation: 'worktree' as const,
+          reasons: [{ key: 'runDefaults.reason.agent.configured', params: { agent: 'codex' } }],
+        }),
+      ),
     },
     account: {
       list: vi.fn(async () => ok([])),
@@ -504,6 +514,7 @@ function fakeRuntime(): TeskraRuntime {
               executableOverrides: {},
               defaultAccountProfiles: {},
               defaultExecutionProfiles: {},
+              defaultAgent: null,
             },
             review: { mediumBlockThreshold: 0 },
             retention: {
@@ -514,7 +525,12 @@ function fakeRuntime(): TeskraRuntime {
               worktreeArtifactIdleDays: 7,
             },
             observability: { structuredStream: true },
-            decisions: { shellConfirmationTimeoutMs: 0, stalledRunTimeoutMs: 0 },
+            decisions: {
+              shellConfirmationTimeoutMs: 0,
+              stalledRunTimeoutMs: 0,
+              desktopNotifications: true,
+            },
+            retry: { transientAttempts: 1 },
           },
           sources: {
             'logging.level': 'default' as const,
@@ -544,6 +560,7 @@ function fakeRuntime(): TeskraRuntime {
               executableOverrides: {},
               defaultAccountProfiles: {},
               defaultExecutionProfiles: {},
+              defaultAgent: null,
             },
             review: { mediumBlockThreshold: 0 },
             retention: {
@@ -554,7 +571,12 @@ function fakeRuntime(): TeskraRuntime {
               worktreeArtifactIdleDays: 7,
             },
             observability: { structuredStream: true },
-            decisions: { shellConfirmationTimeoutMs: 0, stalledRunTimeoutMs: 0 },
+            decisions: {
+              shellConfirmationTimeoutMs: 0,
+              stalledRunTimeoutMs: 0,
+              desktopNotifications: true,
+            },
+            retry: { transientAttempts: 1 },
           },
           sources: { 'logging.level': 'global' as const },
           warnings: [],
@@ -749,6 +771,39 @@ describe('Typed IPC Router (TASK-020)', () => {
       limit: 10_000,
     })
     expect(overLimit).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+  })
+
+  it('resolves run defaults through the runtime facade (TASK-134)', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    const result = await ipc.invoke(IPC_CHANNELS.agentResolveDefaults, {
+      workspaceId: 'ws1',
+      role: 'implementer',
+    })
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        agentType: 'codex',
+        mode: 'exec',
+        executionMode: 'orchestrated',
+        approvalMode: 'safe-auto',
+        isolation: 'worktree',
+        reasons: [{ key: 'runDefaults.reason.agent.configured', params: { agent: 'codex' } }],
+      },
+    })
+    expect(runtime.agent.resolveDefaults).toHaveBeenCalledWith({
+      workspaceId: 'ws1',
+      role: 'implementer',
+    })
+
+    const invalid = await ipc.invoke(IPC_CHANNELS.agentResolveDefaults, {
+      workspaceId: 'ws1',
+      role: 'captain',
+    })
+    expect(invalid).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    expect(runtime.agent.resolveDefaults).toHaveBeenCalledTimes(1)
   })
 
   it('routes a validated Doctor request through the runtime facade', async () => {

@@ -72,6 +72,12 @@ import {
 } from './agent'
 import { continueAgentRunRequestSchema, type ContinueAgentRunRequest } from './agent-continuation'
 import {
+  resolveRunDefaultsRequestSchema,
+  resolvedRunDefaultsSchema,
+  type ResolveRunDefaultsRequest,
+  type ResolvedRunDefaults,
+} from './run-defaults'
+import {
   agentProgressRecordSchema,
   listAgentProgressRequestSchema,
   type AgentProgressRecord,
@@ -494,6 +500,7 @@ export const IPC_CHANNELS = {
   agentRunContinueWithProfile: 'teskra:agent:continue-with-profile',
   agentListProgress: 'teskra:agent:list-progress',
   agentListObservations: 'teskra:agent:list-observations',
+  agentResolveDefaults: 'teskra:agent:resolve-defaults',
   accountList: 'teskra:account:list',
   accountListAdapterAgents: 'teskra:account:adapter-agents:list',
   accountListRateLimitStats: 'teskra:account:rate-limit-stats:list',
@@ -903,6 +910,12 @@ export const agentListObservationsChannel = channel(
   IPC_CHANNELS.agentListObservations,
   listAgentObservationsRequestSchema,
   z.array(agentObservationRecordSchema),
+)
+// TASK-134 (Milestone 26 §6): explainable run defaults for the quick-start input.
+export const agentResolveDefaultsChannel = channel(
+  IPC_CHANNELS.agentResolveDefaults,
+  resolveRunDefaultsRequestSchema,
+  resolvedRunDefaultsSchema,
 )
 // TASK-102 (Milestone 24 §28): account profile CRUD + default + status detect.
 // The alias channels (TASK-111) live right after the login session block.
@@ -1462,6 +1475,7 @@ export const ipcChannelDefinitions = {
   agentRunContinueWithProfile: agentRunContinueWithProfileChannel,
   agentListProgress: agentListProgressChannel,
   agentListObservations: agentListObservationsChannel,
+  agentResolveDefaults: agentResolveDefaultsChannel,
   accountList: accountListChannel,
   accountListAdapterAgents: accountListAdapterAgentsChannel,
   accountListRateLimitStats: accountListRateLimitStatsChannel,
@@ -1663,6 +1677,8 @@ export interface TeskraBridge {
     listObservations(
       request: ListAgentObservationsRequest,
     ): Promise<IpcResult<AgentObservationRecord[]>>
+    /** TASK-134 (Milestone 26 §6): explainable run defaults for quick-start. */
+    resolveDefaults(request: ResolveRunDefaultsRequest): Promise<IpcResult<ResolvedRunDefaults>>
   }
   /**
    * TASK-102 (Milestone 24 §28/§24.2): account profile CRUD + default + detect,

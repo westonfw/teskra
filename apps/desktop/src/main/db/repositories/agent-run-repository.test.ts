@@ -145,6 +145,50 @@ describe('AgentRunRepository', () => {
     expect(byTask.ok && byTask.data.length).toBe(1)
   })
 
+  it('finds the most recent completed run of a workspace (TASK-134)', () => {
+    setup()
+    expect(repo.findLastSuccessfulByWorkspace('ws-1')).toEqual({ ok: true, data: null })
+    repo.create(
+      {
+        id: 'run-old',
+        workspaceId: 'ws-1',
+        agentType: 'codex',
+        executionMode: 'orchestrated',
+        runDir: 'runs/run-old',
+        status: 'completed',
+      },
+      '2026-09-09T01:00:00.000Z',
+    )
+    // A newer non-completed run must not win.
+    repo.create(
+      {
+        id: 'run-failed',
+        workspaceId: 'ws-1',
+        agentType: 'claude',
+        executionMode: 'orchestrated',
+        runDir: 'runs/run-failed',
+        status: 'failed',
+      },
+      '2026-09-09T03:00:00.000Z',
+    )
+    repo.create(
+      {
+        id: 'run-new',
+        workspaceId: 'ws-1',
+        agentType: 'kimi',
+        executionMode: 'orchestrated',
+        runDir: 'runs/run-new',
+        status: 'completed',
+      },
+      '2026-09-09T02:00:00.000Z',
+    )
+    const found = repo.findLastSuccessfulByWorkspace('ws-1')
+    expect(found.ok).toBe(true)
+    if (!found.ok) return
+    expect(found.data?.id).toBe('run-new')
+    expect(found.data?.agentType).toBe('kimi')
+  })
+
   it('returns VALIDATION_FAILED for corrupted provider_session_json', () => {
     setup()
     repo.create({
@@ -220,6 +264,33 @@ describe('AgentRunRepository', () => {
     expect(plain.ok).toBe(true)
     if (!plain.ok) return
     expect(plain.data.queuedReason).toBeUndefined()
+  })
+
+  it('round-trips retry_of_run_id (TASK-121)', () => {
+    setup()
+    repo.create({
+      id: 'run-1',
+      workspaceId: 'ws-1',
+      agentType: 'codex',
+      executionMode: 'attended',
+      runDir: 'runs/run-1',
+    })
+    const retried = repo.create({
+      id: 'run-2',
+      workspaceId: 'ws-1',
+      agentType: 'codex',
+      executionMode: 'attended',
+      runDir: 'runs/run-2',
+    })
+    expect(retried.ok).toBe(true)
+    if (!retried.ok) return
+    expect(retried.data.retryOfRunId).toBeUndefined()
+
+    const linked = repo.update('run-2', { retryOfRunId: 'run-1' })
+    expect(linked.ok).toBe(true)
+    if (!linked.ok) return
+    expect(linked.data?.retryOfRunId).toBe('run-1')
+    expect(repo.getById('run-2')).toEqual(linked)
   })
 
   it('reads back the 013 profile identity columns (TASK-095)', () => {

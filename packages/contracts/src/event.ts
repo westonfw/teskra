@@ -112,6 +112,17 @@ export interface WorkbenchEvents {
     action: 'ask' | 'stop'
   }
   /**
+   * TASK-121 (Milestone 25 §5.4): a transient `network` failure was
+   * automatically retried — `targetRunId` is the continuation run created for
+   * `sourceRunId`, `attempt` the 1-based retry number. Also persisted as a
+   * durable Run event on the target run (events.jsonl + agent_events).
+   */
+  'agent.retry_scheduled': {
+    sourceRunId: string
+    targetRunId: string
+    attempt: number
+  }
+  /**
    * TASK-126 (ADR-0012): one validated line of the run's progress file,
    * redacted and persisted (events.jsonl + agent_events); `seq` aligns with
    * the events.jsonl line number so `list-progress` paging can resume.
@@ -313,6 +324,7 @@ export const WORKBENCH_EVENT_NAMES = [
   'agent.interrupted',
   'agent.watchdog',
   'agent.stalled',
+  'agent.retry_scheduled',
   'agent.progress',
   'agent.progress_summary',
   'agent.observation',

@@ -21,6 +21,7 @@ import { createProgressFollower } from '../agents/progress-follower'
 import { createObservationRecorder } from '../agents/observation/observation-recorder'
 import { createRunWatchdogService, type RunWatchdogService } from '../agents/run-watchdog-service'
 import { createDefaultAgentRegistry } from '../agents/agent-registry'
+import { createDefaultSelectionService } from '../agents/default-selection-service'
 import { createAccountProfileAdapterRegistry } from '../agents/accounts/account-profile-adapter'
 import { createAccountProfileManager } from '../agents/accounts/account-profile-manager'
 import { createAccountProfileStatusService } from '../agents/accounts/account-profile-status-service'
@@ -508,6 +509,16 @@ export async function composeTeskraRuntime(
     executionProfiles: repositories.executionProfiles,
     reservedEnvKeys: () => accountProfileManager.reservedEnvKeys(),
   })
+  // TASK-134 (Milestone 26 §6): explainable run defaults for the quick-start
+  // input and the workflow launcher (implementer / reviewers).
+  const defaultSelectionService = createDefaultSelectionService({
+    registry: registeredAgents.data,
+    health: agentHealth,
+    runs: repositories.agentRuns,
+    accounts: accountProfileManager,
+    config,
+    workspaces: repositories.workspaces,
+  })
   // TASK-102 (§24): the interactive login sessions — spawned through the
   // ProcessManager with adapter-built argv/env, never a shell string.
   const accountLoginService = createAccountLoginService({
@@ -648,6 +659,13 @@ export async function composeTeskraRuntime(
       const resolved = config.resolve({ workspaceId })
       return resolved.ok ? { ok: true, data: resolved.data.config.observability } : resolved
     },
+    // TASK-121 (§5.4): the transient-failure auto-retry budget and the
+    // Workflow membership probe (Workflow-owned runs are never auto-retried).
+    resolveRetry: (workspaceId) => {
+      const resolved = config.resolve({ workspaceId })
+      return resolved.ok ? { ok: true, data: resolved.data.config.retry } : resolved
+    },
+    workflows: repositories.workflowRuns,
     // TASK-123 (§6.2): structured-stream parsing on the process.output path.
     observations: observationRecorder,
   })
@@ -1216,6 +1234,7 @@ export async function composeTeskraRuntime(
         agentManager.getOutput(runId, tailBytes === undefined ? undefined : { tailBytes }),
       listProgress: (request) => progressFollower.list(request),
       listObservations: (request) => observationRecorder.list(request),
+      resolveDefaults: (request) => defaultSelectionService.resolveDefaults(request),
     },
     account: {
       list: (request = {}) => accountProfileManager.list(request),

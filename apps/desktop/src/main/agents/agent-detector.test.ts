@@ -26,6 +26,7 @@ function config() {
             executableOverrides: { ...overrides },
             defaultAccountProfiles: {},
             defaultExecutionProfiles: {},
+            defaultAgent: null,
           },
         },
         sources: {},
