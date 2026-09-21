@@ -9,6 +9,7 @@ import { useTranslation } from '../i18n'
 import { useDashboardStore, type DashboardBlock } from '../stores/dashboard-store'
 import { useNavigationStore, type WorkbenchPage } from '../stores/navigation-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
+import { usageByAgent } from '../usage/usage-view-model'
 
 interface DashboardSectionProps {
   readonly title: string
@@ -131,6 +132,7 @@ export function HomePage() {
   const mergeReady = useDashboardStore((state) => state.mergeReady)
   const agentAvailability = useDashboardStore((state) => state.agentAvailability)
   const recentFailures = useDashboardStore((state) => state.recentFailures)
+  const usage = useDashboardStore((state) => state.usage)
   const load = useDashboardStore((state) => state.load)
   const reloadBlock = useDashboardStore((state) => state.reloadBlock)
   const startSynchronization = useDashboardStore((state) => state.startSynchronization)
@@ -323,6 +325,33 @@ export function HomePage() {
             runs={recentFailures.data?.items ?? []}
             statusTag={() => ({ color: 'red', label: t('home.run.failed') })}
             empty={t('home.empty.recentFailures')}
+          />
+        </DashboardSection>
+
+        {/* TASK-124: this week's usage, grouped by agent; cost only when the
+            provider reported it (display-only, never a quota signal). */}
+        <DashboardSection
+          title={t('home.section.usage')}
+          target="runs"
+          block={usage}
+          onRetry={() => reloadBlock(workspace, 'usage')}
+        >
+          <List
+            size="small"
+            dataSource={[...usageByAgent(usage.data ?? [], t)]}
+            locale={{
+              emptyText: (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('home.empty.usage')} />
+              ),
+            }}
+            renderItem={(item) => (
+              <List.Item className="dashboard-item" onClick={() => navigate('runs')}>
+                <Typography.Text ellipsis className="dashboard-item-label">
+                  {item.agentType}
+                </Typography.Text>
+                <Typography.Text type="secondary">{item.label}</Typography.Text>
+              </List.Item>
+            )}
           />
         </DashboardSection>
       </div>

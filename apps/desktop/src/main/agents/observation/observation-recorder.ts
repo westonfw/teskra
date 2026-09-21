@@ -4,6 +4,7 @@ import {
   type AgentErrorObservation,
   type AgentObservation,
   type AgentObservationRecord,
+  type AgentUsageObservation,
   type IpcResult,
   type ListAgentObservationsRequest,
   type StructuredOutputProtocol,
@@ -27,6 +28,7 @@ export const OBSERVATION_EVENT_TYPE = 'agent.observation'
 export const OBSERVATION_SUMMARY_EVENT_TYPE = 'agent.observation_summary'
 
 type ObservationProtocol = Exclude<StructuredOutputProtocol, 'none'>
+export type { ObservationProtocol }
 
 const NORMALIZERS: Record<ObservationProtocol, ObservationNormalizer> = {
   'claude-stream-json': normalizeClaudeStreamJsonLine,
@@ -43,10 +45,14 @@ export interface ObservationRecorderDeps {
   readonly watchdog?: Pick<RunWatchdogService, 'noteActivity'>
   /**
    * TASK-124 hook: usage observations are reported here AFTER they are
-   * persisted and broadcast. This Task only emits events — persisting the
-   * accumulated usage row is TASK-124's job.
+   * persisted and broadcast. The `source` protocol is the attached parser's,
+   * so the consumer can record it without re-deriving it from the agentType.
    */
-  readonly onUsage?: (runId: string, usage: AgentObservation) => void
+  readonly onUsage?: (
+    runId: string,
+    usage: AgentUsageObservation,
+    source: ObservationProtocol,
+  ) => void
   readonly now?: () => string
 }
 
@@ -89,6 +95,7 @@ export interface ObservationRecorder {
 }
 
 interface RunState {
+  readonly protocol: ObservationProtocol
   readonly normalizer: ObservationNormalizer
   readonly splitter: LineSplitter
   /** Persisted observations (the summary's `parsed`). */
@@ -191,7 +198,7 @@ export function createObservationRecorder(deps: ObservationRecorderDeps): Observ
       // path emits, so the audit lands in the same agent.command stream.
       deps.events.emit('agent.command', { runId, command: redacted.command })
     } else if (redacted.kind === 'usage') {
-      deps.onUsage?.(runId, redacted)
+      deps.onUsage?.(runId, redacted, state.protocol)
     } else if (redacted.kind === 'error') {
       state.lastError = redacted
     }
@@ -232,6 +239,7 @@ export function createObservationRecorder(deps: ObservationRecorderDeps): Observ
   const attach = (runId: string, protocol: ObservationProtocol): void => {
     if (disposed || states.has(runId)) return
     states.set(runId, {
+      protocol,
       normalizer: NORMALIZERS[protocol],
       splitter: createLineSplitter(),
       parsed: 0,

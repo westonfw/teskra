@@ -22,7 +22,10 @@ import { createEventBus, type EventBus } from '../events/event-bus'
 import { createWorktreeManager } from '../git/worktree-manager'
 import { createTeskraPaths } from '../paths'
 import { createCommandRunner, type CommandRunner } from '../process/command-runner'
-import { createPromptTemplateService } from '../prompts/prompt-template-service'
+import {
+  createPromptTemplateService,
+  TESKRA_AGENT_PROTOCOL,
+} from '../prompts/prompt-template-service'
 import { createWorkspaceRuntime } from '../workspace/runtime'
 import type { CodingAgentAdapter } from '../agents/adapters/coding-agent-adapter'
 import { createAgentManager } from '../agents/agent-manager'
@@ -30,6 +33,7 @@ import { createDefaultAgentRegistry } from '../agents/agent-registry'
 import { CODEX_AGENT } from '../agents/definitions/codex'
 import { FAKE_AGENT } from '../agents/definitions/fake'
 import { createRunLogStore } from '../agents/run-log-store'
+import type { ContextBuilder } from '../memory/context-builder'
 import { createDispatchService, type DispatchService } from './dispatch-service'
 import { createWorkflowEngine } from './workflow-engine'
 import { createWorkflowRunStore } from './workflow-run-store'
@@ -99,11 +103,18 @@ interface Fixture {
 }
 
 async function setup(
-  options: boolean | { gateWorktreeCreation?: boolean; restricted?: boolean } = false,
+  options:
+    | boolean
+    | {
+        gateWorktreeCreation?: boolean
+        restricted?: boolean
+        contextBuilder?: Pick<ContextBuilder, 'buildContext'>
+      } = false,
 ): Promise<Fixture> {
   const gateWorktreeCreation =
     typeof options === 'boolean' ? options : (options.gateWorktreeCreation ?? false)
   const restricted = typeof options === 'boolean' ? false : (options.restricted ?? false)
+  const contextBuilder = typeof options === 'boolean' ? undefined : options.contextBuilder
   const directory = mkdtempSync(join(tmpdir(), 'teskra-dispatch-'))
   directories.push(directory)
   const repoDir = join(directory, 'repo')
@@ -242,6 +253,7 @@ async function setup(
     agents,
     handoffs,
     promptTemplates,
+    ...(contextBuilder === undefined ? {} : { contextBuilder }),
     paths,
     events,
   })
@@ -347,8 +359,10 @@ describe('DispatchService (TASK-059)', () => {
     )
     expect(start.prompt).toEqual(expect.stringContaining(result.handoffPath))
     expect(start.prompt).toEqual(expect.stringContaining(runFiles.artifacts))
-
-    // One uniform WorkflowRun record, settled by dispatch (engine leaves
+    // TASK-127: the prompt inlines the protocol document and carries the
+    // ADR-0012 progress path.
+    expect(start.prompt).toEqual(expect.stringContaining('## Teskra Agent Protocol'))
+    expect(start.prompt).toEqual(expect.stringContaining(runFiles.progress)) // One uniform WorkflowRun record, settled by dispatch (engine leaves
     // 'waiting'; the caller owns the final fate).
     expect(result.run).toMatchObject({
       taskId: 'task-1',
@@ -368,6 +382,46 @@ describe('DispatchService (TASK-059)', () => {
       type: 'implementation',
       parseStatus: 'ok',
     })
+  })
+
+  it('charges the inlined {{protocol}} against the ContextBuilder memory budget (TASK-127)', async () => {
+    const budgets: number[] = []
+    const contextBuilder: Pick<ContextBuilder, 'buildContext'> = {
+      buildContext: (request) => {
+        budgets.push(request.budgetChars ?? -1)
+        return {
+          ok: true,
+          data: {
+            workspaceId: request.workspaceId,
+            budgetChars: request.budgetChars ?? 0,
+            totalChars: 0,
+            omittedCount: 0,
+            parts: [],
+            content: '',
+          },
+        }
+      },
+    }
+    const fixture = await setup({ contextBuilder })
+
+    const dispatched = fixture.service.dispatch({
+      workspaceId: 'workspace-1',
+      taskId: 'task-1',
+      agent: 'codex',
+    })
+    const start = await awaitAdapterStart(fixture.adapters.codex)
+
+    // The memory budget (4000) is reduced by the protocol document's size, so
+    // memory + protocol together stay within the dispatch context envelope.
+    expect(budgets).toEqual([Math.max(1, 4000 - TESKRA_AGENT_PROTOCOL.length)])
+
+    const runFiles = requireOk(fixture.paths.runFiles(start.runId))
+    writeFileSync(
+      runFiles.handoff,
+      JSON.stringify({ runId: start.runId, type: 'implementation', summary: 'Dispatched.' }),
+    )
+    finishRun(fixture, start.runId, 'codex')
+    requireOk(await dispatched)
   })
 
   it('uses a repo-local prompt override when trusted, and ignores it when restricted (TASK-118)', async () => {

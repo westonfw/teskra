@@ -493,6 +493,7 @@ export function createReviewPanelService(deps: ReviewPanelServiceDeps): ReviewPa
                   env: {
                     TESKRA_HANDOFF_PATH: runFiles.data.handoff,
                     TESKRA_ARTIFACT_DIR: runFiles.data.artifacts,
+                    TESKRA_PROGRESS_PATH: runFiles.data.progress,
                   },
                 },
               },

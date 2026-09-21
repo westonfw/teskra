@@ -11,6 +11,7 @@ import {
 import type { IpcResult } from '@teskra/contracts'
 
 import { type InternalAppError, toPublicError } from '../errors'
+import { getLogger } from '../logger'
 import type { TeskraPaths } from '../paths'
 import { containsSecretValue } from '../redact'
 
@@ -19,6 +20,7 @@ import implementTemplate from '../../../resources/prompts/implement.md?raw'
 import planTemplate from '../../../resources/prompts/plan.md?raw'
 import reviewTemplate from '../../../resources/prompts/review.md?raw'
 import testTemplate from '../../../resources/prompts/test.md?raw'
+import agentProtocolTemplate from '../../../resources/prompts/teskra-agent-protocol.md?raw'
 
 /**
  * PromptTemplateService (TASK-079, teskra-tasks.md; plan §102 / ADR-0005).
@@ -34,10 +36,15 @@ import testTemplate from '../../../resources/prompts/test.md?raw'
  * Renderable variables: {{task.title}}, {{task.description}}, {{criteria}},
  * {{role}}, {{memory}} (the ContextBuilder-packed Workspace Memory section,
  * TASK-068 — callers that do not wire a ContextBuilder render it as an empty
- * string), {{previousHandoff}}, {{env.TESKRA_HANDOFF_PATH}},
- * {{env.TESKRA_ARTIFACT_DIR}}. A template referencing an unknown or
- * unprovided variable fails with VALIDATION_FAILED naming the variables —
- * `{{...}}` is never left in the output silently.
+ * string), {{previousHandoff}}, {{protocol}} (TASK-127 / ADR-0012 §5: the
+ * inlined teskra-agent-protocol.md document; defaults to the bundled protocol,
+ * overridable via the context), {{env.TESKRA_HANDOFF_PATH}},
+ * {{env.TESKRA_ARTIFACT_DIR}}, {{env.TESKRA_PROGRESS_PATH}}. A template
+ * referencing an unknown or unprovided variable fails with VALIDATION_FAILED
+ * naming the variables — `{{...}}` is never left in the output silently.
+ *
+ * Repo-local overrides that omit {{protocol}} still render — the drift is
+ * logged as a WARN, not blocked (TASK-127).
  *
  * Secret hygiene: context values that match the TASK-004 redact secret
  * patterns are refused (not redacted — a rejected render beats a leaked
@@ -49,6 +56,13 @@ import testTemplate from '../../../resources/prompts/test.md?raw'
 // Built-in templates are LF-canonical: a Windows checkout may carry CRLF
 // (core.autocrlf), and the `?raw` import inlines the file bytes verbatim.
 const lf = (text: string): string => text.replaceAll('\r\n', '\n')
+
+/**
+ * TASK-127: the Agent-facing protocol document inlined for `{{protocol}}`.
+ * Kept in sync with cli-agent-adapter.ts and agentProgressEventSchema by
+ * prompt-protocol-consistency.test.ts (ADR-0012 §5).
+ */
+export const TESKRA_AGENT_PROTOCOL = lf(agentProtocolTemplate)
 
 const BUILT_IN_TEMPLATES: Readonly<Record<string, string>> = {
   plan: lf(planTemplate),
@@ -85,6 +99,8 @@ export interface PromptTemplateServiceDeps {
   readonly readFile?: (path: string) => string
   /** Directory listing seam for tests; defaults to node:fs (throws ENOENT). */
   readonly listDir?: (path: string) => readonly string[]
+  /** WARN sink for repo-local template drift; defaults to the runtime scope logger. */
+  readonly warn?: (record: Record<string, unknown>, message: string) => void
 }
 
 function fail<T>(error: InternalAppError): IpcResult<T> {
@@ -118,8 +134,13 @@ function buildVariables(context: PromptTemplateContext): Record<string, string |
     role: context.role,
     memory: context.memory ?? '',
     previousHandoff: context.previousHandoff ?? '',
+    // TASK-127: the protocol document defaults to the bundled copy, so a
+    // template referencing {{protocol}} always renders; only variables with
+    // no default (like env.TESKRA_PROGRESS_PATH) hit VALIDATION_FAILED.
+    protocol: context.protocol ?? TESKRA_AGENT_PROTOCOL,
     'env.TESKRA_HANDOFF_PATH': context.env.TESKRA_HANDOFF_PATH,
     'env.TESKRA_ARTIFACT_DIR': context.env.TESKRA_ARTIFACT_DIR,
+    'env.TESKRA_PROGRESS_PATH': context.env.TESKRA_PROGRESS_PATH,
   }
 }
 
@@ -128,6 +149,7 @@ export function createPromptTemplateService(
 ): PromptTemplateService {
   const readFile = deps.readFile ?? ((path: string) => readFileSync(path, 'utf8'))
   const listDir = deps.listDir ?? ((path: string) => readdirSync(path))
+  const warn = deps.warn ?? ((record, message) => getLogger('runtime').warn(record, message))
 
   /** Reads the repo-local override; null = absent, error = unreadable. */
   const readOverride = (
@@ -250,6 +272,17 @@ export function createPromptTemplateService(
         return template
       }
 
+      // TASK-127: a repo-local override that predates the {{protocol}}
+      // variable still renders — the agent just misses the protocol document.
+      if (
+        template.data.source === 'repo-local' &&
+        !template.data.content.includes('{{protocol}}')
+      ) {
+        warn(
+          { name: template.data.name, path: template.data.path },
+          'Repo-local prompt template does not include {{protocol}}; the agent will not receive the Teskra Agent Protocol document.',
+        )
+      }
       const variables = buildVariables(context)
 
       for (const [key, value] of Object.entries(variables)) {

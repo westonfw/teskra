@@ -20,6 +20,7 @@ import agentExecutionProfilesSql from './migrations/014_agent_execution_profiles
 import workspaceTrustSql from './migrations/015_workspace_trust.sql?raw'
 import { normalizeExternalConfigHomes } from './migrations/016_external_config_home_normalize'
 import agentRunQueueAndRetrySql from './migrations/017_agent_run_queue_and_retry.sql?raw'
+import agentRunUsageSql from './migrations/018_agent_run_usage.sql?raw'
 import pendingDecisionsSql from './migrations/019_pending_decisions.sql?raw'
 
 /**
@@ -71,9 +72,10 @@ export const MIGRATIONS: readonly Migration[] = [
     run: normalizeExternalConfigHomes,
   },
   { version: 17, name: '017_agent_run_queue_and_retry', sql: agentRunQueueAndRetrySql },
-  // TASK-128. Version 18 is reserved for 018_agent_run_usage (TASK-124), under
-  // parallel development; the runner applies migrations per-version (not by
-  // MAX), so the gap backfills when 018 lands.
+  { version: 18, name: '018_agent_run_usage', sql: agentRunUsageSql },
+  // TASK-128. 019 landed before 018 under parallel development; the runner
+  // applies migrations per-version (not by MAX), so 018 backfills on databases
+  // that already ran 019.
   { version: 19, name: '019_pending_decisions', sql: pendingDecisionsSql },
 ]
 

@@ -12,8 +12,11 @@ import { createConfigService } from '../config/config-service'
 import { APP_VERSION } from '../build-info'
 import { createArtifactStore } from '../artifacts/artifact-store'
 import { createAgentDetector } from '../agents/agent-detector'
+import { createUsageTracker } from '../agents/usage-tracker'
+import { createAgentBlockerDecisionBridge } from '../agents/agent-blocker-decisions'
 import { createAgentHealthManager } from '../agents/agent-health-manager'
 import { createAgentManager } from '../agents/agent-manager'
+import { createHandoffCollector } from '../agents/handoff-collector'
 import { createProgressFollower } from '../agents/progress-follower'
 import { createObservationRecorder } from '../agents/observation/observation-recorder'
 import { createRunWatchdogService, type RunWatchdogService } from '../agents/run-watchdog-service'
@@ -53,6 +56,7 @@ import {
   createProfileAliasRepository,
   createReviewRepository,
   createTaskRepository,
+  createUsageRepository,
   createWorkflowRunRepository,
   createWorkspaceRepository,
   createWorktreeRepository,
@@ -67,6 +71,7 @@ import { createWorktreeManager } from '../git/worktree-manager'
 import { createDoctorService } from '../doctor/doctor-service'
 import { createDecisionRepository } from '../decisions/decision-repository'
 import { createDecisionService } from '../decisions/decision-service'
+import { createHandoffDegradedActions } from '../decisions/handoff-degraded-actions'
 import { getLogger, initializeLogging } from '../logger'
 import { createRetentionService } from '../maintenance/retention-service'
 import { createTeskraPaths, type TeskraPaths } from '../paths'
@@ -157,6 +162,7 @@ function createRepositories(connection: TeskraDatabase['connection']) {
     memory: createMemoryRepository(connection),
     permissions: createPermissionRepository(connection),
     decisions: createDecisionRepository(connection),
+    usage: createUsageRepository(connection),
   }
 }
 
@@ -208,6 +214,17 @@ export async function composeTeskraRuntime(
   }
 
   const events = createEventBus()
+  // TASK-128 (ADR-0014): the persisted Decision Inbox. The service owns the
+  // lifecycle only — the action behind a resolution belongs to the source
+  // modules' onResolved handlers (TASK-129/130 wire those). Created right
+  // after the bus because the workflow run store, merge service, agent
+  // manager, watchdog and progress bridge below all take it as a dependency;
+  // expiry rides the watchdog's single timer (ADR-0014 §4), wired where the
+  // watchdog is created.
+  const decisionService = createDecisionService({
+    decisions: repositories.decisions,
+    events,
+  })
   const commands = options.commands ?? createCommandRunner({ hostPlatform: options.hostPlatform })
   const wsl = createWslManager({ commands, config })
   let wslInfo = options.wslInfo
@@ -260,6 +277,9 @@ export async function composeTeskraRuntime(
   const workflowRunStore = createWorkflowRunStore({
     workflowRuns: repositories.workflowRuns,
     tasks: repositories.tasks,
+    // TASK-130: terminal workflow runs cancel their open decisions here — the
+    // store's setRunStatus is the single chokepoint for every terminal path.
+    decisions: decisionService,
   })
   /**
    * TASK-118 (code-review P0-3): repo root handed to repo-local loaders
@@ -351,6 +371,9 @@ export async function composeTeskraRuntime(
     events,
     preflight: mergePreflight,
     resolveRuntime: (workspace) => runtimeFor(workspace.runtime),
+    // TASK-130 (§9.2): overridable-only blocked merges open a merge_blocked
+    // decision; force_merge re-runs the merge with force.
+    decisions: decisionService,
   })
   // TASK-069: the RetentionService GC reads the `retention` config group per
   // workspace through the Config Layers (TASK-080).
@@ -549,12 +572,16 @@ export async function composeTeskraRuntime(
   // failAndStop). Late-bind the watchdog through this holder; observations
   // can only arrive once a run launches, long after the holder is set below.
   const observationWatchdog: { current?: Pick<RunWatchdogService, 'noteActivity'> } = {}
+  // TASK-124 (§7): usage observations accumulate into agent_run_usage and
+  // broadcast usage.updated — display-only, never a rate-limit input (ADR-0010).
+  const usageTracker = createUsageTracker({ usage: repositories.usage, events })
   const observationRecorder = createObservationRecorder({
     runLogs,
     agentEvents: repositories.agentEvents,
     runs: repositories.agentRuns,
     events,
     watchdog: { noteActivity: (runId) => observationWatchdog.current?.noteActivity(runId) },
+    onUsage: (runId, usage, source) => usageTracker.record(runId, usage, source),
   })
   const agentManager = createAgentManager({
     registry: registeredAgents.data,
@@ -583,6 +610,17 @@ export async function composeTeskraRuntime(
     events,
     paths,
     runLogs,
+    // TASK-130 (§9.2): degraded handoffs open a handoff_degraded decision —
+    // the collector needs the run row for the decision's workspaceId.
+    handoffCollector: createHandoffCollector({
+      handoffs: repositories.handoffs,
+      paths,
+      decisions: decisionService,
+      runs: repositories.agentRuns,
+    }),
+    // TASK-130 (§9.2): rate-limited terminal runs open a rate_limit decision
+    // (the TASK-108 Alert stays); terminal settles cancel the run's decisions.
+    decisions: decisionService,
     permissions: permissionManager,
     hostProcesses,
     processes: processManager,
@@ -624,33 +662,54 @@ export async function composeTeskraRuntime(
       const resolved = config.resolve({ workspaceId })
       return resolved.ok ? { ok: true, data: resolved.data.config.watchdog } : resolved
     },
+    // TASK-130 (§9.2): idleAction 'ask' opens a stalled_run decision; the
+    // watchdog itself executes keep_waiting / stop resolutions.
+    decisions: decisionService,
+    resolveDecisionTimeoutMs: (workspaceId) => {
+      const resolved = config.resolve({ workspaceId })
+      if (!resolved.ok) {
+        getLogger('runtime').error(
+          { workspaceId, error: resolved.error },
+          'Failed to resolve decisions.stalledRunTimeoutMs; the stalled-run decision will not expire.',
+        )
+        return 0
+      }
+      return resolved.data.config.decisions.stalledRunTimeoutMs
+    },
   })
   // TASK-123: the observation recorder created above now gets its watchdog.
   observationWatchdog.current = runWatchdog
-  // TASK-128 (ADR-0014): the persisted Decision Inbox. The service owns the
-  // lifecycle only — the action behind a resolution belongs to the source
-  // modules' onResolved handlers (TASK-129/130 wire those). Expiry rides the
-  // watchdog's single timer (ADR-0014 §4) instead of opening a second one.
-  const decisionService = createDecisionService({
-    decisions: repositories.decisions,
-    events,
-  })
+  // TASK-128 (ADR-0014 §4): decision expiry rides the watchdog's single timer
+  // instead of opening a second one.
   runWatchdog.onTick((now) => {
     const expired = decisionService.expire(now)
     if (!expired.ok) {
       getLogger('runtime').error({ error: expired.error }, 'Decision expiry pass failed.')
     }
   })
+  // TASK-130 (§9.2): progress blocker/question events open agent_blocker
+  // decisions; a stop resolution cancels the run through the AgentManager.
+  const agentBlockerDecisions = createAgentBlockerDecisionBridge({
+    decisions: decisionService,
+    runs: repositories.agentRuns,
+    agents: agentManager,
+  })
   // TASK-126 (Milestone 25 §8.2 / ADR-0012): follows each running run's
   // append-only progress file (1s polling), persists valid lines as
   // agent.progress events and refreshes the watchdog's silence baseline.
-  // blocker/question opening a Decision is TASK-130 — no onBlocker yet.
   const progressFollower = createProgressFollower({
     paths,
     runLogs,
     agentEvents: repositories.agentEvents,
     events,
     watchdog: runWatchdog,
+    onBlocker: (runId, event) => agentBlockerDecisions.report(runId, event),
+  })
+  // TASK-130 (§9.2): open_raw reveals the preserved raw handoff's directory
+  // through the injected shell adapter (Electron stays out of the Runtime).
+  const handoffDegradedActions = createHandoffDegradedActions({
+    decisions: decisionService,
+    openPath: options.openPath,
   })
   // TASK-106 (§18): project terminal Run outcomes onto account profiles.
   // §18.0 auxiliary sweep at startup; the only other sweep trigger is the
@@ -1104,6 +1163,12 @@ export async function composeTeskraRuntime(
       resolve: (request) =>
         decisionService.resolve(request.id, request.optionId, 'user', request.note),
     },
+    // TASK-124: usage queries go straight to the Repository — there is no
+    // Manager in between, so no SQL leaves the Repository layer.
+    usage: {
+      summary: (request) => repositories.usage.summarize(request),
+      getByRun: ({ runId }) => repositories.usage.getByRun(runId),
+    },
     git: {
       status: ({ workspaceId }) => gitManager.status(workspaceId),
       branch: ({ workspaceId }) => gitManager.branch(workspaceId),
@@ -1375,6 +1440,9 @@ export async function composeTeskraRuntime(
       // already triggered the followers' final drains); stop the poll timer
       // before the shared RunLogStore releases its handles.
       progressFollower.dispose()
+      // TASK-130: detach the decision source bridges before the service clears.
+      agentBlockerDecisions.dispose()
+      handoffDegradedActions.dispose()
       // TASK-123: detach the observation parser's terminal-event subscriptions.
       observationRecorder.dispose()
       // Belt and braces: compose owns the shared RunLogStore — make sure its

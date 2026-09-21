@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import Database from 'better-sqlite3'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { IpcResult, WorkbenchEvents } from '@teskra/contracts'
 
@@ -16,6 +16,8 @@ import {
   createWorkspaceRepository,
   createWorktreeRepository,
 } from '../db/repositories'
+import { createDecisionRepository } from '../decisions/decision-repository'
+import { createDecisionService, type DecisionService } from '../decisions/decision-service'
 import { createEventBus, type EventBus } from '../events/event-bus'
 import { createTeskraPaths } from '../paths'
 import { createCommandRunner, type CommandRunner } from '../process/command-runner'
@@ -46,6 +48,7 @@ interface Fixture {
   readonly runs: ReturnType<typeof createAgentRunRepository>
   readonly commands: CommandRunner
   readonly events: EventBus<WorkbenchEvents>
+  readonly decisions: DecisionService
   readonly emitted: EmittedEvent[]
   readonly repoDir: string
 }
@@ -134,6 +137,11 @@ async function setup(): Promise<Fixture> {
     reviews,
     resolveRuntime,
   })
+  // TASK-130: the real persisted inbox shares the fixture's connection + bus.
+  const decisions = createDecisionService({
+    decisions: createDecisionRepository(database),
+    events,
+  })
   const service = createMergeService({
     commands,
     workspaces,
@@ -143,8 +151,9 @@ async function setup(): Promise<Fixture> {
     events,
     preflight,
     resolveRuntime,
+    decisions,
   })
-  return { service, manager, worktrees, tasks, runs, commands, events, emitted, repoDir }
+  return { service, manager, worktrees, tasks, runs, commands, events, decisions, emitted, repoDir }
 }
 
 function requireOk<T>(result: IpcResult<T>): T {
@@ -375,5 +384,110 @@ describe('MergeService (TASK-046)', () => {
     const fixture = await setup()
     const result = await fixture.service.merge({ worktreeId: 'nope' })
     expect(result).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+  })
+
+  it('TASK-130: opens a merge_blocked decision for overridable-only blockers; force_merge re-runs the merge', async () => {
+    const fixture = await setup()
+    const worktree = await createWorktree(fixture, 'run-1')
+    // pending_decisions.run_id REFERENCES agent_runs — the linked run row must exist.
+    requireOk(
+      fixture.runs.create({
+        id: 'run-1',
+        workspaceId: 'workspace-1',
+        agentType: 'fake-agent',
+        executionMode: 'orchestrated',
+        runDir: join(fixture.repoDir, '.run'),
+        worktreeId: worktree.id,
+      }),
+    )
+    writeFileSync(join(worktree.path, 'feature.txt'), 'agent output\n')
+    await commitAll(fixture, worktree.path, 'agent: add feature')
+    // MAIN_WORKSPACE_DIRTY (overridable) is the only blocker.
+    writeFileSync(join(fixture.repoDir, 'scratch.txt'), 'dirty\n')
+
+    const blocked = await fixture.service.merge({ worktreeId: worktree.id })
+    expect(blocked).toMatchObject({ ok: false, error: { code: 'MERGE_BLOCKED' } })
+    expect(requireRecord(fixture.worktrees.getById(worktree.id)).state).toBe('ready')
+
+    const open = requireOk(fixture.decisions.list({ kind: 'merge_blocked', status: 'open' }))
+    expect(open).toHaveLength(1)
+    expect(open[0]).toMatchObject({
+      kind: 'merge_blocked',
+      severity: 'warning',
+      workspaceId: 'workspace-1',
+      worktreeId: worktree.id,
+      dedupeKey: `merge_blocked:${worktree.id}`,
+      options: [
+        { id: 'force_merge', label: 'Force merge', danger: true },
+        { id: 'cancel', label: 'Cancel' },
+      ],
+    })
+    const decision = open[0]
+    if (decision === undefined) throw new Error('unreachable')
+    if (decision.detail.kind !== 'merge_blocked') throw new Error('unreachable')
+    expect(decision.detail.blockers.map((blocker) => blocker.code)).toEqual([
+      'MAIN_WORKSPACE_DIRTY',
+    ])
+
+    // A repeated blocked attempt reuses the same open row (dedupeKey).
+    await fixture.service.merge({ worktreeId: worktree.id })
+    expect(
+      requireOk(fixture.decisions.list({ kind: 'merge_blocked', status: 'open' })),
+    ).toHaveLength(1)
+
+    // force_merge resolves into merge({ force: true }) and the merge lands.
+    const resolved = fixture.decisions.resolve(decision.id, 'force_merge', 'user')
+    expect(resolved.ok).toBe(true)
+    await vi.waitFor(() => {
+      expect(requireRecord(fixture.worktrees.getById(worktree.id)).state).toBe('merged')
+    })
+    expect(readFileSync(join(fixture.repoDir, 'feature.txt'), 'utf8')).toBe('agent output\n')
+  })
+
+  it('TASK-130: cancel leaves the blocked merge untouched', async () => {
+    const fixture = await setup()
+    const worktree = await createWorktree(fixture, 'run-1')
+    requireOk(
+      fixture.runs.create({
+        id: 'run-1',
+        workspaceId: 'workspace-1',
+        agentType: 'fake-agent',
+        executionMode: 'orchestrated',
+        runDir: join(fixture.repoDir, '.run'),
+        worktreeId: worktree.id,
+      }),
+    )
+    writeFileSync(join(worktree.path, 'feature.txt'), 'agent output\n')
+    await commitAll(fixture, worktree.path, 'agent: add feature')
+    writeFileSync(join(fixture.repoDir, 'scratch.txt'), 'dirty\n')
+
+    await fixture.service.merge({ worktreeId: worktree.id })
+    const open = requireOk(fixture.decisions.list({ kind: 'merge_blocked', status: 'open' }))
+    const decision = open[0]
+    if (decision === undefined) throw new Error('expected an open merge_blocked decision')
+
+    const resolved = fixture.decisions.resolve(decision.id, 'cancel', 'user')
+    expect(resolved.ok).toBe(true)
+    // No forced merge was kicked off: the worktree stays ready, main unchanged.
+    expect(requireRecord(fixture.worktrees.getById(worktree.id)).state).toBe('ready')
+    expect(existsSync(join(fixture.repoDir, 'feature.txt'))).toBe(false)
+  })
+
+  it('TASK-130: hard blockers still fail directly without opening a decision', async () => {
+    const fixture = await setup()
+    const worktree = await createWorktree(fixture, 'run-1')
+    // BRANCH_MISSING is overridable: false.
+    const deleted = await gitAt(
+      fixture,
+      fixture.repoDir,
+      'update-ref',
+      '-d',
+      `refs/heads/${worktree.branch}`,
+    )
+    expect(deleted.exitCode).toBe(0)
+
+    const result = await fixture.service.merge({ worktreeId: worktree.id })
+    expect(result).toMatchObject({ ok: false, error: { code: 'MERGE_BLOCKED' } })
+    expect(requireOk(fixture.decisions.list({ status: 'open' }))).toEqual([])
   })
 })

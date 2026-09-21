@@ -477,6 +477,10 @@ function fakeRuntime(): TeskraRuntime {
         throw new Error('not used')
       }),
     },
+    usage: {
+      summary: vi.fn(() => ok([])),
+      getByRun: vi.fn(() => ok(null)),
+    },
     credential: {
       status: vi.fn(() => ok({ available: true })),
       set: vi.fn(() => ok(undefined)),

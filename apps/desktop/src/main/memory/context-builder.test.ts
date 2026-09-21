@@ -264,7 +264,11 @@ describe('ContextBuilder (TASK-068)', () => {
         task: { title: 'Add login', description: '' },
         role: 'implementer',
         memory: built.data.content,
-        env: { TESKRA_HANDOFF_PATH: '/h.json', TESKRA_ARTIFACT_DIR: '/a' },
+        env: {
+          TESKRA_HANDOFF_PATH: '/h.json',
+          TESKRA_ARTIFACT_DIR: '/a',
+          TESKRA_PROGRESS_PATH: '/progress.jsonl',
+        },
       },
     })
     expect(rendered.ok).toBe(true)

@@ -7,7 +7,9 @@ import type {
   ListTasksRequest,
   ListWorkflowRunsRequest,
   PublicAppError,
+  SummarizeUsageRequest,
   Task,
+  UsageSummaryBucket,
   WorkbenchEvents,
   WorkflowRun,
   Workspace,
@@ -27,6 +29,7 @@ export const DASHBOARD_BLOCK_KEYS = [
   'mergeReady',
   'agentAvailability',
   'recentFailures',
+  'usage',
 ] as const
 export type DashboardBlockKey = (typeof DASHBOARD_BLOCK_KEYS)[number]
 
@@ -63,6 +66,9 @@ export interface DashboardStoreBridge {
   readonly workflow: {
     listRuns(request?: ListWorkflowRunsRequest): Promise<IpcResult<WorkflowRun[]>>
   }
+  readonly usage: {
+    summary(request: SummarizeUsageRequest): Promise<IpcResult<UsageSummaryBucket[]>>
+  }
   readonly events: {
     subscribe<
       Name extends
@@ -77,7 +83,8 @@ export interface DashboardStoreBridge {
         | 'workflow.run_updated'
         | 'worktree.merged'
         | 'worktree.merge_conflict'
-        | 'git.changed',
+        | 'git.changed'
+        | 'usage.updated',
     >(
       name: Name,
       handler: (payload: WorkbenchEvents[Name]) => void,
@@ -92,6 +99,8 @@ interface DashboardState {
   readonly mergeReady: DashboardBlock<DashboardListSummary<Worktree>>
   readonly agentAvailability: DashboardBlock<readonly AgentHealth[]>
   readonly recentFailures: DashboardBlock<DashboardListSummary<AgentRun>>
+  /** TASK-124: this week's usage buckets (workspace / agentType / profile). */
+  readonly usage: DashboardBlock<readonly UsageSummaryBucket[]>
   /** Fires every block loader in parallel; each block settles independently. */
   load(workspace: Workspace): void
   reloadBlock(workspace: Workspace, block: DashboardBlockKey): void
@@ -124,6 +133,7 @@ export function createDashboardStore(getBridge: () => DashboardStoreBridge) {
     mergeReady: 0,
     agentAvailability: 0,
     recentFailures: 0,
+    usage: 0,
   }
   let synchronizationGeneration = 0
 
@@ -262,6 +272,33 @@ export function createDashboardStore(getBridge: () => DashboardStoreBridge) {
       }
     }
 
+    /** Monday 00:00 local time — the "this week" window for the usage card. */
+    const weekStartIso = (): string => {
+      const start = new Date()
+      start.setHours(0, 0, 0, 0)
+      start.setDate(start.getDate() - ((start.getDay() + 6) % 7))
+      return start.toISOString()
+    }
+
+    // TASK-124 (§7): usage accounting, display-only (ADR-0010) — one
+    // summarize call scoped to the workspace's week; the card groups by agent.
+    const loadUsage = async (workspaceId: string): Promise<void> => {
+      const generation = begin('usage')
+      try {
+        const result = await getBridge().usage.summary({
+          workspaceId,
+          since: weekStartIso(),
+        })
+        if (!result.ok) {
+          fail('usage', generation, result.error)
+          return
+        }
+        succeed('usage', generation, result.data)
+      } catch {
+        fail('usage', generation, transportError())
+      }
+    }
+
     const loaders: Record<DashboardBlockKey, (workspace: Workspace) => Promise<void>> = {
       activeTasks: (workspace) => loadActiveTasks(workspace.id),
       waitingForYou: (workspace) => loadWaitingForYou(workspace.id),
@@ -269,6 +306,7 @@ export function createDashboardStore(getBridge: () => DashboardStoreBridge) {
       mergeReady: (workspace) => loadMergeReady(workspace.id),
       agentAvailability: loadAgentAvailability,
       recentFailures: (workspace) => loadRecentFailures(workspace.id),
+      usage: (workspace) => loadUsage(workspace.id),
     }
 
     const loadAll = (workspace: Workspace): void => {
@@ -282,6 +320,7 @@ export function createDashboardStore(getBridge: () => DashboardStoreBridge) {
       mergeReady: idle(),
       agentAvailability: idle(),
       recentFailures: idle(),
+      usage: idle(),
 
       load: loadAll,
 
@@ -308,6 +347,7 @@ export function createDashboardStore(getBridge: () => DashboardStoreBridge) {
           getBridge().events.subscribe('worktree.merged', reload),
           getBridge().events.subscribe('worktree.merge_conflict', reload),
           getBridge().events.subscribe('git.changed', reload),
+          getBridge().events.subscribe('usage.updated', reload),
         ]
         loadAll(workspace)
 

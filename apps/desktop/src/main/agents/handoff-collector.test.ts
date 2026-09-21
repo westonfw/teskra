@@ -6,10 +6,14 @@ import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { migrateDatabase } from '../db/migrations'
+import { createAgentRunRepository } from '../db/repositories/agent-run-repository'
 import {
   createHandoffRepository,
   type HandoffRepository,
 } from '../db/repositories/handoff-repository'
+import { createDecisionRepository } from '../decisions/decision-repository'
+import { createDecisionService, type DecisionService } from '../decisions/decision-service'
+import { createEventBus } from '../events/event-bus'
 import { createTeskraPaths, type TeskraPaths } from '../paths'
 import { createCommandRunner } from '../process/command-runner'
 import { createHandoffCollector, type HandoffCollector } from './handoff-collector'
@@ -28,9 +32,11 @@ interface Fixture {
   readonly collector: HandoffCollector
   readonly handoffs: HandoffRepository
   readonly paths: TeskraPaths
+  /** Present iff setup ran with withDecisions (TASK-130). */
+  readonly decisions?: DecisionService
 }
 
-function setup(): Fixture {
+function setup(options?: { withDecisions?: boolean }): Fixture {
   const home = mkdtempSync(join(tmpdir(), 'teskra-handoff-'))
   homes.push(home)
   connection = new Database(':memory:')
@@ -52,6 +58,13 @@ function setup(): Fixture {
     .run()
   const paths = createTeskraPaths({ TESKRA_HOME: home })
   const handoffs = createHandoffRepository(connection)
+  const decisions =
+    options?.withDecisions === true
+      ? createDecisionService({
+          decisions: createDecisionRepository(connection),
+          events: createEventBus(),
+        })
+      : undefined
   return {
     paths,
     handoffs,
@@ -60,7 +73,9 @@ function setup(): Fixture {
       paths,
       createHandoffId: () => 'handoff-1',
       now: () => '2026-09-10T00:00:02.000Z',
+      ...(decisions === undefined ? {} : { decisions, runs: createAgentRunRepository(connection) }),
     }),
+    ...(decisions === undefined ? {} : { decisions }),
   }
 }
 
@@ -204,6 +219,43 @@ describe('HandoffCollector (TASK-051, ADR-0004)', () => {
     const collected = fixture.collector.collect('run-404')
 
     expect(collected.ok).toBe(false)
+  })
+
+  it('TASK-130: a degraded handoff opens a handoff_degraded decision; a valid one does not', () => {
+    const fixture = setup({ withDecisions: true })
+    const decisions = fixture.decisions
+    if (decisions === undefined) throw new Error('expected the decisions service')
+    const files = runFiles(fixture)
+    writeFileSync(
+      files.handoff,
+      JSON.stringify({ runId: 'run-1', type: 'review', summary: 42 }),
+      'utf8',
+    )
+
+    const collected = fixture.collector.collect('run-1')
+    expect(collected.ok && collected.data?.parseStatus === 'degraded').toBe(true)
+
+    const open = decisions.list({ kind: 'handoff_degraded', status: 'open' })
+    expect(open.ok && open.data.length === 1).toBe(true)
+    const decision = open.ok ? open.data[0] : undefined
+    expect(decision).toMatchObject({
+      workspaceId: 'ws-1',
+      kind: 'handoff_degraded',
+      severity: 'warning',
+      runId: 'run-1',
+      dedupeKey: 'handoff_degraded:run-1',
+      options: [
+        { id: 'open_raw', label: 'Open raw file' },
+        { id: 'dismiss', label: 'Dismiss' },
+      ],
+    })
+    if (decision?.detail.kind === 'handoff_degraded') {
+      expect(decision.detail.rawPath).toBe(files.handoff)
+      // The Zod issues that made the handoff degraded travel with the detail.
+      expect(decision.detail.issues?.length).toBeGreaterThan(0)
+    } else {
+      throw new Error('expected a handoff_degraded detail')
+    }
   })
 })
 

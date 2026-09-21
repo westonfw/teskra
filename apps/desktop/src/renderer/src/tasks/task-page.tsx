@@ -36,6 +36,7 @@ import { RunCommandsPanel } from '../permissions/run-commands-panel'
 import { agentRuntimeKey, useAgentStore } from '../stores/agent-store'
 import { useTaskStore } from '../stores/task-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
+import { RunUsageText } from '../usage/run-usage'
 import { RunWorktreePanel } from './run-worktree-panel'
 import { taskDraftResetKey } from './task-draft'
 import { CriteriaPanel } from './criteria-panel'
@@ -494,6 +495,7 @@ export function TaskPage() {
               <Tag>{runStatusLabel(openRun, t)}</Tag>
               <Typography.Text code>{openRun.id}</Typography.Text>
             </Space>
+            <RunUsageText runId={openRun.id} />
             <RateLimitAlert run={openRun} onOpenRun={(next) => void handleOpenRun(next)} />
             <Tabs
               className="run-detail-tabs"

@@ -32,6 +32,7 @@ import { agentRuntimeKey, useAgentStore } from '../stores/agent-store'
 import { useNavigationStore } from '../stores/navigation-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
 import { RunWorktreePanel } from '../tasks/run-worktree-panel'
+import { RunUsageItem } from '../usage/run-usage'
 import { AgentPicker } from './agent-picker'
 import { AgentRunTerminal } from './agent-run-terminal'
 import { restartAgentRunRequest, shortDuration } from './agent-watchdog'
@@ -536,6 +537,7 @@ function RunDetail({
           {run.model ?? t('runs.field.defaultModel')}
         </Descriptions.Item>
         <Descriptions.Item label={t('runs.field.elapsed')}>{elapsed(run, now)}</Descriptions.Item>
+        <RunUsageItem runId={run.id} />
         <Descriptions.Item label={t('runs.field.currentActivity')}>
           {activity ?? defaultActivity(run.status, t)}
         </Descriptions.Item>

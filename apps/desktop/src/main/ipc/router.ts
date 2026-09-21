@@ -667,6 +667,15 @@ export function registerIpcRouter(
     ipcChannelDefinitions.decisionResolve,
     withRuntime((runtime, request) => runtime.decision.resolve(request)),
   )
+  // TASK-124 (Milestone 25 §7): usage accounting queries.
+  register(
+    ipcChannelDefinitions.usageSummary,
+    withRuntime((runtime, request) => runtime.usage.summary(request)),
+  )
+  register(
+    ipcChannelDefinitions.usageGetByRun,
+    withRuntime((runtime, request) => runtime.usage.getByRun(request)),
+  )
   register(
     ipcChannelDefinitions.settingsResolveConfig,
     withRuntime((runtime, request) => runtime.settings.resolveConfig(request)),

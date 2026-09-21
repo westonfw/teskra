@@ -75,12 +75,12 @@ afterEach(() => {
 })
 
 describe('migration 019 — pending_decisions (TASK-128)', () => {
-  it('registers version 19 immediately after 017; 018 is reserved for TASK-124', () => {
+  it('registers version 19 immediately after 018', () => {
     const index = MIGRATIONS.findIndex((migration) => migration.version === 19)
     expect(index).toBeGreaterThan(-1)
     expect(MIGRATIONS[index]?.name).toBe('019_pending_decisions')
-    expect(MIGRATIONS[index - 1]?.version).toBe(17)
-    expect(MIGRATIONS.some((migration) => migration.version === 18)).toBe(false)
+    expect(MIGRATIONS[index - 1]?.version).toBe(18)
+    expect(MIGRATIONS[index - 1]?.name).toBe('018_agent_run_usage')
   })
 
   it.each([
@@ -222,7 +222,7 @@ describe('migration 019 — pending_decisions (TASK-128)', () => {
     const upgraded = migrateDatabase(db)
     expect(upgraded.ok).toBe(true)
     if (!upgraded.ok) return
-    expect(upgraded.data).toEqual({ fromVersion: 17, toVersion: 19, applied: [19] })
+    expect(upgraded.data).toEqual({ fromVersion: 17, toVersion: 19, applied: [18, 19] })
     expect(db.prepare('SELECT COUNT(*) AS n FROM agent_runs').get()).toEqual({ n: 1 })
   })
 })

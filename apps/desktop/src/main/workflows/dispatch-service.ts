@@ -20,7 +20,10 @@ import type { WorktreeManager } from '../git/worktree-manager'
 import { getLogger } from '../logger'
 import type { ContextBuilder } from '../memory/context-builder'
 import type { TeskraPaths } from '../paths'
-import type { PromptTemplateService } from '../prompts/prompt-template-service'
+import {
+  TESKRA_AGENT_PROTOCOL,
+  type PromptTemplateService,
+} from '../prompts/prompt-template-service'
 import { trustedRepoRoot } from '../workspace/trust'
 import type { WorkflowEngine } from './workflow-engine'
 import type { WorkflowRunStore } from './workflow-run-store'
@@ -113,7 +116,11 @@ export interface DispatchServiceDeps {
 /** Fixed identity of the one-node definition snapshot every dispatch persists. */
 const DISPATCH_DEFINITION_ID = 'dispatch'
 const DISPATCH_NODE_ID = 'implement'
-/** TASK-068: the `{{memory}}` section gets half the standard context budget. */
+/**
+ * TASK-068: the `{{memory}}` section gets half the standard context budget.
+ * TASK-127: the inlined `{{protocol}}` document is charged against the same
+ * envelope (subtracted at the buildContext call site).
+ */
 const DISPATCH_MEMORY_BUDGET_CHARS = 4000
 
 function fail<T>(error: InternalAppError): IpcResult<T> {
@@ -244,12 +251,14 @@ export function createDispatchService(deps: DispatchServiceDeps): DispatchServic
       }
       // TASK-068: the {{memory}} variable carries the ContextBuilder-packed
       // Workspace Memory section (budget-limited; empty workspace memory
-      // renders as an empty section).
+      // renders as an empty section). TASK-127: the inlined {{protocol}}
+      // section is charged against the same dispatch context budget, so
+      // ContextBuilder packs memory under what the protocol leaves behind.
       let memory: string | undefined
       if (deps.contextBuilder !== undefined) {
         const built = deps.contextBuilder.buildContext({
           workspaceId: request.workspaceId,
-          budgetChars: DISPATCH_MEMORY_BUDGET_CHARS,
+          budgetChars: Math.max(1, DISPATCH_MEMORY_BUDGET_CHARS - TESKRA_AGENT_PROTOCOL.length),
         })
         if (!built.ok) {
           discardWorktree()
@@ -282,6 +291,7 @@ export function createDispatchService(deps: DispatchServiceDeps): DispatchServic
             env: {
               TESKRA_HANDOFF_PATH: runFiles.data.handoff,
               TESKRA_ARTIFACT_DIR: runFiles.data.artifacts,
+              TESKRA_PROGRESS_PATH: runFiles.data.progress,
             },
           },
         },

@@ -36,6 +36,7 @@ import {
   defaultAccountProfileId,
   profilesByAgent,
 } from '../../accounts/account-view-model'
+import { accountRecentUsageLabel } from '../../usage/usage-view-model'
 import { ExternalAccountModal } from '../../accounts/external-account-modal'
 import { LoginTerminalView } from '../../accounts/login-terminal-view'
 import { AppErrorAlert } from '../../components/app-error-alert'
@@ -67,6 +68,9 @@ export function AccountsSettingsSection() {
   const [rateLimitStats, setRateLimitStats] = useState<ReadonlyMap<string, AccountRateLimitStats>>(
     new Map(),
   )
+  // TASK-124: per-profile usage for the trailing 24h / 7d (display-only,
+  // ADR-0010) — a failed query just leaves the cards without the usage line.
+  const [recentUsage, setRecentUsage] = useState<ReadonlyMap<string, string>>(new Map())
   const [editing, setEditing] = useState<AgentAccountProfile>()
   const [removing, setRemoving] = useState<AgentAccountProfile>()
   const [loggingIn, setLoggingIn] = useState<AgentAccountProfile>()
@@ -81,13 +85,43 @@ export function AccountsSettingsSection() {
     })
   }
 
+  const loadRecentUsage = (listed: readonly AgentAccountProfile[]): void => {
+    const nowMs = Date.now()
+    const dayAgo = new Date(nowMs - 24 * 3_600_000).toISOString()
+    const weekAgo = new Date(nowMs - 7 * 24 * 3_600_000).toISOString()
+    void Promise.all(
+      listed.map(async (profile) => {
+        const [day, week] = await Promise.all([
+          window.teskra.usage.summary({ accountProfileId: profile.id, since: dayAgo }),
+          window.teskra.usage.summary({ accountProfileId: profile.id, since: weekAgo }),
+        ])
+        if (!day.ok || !week.ok) return undefined
+        const label = accountRecentUsageLabel(day.data, week.data, t)
+        return label === undefined ? undefined : ([profile.id, label] as const)
+      }),
+    ).then((entries) => {
+      setRecentUsage(new Map(entries.filter((entry) => entry !== undefined)))
+    })
+  }
+
   // §18.0: opening the page issues one account.list, which is also Main's
   // lazy limited-sweep trigger — no separate sweep call exists.
   useEffect(() => {
-    void refresh().then(loadRateLimitStats)
+    void refresh().then(() => {
+      loadRateLimitStats()
+      loadRecentUsage(useAccountProfileStore.getState().profiles)
+    })
     void loadDefinitions()
     if (useSettingsStore.getState().resolved === undefined) void loadSettings()
-    return startSynchronization()
+    // TASK-124: usage rows accumulate while runs work; refresh the lines live.
+    const stopUsage = window.teskra.events.subscribe('usage.updated', () => {
+      loadRecentUsage(useAccountProfileStore.getState().profiles)
+    })
+    const stopSync = startSynchronization()
+    return () => {
+      stopUsage()
+      stopSync()
+    }
   }, [refresh, loadDefinitions, loadSettings, startSynchronization])
 
   // §4.2: the per-agent "add" entry only makes sense for adapter-backed
@@ -154,6 +188,7 @@ export function AccountsSettingsSection() {
                         profile={profile}
                         isDefault={profile.id === defaultId}
                         stats={rateLimitStats.get(profile.id)}
+                        recentUsage={recentUsage.get(profile.id)}
                         usageUrl={adapterUsageUrl(adapterAgents, agentId)}
                         onEdit={() => setEditing(profile)}
                         onRemove={() => setRemoving(profile)}
@@ -221,6 +256,8 @@ interface AccountCardProps {
   readonly profile: AgentAccountProfile
   readonly isDefault: boolean
   readonly stats?: AccountRateLimitStats | undefined
+  /** TASK-124: pre-rendered trailing 24h / 7d usage line (display-only). */
+  readonly recentUsage?: string | undefined
   readonly usageUrl?: string | undefined
   readonly onEdit: () => void
   readonly onRemove: () => void
@@ -231,6 +268,7 @@ function AccountCard({
   profile,
   isDefault,
   stats,
+  recentUsage,
   usageUrl,
   onEdit,
   onRemove,
@@ -279,6 +317,9 @@ function AccountCard({
         </Typography.Text>
         {statsLabel !== undefined && (
           <Typography.Text type="secondary">{statsLabel}</Typography.Text>
+        )}
+        {recentUsage !== undefined && (
+          <Typography.Text type="secondary">{recentUsage}</Typography.Text>
         )}
         {profile.configHome !== undefined && (
           <Typography.Text type="secondary" ellipsis>

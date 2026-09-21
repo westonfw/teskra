@@ -517,6 +517,7 @@ export function createIterationController(deps: IterationControllerDeps): Iterat
               env: {
                 TESKRA_HANDOFF_PATH: runFiles.data.handoff,
                 TESKRA_ARTIFACT_DIR: runFiles.data.artifacts,
+                TESKRA_PROGRESS_PATH: runFiles.data.progress,
               },
             },
           },

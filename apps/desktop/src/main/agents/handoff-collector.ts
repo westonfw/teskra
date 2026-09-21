@@ -4,16 +4,19 @@ import { readFileSync } from 'node:fs'
 import {
   handoffTypeSchema,
   workerHandoffSchema,
+  type DecisionOption,
   type HandoffType,
   type IpcResult,
 } from '@teskra/contracts'
 
 import type { JsonRecord } from '../db/repositories/common'
+import type { AgentRunRepository } from '../db/repositories/agent-run-repository'
 import type {
   Handoff,
   HandoffRepository,
   SaveHandoffInput,
 } from '../db/repositories/handoff-repository'
+import type { DecisionService } from '../decisions/decision-service'
 import { getLogger } from '../logger'
 import type { TeskraPaths } from '../paths'
 
@@ -22,9 +25,23 @@ const FALLBACK_SUMMARY_MAX_CHARS = 2_000
 /** Fallback rows have no Agent-declared type; 'analysis' is the neutral bucket. */
 const FALLBACK_TYPE: HandoffType = 'analysis'
 
+/** §9.2 vocabulary; dismiss is the timeout default (DECISION_TIMEOUT_DEFAULT_OPTIONS). */
+const HANDOFF_DEGRADED_OPTIONS: readonly DecisionOption[] = [
+  { id: 'open_raw', label: 'Open raw file' },
+  { id: 'dismiss', label: 'Dismiss' },
+]
+
 export interface HandoffCollectorDeps {
   readonly handoffs: HandoffRepository
   readonly paths: TeskraPaths
+  /**
+   * TASK-130 (ADR-0014 §3, design §9.2): a `degraded` result also opens a
+   * persisted `handoff_degraded` decision (open_raw / dismiss). The run row
+   * supplies the decision's workspaceId, so both deps are required for the
+   * decision; without them the collector keeps its TASK-051 log-only behavior.
+   */
+  readonly decisions?: Pick<DecisionService, 'open'>
+  readonly runs?: Pick<AgentRunRepository, 'getById'>
   readonly createHandoffId?: () => string
   readonly now?: () => string
 }
@@ -71,6 +88,48 @@ export function createHandoffCollector(deps: HandoffCollectorDeps): HandoffColle
     return tail.length > 0 ? tail : 'The Agent produced no terminal output.'
   }
 
+  /**
+   * TASK-130: a degraded handoff surfaces in the Decision Inbox. Best-effort —
+   * collection never blocks on it (the decision needs the run row only for its
+   * workspaceId).
+   */
+  const openDegradedDecision = (
+    runId: string,
+    rawPath: string,
+    issues?: readonly string[],
+  ): void => {
+    if (deps.decisions === undefined || deps.runs === undefined) return
+    const run = deps.runs.getById(runId)
+    if (!run.ok) {
+      logger.error(
+        { runId, error: run.error },
+        'Failed to read the run for the degraded-handoff decision.',
+      )
+      return
+    }
+    if (run.data === null) {
+      logger.warn({ runId }, 'Handoff is degraded but the run row is gone; no decision opened.')
+      return
+    }
+    const opened = deps.decisions.open({
+      workspaceId: run.data.workspaceId,
+      kind: 'handoff_degraded',
+      severity: 'warning',
+      dedupeKey: `handoff_degraded:${runId}`,
+      title: 'The Agent handoff failed validation',
+      detail: {
+        kind: 'handoff_degraded',
+        rawPath,
+        ...(issues === undefined ? {} : { issues: [...issues] }),
+      },
+      options: HANDOFF_DEGRADED_OPTIONS,
+      runId,
+    })
+    if (!opened.ok) {
+      logger.error({ runId, error: opened.error }, 'Failed to open the degraded-handoff decision.')
+    }
+  }
+
   return {
     collect(runId) {
       const files = deps.paths.runFiles(runId)
@@ -108,6 +167,7 @@ export function createHandoffCollector(deps: HandoffCollectorDeps): HandoffColle
           { runId, path: files.data.handoff, cause },
           'Handoff file is not valid JSON; the raw file is kept.',
         )
+        openDegradedDecision(runId, files.data.handoff)
         return save({ type: FALLBACK_TYPE, rawPath: files.data.handoff, parseStatus: 'degraded' })
       }
 
@@ -123,16 +183,18 @@ export function createHandoffCollector(deps: HandoffCollectorDeps): HandoffColle
 
       const partial = isRecord(parsed) ? parsed : undefined
       const declaredType = handoffTypeSchema.safeParse(partial?.['type'])
+      const issues = validated.success
+        ? [`runId mismatch: the handoff declares ${validated.data.runId}`]
+        : validated.error.issues.map((issue) => issue.message)
       logger.warn(
         {
           runId,
           path: files.data.handoff,
-          issues: validated.success
-            ? `runId mismatch: ${validated.data.runId}`
-            : validated.error.issues,
+          issues,
         },
         'Handoff file failed validation; the raw file is kept.',
       )
+      openDegradedDecision(runId, files.data.handoff, issues)
       return save({
         type: declaredType.success ? declaredType.data : FALLBACK_TYPE,
         ...(partial === undefined ? {} : { payload: partial }),

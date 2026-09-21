@@ -236,9 +236,9 @@ describe('runMigrations (TASK-006)', () => {
 })
 
 describe('MIGRATIONS registry (TASK-006)', () => {
-  it('is the ordered 001–019 chain (018 reserved for TASK-124, parallel branch)', () => {
+  it('is the ordered 001–019 chain', () => {
     expect(MIGRATIONS.map((m) => m.version)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
     ])
     expect(MIGRATIONS.map((m) => m.name)).toEqual([
       '001_init',
@@ -258,6 +258,7 @@ describe('MIGRATIONS registry (TASK-006)', () => {
       '015_workspace_trust',
       '016_external_config_home_normalize',
       '017_agent_run_queue_and_retry',
+      '018_agent_run_usage',
       '019_pending_decisions',
     ])
   })
@@ -270,11 +271,11 @@ describe('MIGRATIONS registry (TASK-006)', () => {
       data: {
         fromVersion: 0,
         toVersion: 19,
-        applied: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19],
+        applied: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
       },
     })
     expect(appliedVersions(db)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
     ])
 
     const second = migrateDatabase(db)
@@ -311,7 +312,7 @@ describe('MIGRATIONS registry (TASK-006)', () => {
       data: {
         fromVersion: 6,
         toVersion: 19,
-        applied: [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19],
+        applied: [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
       },
     })
 

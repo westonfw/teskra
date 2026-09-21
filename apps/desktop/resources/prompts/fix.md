@@ -26,6 +26,10 @@ the task description). Make the smallest correct change for each issue, keep
 the fix scoped to the task, and re-verify every acceptance criterion before
 finishing.
 
+## Teskra Agent Protocol
+
+{{protocol}}
+
 ## Handoff (required)
 
 When you finish, write your handoff as a JSON file at
@@ -37,3 +41,11 @@ fields `runId`, `type`, `summary`; optional fields `filesChanged`,
 process exits — it is the only reliable channel back, so writing it is
 mandatory. Store any large outputs (logs, before/after diffs) as files under
 `{{env.TESKRA_ARTIFACT_DIR}}` and reference them from the handoff.
+
+## Progress (optional)
+
+While you work you may append progress events — one JSON object per line,
+append-only — to `{{env.TESKRA_PROGRESS_PATH}}`, e.g.
+`{"kind": "progress", "message": "Fixed 2 of 5 findings", "percent": 40}`.
+Valid kinds are `progress`, `blocker`, `question`, `note`. This channel is
+optional and never replaces the handoff.

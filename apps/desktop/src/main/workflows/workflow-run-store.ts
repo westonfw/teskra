@@ -16,7 +16,9 @@ import type {
   WorkflowRunRepository,
   CreateWorkflowRunInput,
 } from '../db/repositories/workflow-run-repository'
+import type { DecisionService } from '../decisions/decision-service'
 import { type InternalAppError, toPublicError } from '../errors'
+import { getLogger } from '../logger'
 
 /**
  * WorkflowRunStore (TASK-056) — the domain service over WorkflowRunRepository
@@ -90,6 +92,13 @@ export interface WorkflowRunStoreDeps {
   readonly workflowRuns: WorkflowRunRepository
   /** When provided, a supplied taskId must reference an existing Task. */
   readonly tasks?: Pick<TaskRepository, 'getById'>
+  /**
+   * TASK-130 (ADR-0014 §3): a terminal run transition cancels every decision
+   * the run's pass opened (e.g. shell confirmations). setRunStatus is the
+   * single chokepoint all terminal transitions (engine, dispatch, iteration,
+   * full workflow) flow through, so this one call site covers them all.
+   */
+  readonly decisions?: Pick<DecisionService, 'cancelBySource'>
   readonly createId?: () => string
   readonly now?: () => string
 }
@@ -317,7 +326,7 @@ export function createWorkflowRunStore(deps: WorkflowRunStoreDeps): WorkflowRunS
     setRunStatus(runId, status) {
       const run = requireRun(runId)
       if (!run.ok) return run
-      return requireUpdated(
+      const updated = requireUpdated(
         runs.updateRun(runId, {
           status,
           ...(TERMINAL_RUN_STATUSES.has(status) ? { completedAt: now() } : {}),
@@ -325,6 +334,18 @@ export function createWorkflowRunStore(deps: WorkflowRunStoreDeps): WorkflowRunS
         'run',
         runId,
       )
+      // TASK-130: source teardown — a terminal run's open decisions close as
+      // cancelled (no handler dispatch; nothing is left to act on).
+      if (updated.ok && TERMINAL_RUN_STATUSES.has(status) && deps.decisions !== undefined) {
+        const cancelled = deps.decisions.cancelBySource({ workflowRunId: runId })
+        if (!cancelled.ok) {
+          getLogger('runtime').error(
+            { runId, error: cancelled.error },
+            "Failed to cancel the workflow run's open decisions.",
+          )
+        }
+      }
+      return updated
     },
   }
 

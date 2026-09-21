@@ -434,7 +434,11 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
         role: 'reviewer',
         memory: '',
         ...(previousHandoff === undefined ? {} : { previousHandoff }),
-        env: { TESKRA_HANDOFF_PATH: '/tmp/handoff.json', TESKRA_ARTIFACT_DIR: '/tmp/artifacts' },
+        env: {
+          TESKRA_HANDOFF_PATH: '/tmp/handoff.json',
+          TESKRA_ARTIFACT_DIR: '/tmp/artifacts',
+          TESKRA_PROGRESS_PATH: '/tmp/progress.jsonl',
+        },
       },
     })
     expect(rendered.ok).toBe(true)
@@ -534,7 +538,11 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
       task: { title: 'Demo Task', description: 'Describe it.' },
       criteria: ['It works'],
       role: 'implementer',
-      env: { TESKRA_HANDOFF_PATH: '/tmp/handoff.json', TESKRA_ARTIFACT_DIR: '/tmp/artifacts' },
+      env: {
+        TESKRA_HANDOFF_PATH: '/tmp/handoff.json',
+        TESKRA_ARTIFACT_DIR: '/tmp/artifacts',
+        TESKRA_PROGRESS_PATH: '/tmp/progress.jsonl',
+      },
     }
 
     const builtin = runtime.prompts.render({ name: 'implement', context })
@@ -652,7 +660,11 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
         task: { title: 'Preview me', description: '' },
         role: 'implementer',
         memory: memoryOnly.data.content,
-        env: { TESKRA_HANDOFF_PATH: '/tmp/h.json', TESKRA_ARTIFACT_DIR: '/tmp/a' },
+        env: {
+          TESKRA_HANDOFF_PATH: '/tmp/h.json',
+          TESKRA_ARTIFACT_DIR: '/tmp/a',
+          TESKRA_PROGRESS_PATH: '/tmp/progress.jsonl',
+        },
       },
     })
     expect(rendered.ok).toBe(true)

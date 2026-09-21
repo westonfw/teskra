@@ -26,6 +26,10 @@ acceptance criteria. Report findings with severity (`critical`, `high`,
 `medium`, `low`), each with a title and, where applicable, the file and line.
 Do not modify code in this phase.
 
+## Teskra Agent Protocol
+
+{{protocol}}
+
 ## Handoff (required)
 
 When you finish, write your handoff as a JSON file at
@@ -46,3 +50,11 @@ Teskra reads this file after your process exits — it is the only reliable
 channel back, so writing it is mandatory. Store any large outputs (full
 review reports, diffs) as files under `{{env.TESKRA_ARTIFACT_DIR}}` and
 reference them from the handoff.
+
+## Progress (optional)
+
+While you work you may append progress events — one JSON object per line,
+append-only — to `{{env.TESKRA_PROGRESS_PATH}}`, e.g.
+`{"kind": "progress", "message": "Reviewed 3 of 8 files", "percent": 35}`.
+Valid kinds are `progress`, `blocker`, `question`, `note`. This channel is
+optional and never replaces the handoff.

@@ -93,7 +93,7 @@ function upgradedDb(seed: (db: Database.Database) => void): Database.Database {
     throw new Error(upgraded.error.message)
   }
   expect(upgraded.data.fromVersion).toBe(15)
-  expect(upgraded.data.applied).toEqual([16, 17, 19])
+  expect(upgraded.data.applied).toEqual([16, 17, 18, 19])
   return db
 }
 

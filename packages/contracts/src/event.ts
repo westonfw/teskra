@@ -4,6 +4,7 @@ import type { AgentProgressEvent } from './agent-progress'
 import type { AgentObservation } from './agent-observation'
 import type { PendingDecision } from './decision'
 import type { PublicAppError } from './error'
+import type { AgentRunUsage } from './usage'
 import type { ReviewPanelStatus } from './review'
 import type { WorkflowRunStatus, WorkflowStepStatus } from './workflow'
 
@@ -277,6 +278,16 @@ export interface WorkbenchEvents {
   'decision.resolved': {
     decision: PendingDecision
   }
+
+  /**
+   * TASK-124 (Milestone 25 §7): a usage observation accumulated into the
+   * run's `agent_run_usage` row. Display-only — never a rate-limit input
+   * (ADR-0010).
+   */
+  'usage.updated': {
+    runId: string
+    usage: AgentRunUsage
+  }
 }
 
 export type WorkbenchEventName = keyof WorkbenchEvents
@@ -328,6 +339,7 @@ export const WORKBENCH_EVENT_NAMES = [
   'account.login.exited',
   'decision.opened',
   'decision.resolved',
+  'usage.updated',
 ] as const satisfies readonly WorkbenchEventName[]
 
 export const RENDERER_EVENT_CHANNEL = 'teskra:event' as const

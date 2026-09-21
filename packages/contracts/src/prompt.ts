@@ -59,10 +59,18 @@ export const promptTemplateContextSchema = z.strictObject({
   /** Workspace Memory section packed by the ContextBuilder (TASK-068); empty when unwired. */
   memory: z.string().max(IPC_CONTENT_MAX).optional(),
   previousHandoff: z.string().max(IPC_CONTENT_MAX).optional(),
+  /**
+   * TASK-127 / ADR-0012 §5: overrides the inlined teskra-agent-protocol.md
+   * document for the `{{protocol}}` variable; defaults to the bundled
+   * protocol when omitted.
+   */
+  protocol: z.string().max(IPC_CONTENT_MAX).optional(),
   /** ADR-0004 handoff contract paths injected into the agent environment. */
   env: z.strictObject({
     TESKRA_HANDOFF_PATH: z.string().min(1).max(IPC_CONTENT_MAX),
     TESKRA_ARTIFACT_DIR: z.string().min(1).max(IPC_CONTENT_MAX),
+    /** ADR-0012 / TASK-126: append-only progress file; templates referencing it fail when absent. */
+    TESKRA_PROGRESS_PATH: z.string().min(1).max(IPC_CONTENT_MAX).optional(),
   }),
 })
 export type PromptTemplateContext = z.infer<typeof promptTemplateContextSchema>

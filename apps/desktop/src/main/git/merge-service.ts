@@ -1,4 +1,5 @@
 import type {
+  DecisionOption,
   IpcResult,
   MergePreflightBlocker,
   WorkbenchEvents,
@@ -11,8 +12,10 @@ import type { AgentRunRepository } from '../db/repositories/agent-run-repository
 import type { TaskRepository } from '../db/repositories/task-repository'
 import type { WorkspaceRepository } from '../db/repositories/workspace-repository'
 import type { Worktree, WorktreeRepository } from '../db/repositories/worktree-repository'
+import type { DecisionService } from '../decisions/decision-service'
 import type { EventBus } from '../events/event-bus'
 import { type InternalAppError, toPublicError } from '../errors'
+import { getLogger } from '../logger'
 import type { CommandResult, CommandRunner } from '../process/command-runner'
 import type { WorkspaceRuntime } from '../workspace/runtime'
 import type { MergePreflightService } from './merge-preflight-service'
@@ -51,9 +54,22 @@ import type { MergePreflightService } from './merge-preflight-service'
  * Preflight gate: any failed check with `overridable: false` always blocks;
  * overridable blockers require `force: true`. A blocked merge changes nothing
  * in git or the database.
+ *
+ * TASK-130 (ADR-0014 §3, design §9.2): a merge blocked by ONLY overridable
+ * blockers additionally opens a persisted `merge_blocked` PendingDecision
+ * (force_merge / cancel) — the caller still receives MERGE_BLOCKED, so the
+ * existing IPC/UI path is unchanged; resolving `force_merge` re-enters
+ * `merge({ force: true })` from the onResolved subscription. Hard blockers
+ * never open a decision.
  */
 
 const GIT_TIMEOUT_MS = 60_000
+
+/** §9.2 vocabulary; force_merge is the danger option (the UI confirms twice). */
+const MERGE_BLOCKED_OPTIONS: readonly DecisionOption[] = [
+  { id: 'force_merge', label: 'Force merge', danger: true },
+  { id: 'cancel', label: 'Cancel' },
+]
 
 export interface MergeService {
   merge(request: WorktreeMergeRequest): Promise<IpcResult<WorktreeMergeResult>>
@@ -68,6 +84,13 @@ export interface MergeServiceDeps {
   readonly events: EventBus<WorkbenchEvents>
   readonly preflight: MergePreflightService
   readonly resolveRuntime: (workspace: Workspace) => IpcResult<WorkspaceRuntime>
+  /**
+   * TASK-130 (ADR-0014): with a DecisionService composed, an overridable-only
+   * blocked merge opens a `merge_blocked` decision and its `force_merge`
+   * resolution re-runs the merge with force. Without it a blocked merge only
+   * returns MERGE_BLOCKED (TASK-046 behavior).
+   */
+  readonly decisions?: Pick<DecisionService, 'open' | 'onResolved'>
   readonly now?: () => string
 }
 
@@ -93,6 +116,7 @@ function commandFailed<T>(operation: string, result: CommandResult): IpcResult<T
 }
 
 export function createMergeService(deps: MergeServiceDeps): MergeService {
+  const logger = getLogger('runtime')
   const now = deps.now ?? (() => new Date().toISOString())
 
   const git = async (
@@ -188,7 +212,7 @@ export function createMergeService(deps: MergeServiceDeps): MergeService {
     }
   }
 
-  return {
+  const service: MergeService = {
     async merge({ worktreeId, force }) {
       const found = deps.worktrees.getById(worktreeId)
       if (!found.ok) return found
@@ -211,14 +235,47 @@ export function createMergeService(deps: MergeServiceDeps): MergeService {
           check.outcome === 'failed' && check.blocker !== undefined ? [check.blocker] : [],
         )
         const hard = blockers.filter((blocker) => !blocker.overridable)
-        if (hard.length > 0 || force !== true) {
-          const describe = (blocker: MergePreflightBlocker) => `${blocker.code}: ${blocker.message}`
+        const describe = (blocker: MergePreflightBlocker) => `${blocker.code}: ${blocker.message}`
+        if (hard.length > 0) {
+          // Hard blockers never open a decision (§9.2) — they fail directly.
           return fail({
             code: 'MERGE_BLOCKED',
-            message:
-              hard.length > 0
-                ? `Merge is blocked: ${hard.map(describe).join(' ')}`
-                : `Merge is blocked by overridable checks; rerun with force to proceed: ${blockers.map(describe).join(' ')}`,
+            message: `Merge is blocked: ${hard.map(describe).join(' ')}`,
+            retryable: true,
+            detail: `worktree=${worktreeId} blockers=${blockers.map((blocker) => blocker.code).join(',')}`,
+          })
+        }
+        if (force !== true) {
+          // TASK-130 (ADR-0014 §3): only overridable blockers — open the
+          // persisted decision (dedupeKey keeps one open row per worktree) and
+          // still answer MERGE_BLOCKED; force_merge re-enters with force below.
+          // The run reference is attached only while the row exists — the FK
+          // rejects a dangling id (e.g. the run was already retention-deleted).
+          let runRef: { runId?: string } = {}
+          if (worktree.runId !== undefined) {
+            const run = deps.runs.getById(worktree.runId)
+            if (run.ok && run.data !== null) runRef = { runId: worktree.runId }
+          }
+          const opened = deps.decisions?.open({
+            workspaceId: worktree.workspaceId,
+            kind: 'merge_blocked',
+            severity: 'warning',
+            dedupeKey: `merge_blocked:${worktreeId}`,
+            title: `Merging "${worktree.branch}" into "${worktree.baseBranch}" is blocked`,
+            detail: { kind: 'merge_blocked', blockers },
+            options: MERGE_BLOCKED_OPTIONS,
+            worktreeId,
+            ...runRef,
+          })
+          if (opened !== undefined && !opened.ok) {
+            logger.error(
+              { worktreeId, error: opened.error },
+              'Failed to open the merge-blocked decision.',
+            )
+          }
+          return fail({
+            code: 'MERGE_BLOCKED',
+            message: `Merge is blocked by overridable checks; rerun with force to proceed: ${blockers.map(describe).join(' ')}`,
             retryable: true,
             detail: `worktree=${worktreeId} blockers=${blockers.map((blocker) => blocker.code).join(',')}`,
           })
@@ -318,4 +375,26 @@ export function createMergeService(deps: MergeServiceDeps): MergeService {
       return { ok: true, data: { worktreeId, outcome: 'merged', worktree: done.data } }
     },
   }
+
+  // TASK-130 (ADR-0014 §3): force_merge re-enters the merge with the force
+  // flag; cancel (also the §9.1 timeout default) is the no-op. The
+  // subscription lives for the process — DecisionService.dispose() clears it.
+  deps.decisions?.onResolved('merge_blocked', (decision) => {
+    if (decision.resolution?.optionId !== 'force_merge') return
+    const worktreeId = decision.worktreeId
+    if (worktreeId === undefined) {
+      logger.error({ decisionId: decision.id }, 'A merge_blocked decision carries no worktree id.')
+      return
+    }
+    void service.merge({ worktreeId, force: true }).then((merged) => {
+      if (!merged.ok) {
+        logger.error(
+          { worktreeId, error: merged.error },
+          'The forced merge from a merge-blocked decision failed.',
+        )
+      }
+    })
+  })
+
+  return service
 }

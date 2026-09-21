@@ -25,6 +25,8 @@ import {
   createWorkspaceRepository,
   createWorktreeRepository,
 } from '../db/repositories'
+import { createDecisionRepository } from '../decisions/decision-repository'
+import { createDecisionService, type DecisionService } from '../decisions/decision-service'
 import { createEventBus, type EventBus } from '../events/event-bus'
 import { createTeskraPaths, type TeskraPaths } from '../paths'
 import type { HostProcessControl } from '../process/host-processes'
@@ -55,6 +57,8 @@ interface TestContext {
   readonly tasks: ReturnType<typeof createTaskRepository>
   readonly adapters: Record<'codex' | 'claude', CodingAgentAdapter>
   readonly paths: TeskraPaths
+  /** Present iff setup ran with extras.withDecisions (TASK-130). */
+  readonly decisions?: DecisionService
 }
 
 const contexts: TestContext[] = []
@@ -118,6 +122,8 @@ function setup(
     observations?: NonNullable<AgentManagerDeps['observations']>
     permissions?: NonNullable<AgentManagerDeps['permissions']>
     failureClassifiers?: NonNullable<AgentManagerDeps['failureClassifiers']>
+    /** TASK-130: wire a real DecisionService (same connection + bus) into the manager. */
+    withDecisions?: boolean
   },
 ): TestContext {
   const connection = new Database(':memory:')
@@ -170,6 +176,10 @@ function setup(
         }),
       }
     : agentEvents
+  const decisions =
+    extras?.withDecisions === true
+      ? createDecisionService({ decisions: createDecisionRepository(connection), events })
+      : undefined
   const manager = createAgentManager({
     registry: registry.data,
     adapters: [codex, claude],
@@ -202,6 +212,7 @@ function setup(
     ...(extras?.failureClassifiers === undefined
       ? {}
       : { failureClassifiers: extras.failureClassifiers }),
+    ...(decisions === undefined ? {} : { decisions }),
   })
   const context = {
     connection,
@@ -216,6 +227,7 @@ function setup(
     tasks,
     adapters: { codex, claude },
     paths,
+    ...(decisions === undefined ? {} : { decisions }),
   }
   contexts.push(context)
   return context
@@ -2099,5 +2111,192 @@ describe('AgentManager structured observation wiring (TASK-123 / ADR-0013)', () 
       ok: true,
       data: { status: 'failed', failureClassification: { kind: 'rate-limited' } },
     })
+  })
+})
+
+describe('AgentManager decision integration (TASK-130, ADR-0014)', () => {
+  const RATE_LIMITED = {
+    kind: 'rate-limited' as const,
+    retryable: true,
+    resetAt: '2026-09-10T01:00:00.000Z',
+  }
+
+  function requireDecisions(context: TestContext): DecisionService {
+    if (context.decisions === undefined) throw new Error('setup without withDecisions')
+    return context.decisions
+  }
+
+  function openStalledDecision(decisions: DecisionService, runId: string): string {
+    const opened = decisions.open({
+      workspaceId: 'workspace-1',
+      kind: 'stalled_run',
+      severity: 'warning',
+      dedupeKey: runId,
+      title: 'The Agent run has gone silent',
+      detail: { kind: 'stalled_run', silentForMs: 60_000 },
+      options: [
+        { id: 'keep_waiting', label: 'Keep waiting' },
+        { id: 'stop', label: 'Stop the run' },
+      ],
+      runId,
+    })
+    if (!opened.ok) throw new Error(opened.error.message)
+    return opened.data.id
+  }
+
+  it('stopExited with a rate-limited classification opens a rate_limit decision; retry relaunches the run', async () => {
+    const context = setup(undefined, false, undefined, undefined, undefined, {
+      failureClassifiers: [{ agentId: 'codex', classify: () => RATE_LIMITED }],
+      withDecisions: true,
+    })
+    const decisions = requireDecisions(context)
+    await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      prompt: 'Implement',
+    })
+
+    context.events.emit('process.exited', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      exitCode: 1,
+    })
+
+    expect(context.manager.get('run-1')).toMatchObject({
+      ok: true,
+      data: { status: 'failed', failureClassification: { kind: 'rate-limited' } },
+    })
+    const open = decisions.list({ kind: 'rate_limit', status: 'open' })
+    expect(open.ok && open.data.length === 1).toBe(true)
+    const decision = open.ok ? open.data[0] : undefined
+    expect(decision).toMatchObject({
+      workspaceId: 'workspace-1',
+      kind: 'rate_limit',
+      severity: 'warning',
+      runId: 'run-1',
+      dedupeKey: 'rate_limit:run-1',
+      detail: { kind: 'rate_limit', limitedUntil: '2026-09-10T01:00:00.000Z' },
+      options: [
+        { id: 'continue_with_account', label: 'Continue with another account' },
+        { id: 'retry', label: 'Retry' },
+        { id: 'wait', label: 'Wait' },
+      ],
+    })
+    if (decision === undefined) throw new Error('unreachable')
+
+    // retry mirrors the Alert's restart: a fresh interactive run with the
+    // terminal run's launch parameters.
+    const resolved = decisions.resolve(decision.id, 'retry', 'user')
+    expect(resolved.ok).toBe(true)
+    await vi.waitFor(() => {
+      expect(context.adapters.codex.start).toHaveBeenCalledTimes(2)
+    })
+    expect(context.manager.get('run-2')).toMatchObject({
+      ok: true,
+      data: {
+        status: 'running',
+        agentType: 'codex',
+        prompt: 'Implement',
+        mode: 'interactive',
+        executionMode: 'attended',
+      },
+    })
+  })
+
+  it('wait performs no Main-side action', async () => {
+    const context = setup(undefined, false, undefined, undefined, undefined, {
+      failureClassifiers: [{ agentId: 'codex', classify: () => RATE_LIMITED }],
+      withDecisions: true,
+    })
+    const decisions = requireDecisions(context)
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    context.events.emit('process.exited', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      exitCode: 1,
+    })
+    const open = decisions.list({ kind: 'rate_limit', status: 'open' })
+    const decision = open.ok ? open.data[0] : undefined
+    if (decision === undefined) throw new Error('expected an open rate_limit decision')
+
+    const resolved = decisions.resolve(decision.id, 'wait', 'user')
+    expect(resolved.ok).toBe(true)
+    await Promise.resolve()
+
+    expect(context.adapters.codex.start).toHaveBeenCalledTimes(1)
+  })
+
+  it('settleFailedStop (failAndStop of a queued run) opens the decision and cancels the run\u2019s earlier decisions first', async () => {
+    const context = setup(
+      { maxGlobalRuns: 1, maxRunsPerWorkspace: 3, maxRunsPerAgent: 2 },
+      false,
+      undefined,
+      undefined,
+      undefined,
+      { withDecisions: true },
+    )
+    const decisions = requireDecisions(context)
+    // read-only approval keeps run-1 out of the attended-write conflict so
+    // run-2 queues on the concurrency limit.
+    await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      approvalMode: 'read-only',
+    })
+    const queued = await context.manager.start({ workspaceId: 'workspace-1', agentType: 'claude' })
+    expect(queued).toMatchObject({ ok: true, data: { id: 'run-2', status: 'queued' } })
+    // The live phase left a stalled_run decision open for the queued run.
+    const stalledId = openStalledDecision(decisions, 'run-2')
+
+    const stopped = await context.manager.failAndStop('run-2', {
+      kind: 'rate-limited',
+      retryable: true,
+    })
+    expect(stopped).toMatchObject({
+      ok: true,
+      data: { status: 'failed', failureClassification: { kind: 'rate-limited' } },
+    })
+
+    // Ordering: cancelBySource ran BEFORE the rate_limit open — the stale
+    // stalled_run row is cancelled, the fresh rate_limit row stays open.
+    expect(decisions.get(stalledId)).toMatchObject({ ok: true, data: { status: 'cancelled' } })
+    const open = decisions.list({ kind: 'rate_limit', status: 'open' })
+    expect(open.ok && open.data.length === 1).toBe(true)
+    expect(open.ok && open.data[0]?.runId === 'run-2').toBe(true)
+  })
+
+  it('stopExited cancels the run\u2019s open decisions on a clean exit', async () => {
+    const context = setup(undefined, false, undefined, undefined, undefined, {
+      withDecisions: true,
+    })
+    const decisions = requireDecisions(context)
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    const stalledId = openStalledDecision(decisions, 'run-1')
+
+    context.events.emit('process.exited', {
+      processId: 'codex:run-1',
+      agentRunId: 'run-1',
+      exitCode: 0,
+    })
+
+    expect(context.manager.get('run-1')).toMatchObject({ ok: true, data: { status: 'completed' } })
+    expect(decisions.get(stalledId)).toMatchObject({ ok: true, data: { status: 'cancelled' } })
+    // No classification → no rate_limit decision.
+    expect(decisions.list({ status: 'open' })).toMatchObject({ ok: true, data: [] })
+  })
+
+  it('cancel() cancels the run\u2019s open decisions', async () => {
+    const context = setup(undefined, false, undefined, undefined, undefined, {
+      withDecisions: true,
+    })
+    const decisions = requireDecisions(context)
+    await context.manager.start({ workspaceId: 'workspace-1', agentType: 'codex' })
+    const stalledId = openStalledDecision(decisions, 'run-1')
+
+    // The mock adapter's cancel resolves without a process.exited event, so
+    // cancel() itself performs the terminal settle.
+    const cancelled = await context.manager.cancel('run-1')
+    expect(cancelled).toMatchObject({ ok: true, data: { status: 'cancelled' } })
+    expect(decisions.get(stalledId)).toMatchObject({ ok: true, data: { status: 'cancelled' } })
   })
 })

@@ -25,6 +25,10 @@ Run the project's test suite and any checks specific to the task. Map the
 the acceptance criteria: state clearly which criteria are verified by tests and
 which are not covered. Do not fix failures in this phase — report them.
 
+## Teskra Agent Protocol
+
+{{protocol}}
+
 ## Handoff (required)
 
 When you finish, write your handoff as a JSON file at
@@ -36,3 +40,11 @@ detail) and every command in `commandsRun`. Teskra reads this file after your
 process exits — it is the only reliable channel back, so writing it is
 mandatory. Store any large outputs (full test logs, coverage reports) as files
 under `{{env.TESKRA_ARTIFACT_DIR}}` and reference them from the handoff.
+
+## Progress (optional)
+
+While you work you may append progress events — one JSON object per line,
+append-only — to `{{env.TESKRA_PROGRESS_PATH}}`, e.g.
+`{"kind": "progress", "message": "120 of 300 tests executed", "percent": 40}`.
+Valid kinds are `progress`, `blocker`, `question`, `note`. This channel is
+optional and never replaces the handoff.

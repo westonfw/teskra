@@ -30,10 +30,15 @@ function makeRepo(): { repoRoot: string; writeOverride: (name: string, content: 
   }
 }
 
-function makeService() {
+function makeService(
+  deps: { warn?: (record: Record<string, unknown>, message: string) => void } = {},
+) {
   const home = mkdtempSync(join(tmpdir(), 'teskra-prompts-home-'))
   tempRoots.push(home)
-  return createPromptTemplateService({ paths: createTeskraPaths({ TESKRA_HOME: home }) })
+  return createPromptTemplateService({
+    paths: createTeskraPaths({ TESKRA_HOME: home }),
+    ...(deps.warn === undefined ? {} : { warn: deps.warn }),
+  })
 }
 
 function fullContext(): PromptTemplateContext {
@@ -46,6 +51,7 @@ function fullContext(): PromptTemplateContext {
     env: {
       TESKRA_HANDOFF_PATH: '/data/runs/run-1/handoff.json',
       TESKRA_ARTIFACT_DIR: '/data/runs/run-1/artifacts',
+      TESKRA_PROGRESS_PATH: '/data/runs/run-1/progress.jsonl',
     },
   }
 }
@@ -70,6 +76,12 @@ describe('PromptTemplateService (TASK-079)', () => {
       expect(rendered.data.content).toContain('/data/runs/run-1/handoff.json')
       expect(rendered.data.content).toContain('/data/runs/run-1/artifacts')
       expect(rendered.data.content.toLowerCase()).toContain('handoff')
+      // TASK-127: the protocol document is inlined and the Progress section
+      // carries the ADR-0012 progress path.
+      expect(rendered.data.content).toContain('## Teskra Agent Protocol')
+      expect(rendered.data.content).toContain('## Progress (optional)')
+      expect(rendered.data.content).toContain('/data/runs/run-1/progress.jsonl')
+      expect(rendered.data.content).toContain('# Teskra Agent Protocol')
       // No placeholder survives rendering.
       expect(rendered.data.content).not.toMatch(/\{\{[^{}]*\}\}/)
     }
@@ -169,6 +181,79 @@ describe('PromptTemplateService (TASK-079)', () => {
       expect(rendered.error.code).toBe('VALIDATION_FAILED')
       expect(rendered.error.message).toContain('{{role}}')
     }
+  })
+
+  it('fails with VALIDATION_FAILED when env.TESKRA_PROGRESS_PATH is referenced but not provided (TASK-127)', () => {
+    const service = makeService()
+    const context = fullContext()
+    delete context.env.TESKRA_PROGRESS_PATH
+    const rendered = service.render({ name: 'implement', context })
+    expect(rendered.ok).toBe(false)
+    if (!rendered.ok) {
+      expect(rendered.error.code).toBe('VALIDATION_FAILED')
+      expect(rendered.error.message).toContain('{{env.TESKRA_PROGRESS_PATH}}')
+    }
+  })
+
+  it('inlines the bundled protocol document for {{protocol}} by default (TASK-127)', () => {
+    const service = makeService()
+    const rendered = service.render({ name: 'plan', context: fullContext() })
+    expect(rendered.ok).toBe(true)
+    if (rendered.ok) {
+      expect(rendered.data.content).toContain('# Teskra Agent Protocol')
+      expect(rendered.data.content).toContain('TESKRA_PROGRESS_PATH')
+    }
+  })
+
+  it('lets the context override the {{protocol}} document (TASK-127)', () => {
+    const service = makeService()
+    const context = fullContext()
+    context.protocol = 'CUSTOM PROTOCOL DOCUMENT'
+    const rendered = service.render({ name: 'plan', context })
+    expect(rendered.ok).toBe(true)
+    if (rendered.ok) {
+      expect(rendered.data.content).toContain('CUSTOM PROTOCOL DOCUMENT')
+      expect(rendered.data.content).not.toContain('## Environment variables')
+    }
+  })
+
+  it('warns but still renders when a repo-local override omits {{protocol}} (TASK-127)', () => {
+    const { repoRoot, writeOverride } = makeRepo()
+    writeOverride('implement', 'CUSTOM: {{task.title}}')
+    const warnings: { record: Record<string, unknown>; message: string }[] = []
+    const service = makeService({
+      warn: (record, message) => {
+        warnings.push({ record, message })
+      },
+    })
+
+    const rendered = service.render({ name: 'implement', context: fullContext() }, repoRoot)
+    expect(rendered.ok).toBe(true)
+    if (rendered.ok) {
+      expect(rendered.data.source).toBe('repo-local')
+      expect(rendered.data.content).toBe('CUSTOM: Add dark mode')
+    }
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]?.message).toContain('{{protocol}}')
+    expect(warnings[0]?.record['name']).toBe('implement')
+  })
+
+  it('does not warn when a repo-local override includes {{protocol}} (TASK-127)', () => {
+    const { repoRoot, writeOverride } = makeRepo()
+    writeOverride('implement', 'CUSTOM: {{task.title}}\n\n{{protocol}}')
+    const warnings: string[] = []
+    const service = makeService({
+      warn: (_record, message) => {
+        warnings.push(message)
+      },
+    })
+
+    const rendered = service.render({ name: 'implement', context: fullContext() }, repoRoot)
+    expect(rendered.ok).toBe(true)
+    if (rendered.ok) {
+      expect(rendered.data.content).toContain('# Teskra Agent Protocol')
+    }
+    expect(warnings).toHaveLength(0)
   })
 
   it('rejects unknown template names and invalid name segments', () => {

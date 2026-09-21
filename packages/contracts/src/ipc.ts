@@ -357,6 +357,16 @@ import {
   type TerminalWriteRequest,
 } from './terminal'
 import {
+  agentRunUsageSchema,
+  getRunUsageRequestSchema,
+  summarizeUsageRequestSchema,
+  usageSummaryBucketSchema,
+  type AgentRunUsage,
+  type GetRunUsageRequest,
+  type SummarizeUsageRequest,
+  type UsageSummaryBucket,
+} from './usage'
+import {
   createWorkspaceRequestSchema,
   listRecentWorkspacesRequestSchema,
   openWorkspaceRequestSchema,
@@ -577,6 +587,8 @@ export const IPC_CHANNELS = {
   workflowRunSummary: 'teskra:workflow:run:summary',
   decisionList: 'teskra:decision:list',
   decisionResolve: 'teskra:decision:resolve',
+  usageSummary: 'teskra:usage:summary',
+  usageGetByRun: 'teskra:usage:get-by-run',
 } as const
 export type IpcChannelName = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
 
@@ -1378,6 +1390,18 @@ export const decisionResolveChannel = channel(
   resolveDecisionRequestSchema,
   pendingDecisionSchema,
 )
+// TASK-124 (Milestone 25 §7): usage accounting — accumulated per run from the
+// structured stream's usage observations; summarized by joining agent_runs.
+export const usageSummaryChannel = channel(
+  IPC_CHANNELS.usageSummary,
+  summarizeUsageRequestSchema,
+  z.array(usageSummaryBucketSchema),
+)
+export const usageGetByRunChannel = channel(
+  IPC_CHANNELS.usageGetByRun,
+  getRunUsageRequestSchema,
+  agentRunUsageSchema.nullable(),
+)
 
 export const ipcChannelDefinitions = {
   ping: pingChannel,
@@ -1531,6 +1555,8 @@ export const ipcChannelDefinitions = {
   workflowRunSummary: workflowRunSummaryChannel,
   decisionList: decisionListChannel,
   decisionResolve: decisionResolveChannel,
+  usageSummary: usageSummaryChannel,
+  usageGetByRun: usageGetByRunChannel,
 } as const
 
 export interface TeskraBridge {
@@ -1822,6 +1848,15 @@ export interface TeskraBridge {
   readonly decision: {
     list(request?: ListDecisionsRequest): Promise<IpcResult<PendingDecision[]>>
     resolve(request: ResolveDecisionRequest): Promise<IpcResult<PendingDecision>>
+  }
+  /**
+   * TASK-124 (Milestone 25 §7): usage accounting, display-only — never a
+   * rate-limit input (ADR-0010). Buckets carry the joined agent_runs
+   * dimensions; costUsdMicros absent means "not reported", not zero.
+   */
+  readonly usage: {
+    summary(request: SummarizeUsageRequest): Promise<IpcResult<UsageSummaryBucket[]>>
+    getByRun(request: GetRunUsageRequest): Promise<IpcResult<AgentRunUsage | null>>
   }
   readonly events: {
     subscribe<Name extends WorkbenchEventName>(

@@ -1,3 +1,5 @@
+import Database from 'better-sqlite3'
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type {
@@ -8,8 +10,11 @@ import type {
   WorkbenchEvents,
 } from '@teskra/contracts'
 
+import { migrateDatabase } from '../db/migrations'
 import { createEventBus } from '../events/event-bus'
 import type { UpdateAgentRunInput } from '../db/repositories/agent-run-repository'
+import { createDecisionRepository } from '../decisions/decision-repository'
+import { createDecisionService, type DecisionService } from '../decisions/decision-service'
 import {
   createRunWatchdogService,
   WATCHDOG_MAX_PREPARING_CONFLICTS,
@@ -49,6 +54,16 @@ const CONFLICT_RESULT: IpcResult<AgentRun> = {
   },
 }
 
+/** In-memory decision databases opened by harnesses, closed in afterEach. */
+const connections: Database.Database[] = []
+
+interface HarnessExtras {
+  /** TASK-130: wire a real DecisionService (in-memory SQLite) into the watchdog. */
+  readonly withDecisions?: boolean
+  /** decisions.stalledRunTimeoutMs; default 0 (never expires). */
+  readonly decisionTimeoutMs?: number
+}
+
 interface Harness {
   readonly service: RunWatchdogService
   readonly runs: AgentRun[]
@@ -66,12 +81,15 @@ interface Harness {
   readonly watchdogEvents: WorkbenchEvents['agent.watchdog'][]
   readonly stalledEvents: WorkbenchEvents['agent.stalled'][]
   readonly emitOutput: (runId: string) => void
+  /** Present iff the harness was created with withDecisions. */
+  readonly decisions?: DecisionService
 }
 
 function createHarness(
   config: Partial<WatchdogConfig>,
   initialRuns: AgentRun[],
   failAndStopImpl?: (runId: string) => Promise<IpcResult<AgentRun>>,
+  extras?: HarnessExtras,
 ): Harness {
   const runs = [...initialRuns]
   const events = createEventBus()
@@ -121,11 +139,42 @@ function createHarness(
     idleAction: 'ask',
     ...config,
   }
+  // TASK-130: a real DecisionService over in-memory SQLite. The FK references
+  // (workspace, agent_runs) mirror the harness's in-memory run set.
+  let decisions: DecisionService | undefined
+  if (extras?.withDecisions === true) {
+    const connection = new Database(':memory:')
+    connection.pragma('foreign_keys = ON')
+    const migrated = migrateDatabase(connection)
+    if (!migrated.ok) throw new Error(migrated.error.message)
+    connections.push(connection)
+    connection
+      .prepare(
+        `INSERT INTO workspaces (id, name, runtime_kind, path, created_at, updated_at)
+         VALUES ('ws-1', 'WS', 'windows', 'C:\\dev\\ws', '${iso(0)}', '${iso(0)}')`,
+      )
+      .run()
+    for (const run of initialRuns) {
+      connection
+        .prepare(
+          `INSERT INTO agent_runs (id, workspace_id, agent_type, status, execution_mode, run_dir, created_at, updated_at)
+           VALUES (?, 'ws-1', 'fake', ?, 'attended', 'runs/' || ?, '${iso(0)}', '${iso(0)}')`,
+        )
+        .run(run.id, run.status, run.id)
+    }
+    decisions = createDecisionService({ decisions: createDecisionRepository(connection), events })
+  }
   const service = createRunWatchdogService({
     runs: { listActive, update },
     agents: { failAndStop },
     events,
     resolveConfig: () => ({ ok: true, data: watchdogConfig }),
+    ...(decisions === undefined
+      ? {}
+      : {
+          decisions,
+          resolveDecisionTimeoutMs: () => extras?.decisionTimeoutMs ?? 0,
+        }),
   })
   return {
     service,
@@ -136,6 +185,7 @@ function createHarness(
     watchdogEvents,
     stalledEvents,
     emitOutput: (runId) => events.emit('agent.output', { runId, data: 'chunk' }),
+    ...(decisions === undefined ? {} : { decisions }),
   }
 }
 
@@ -150,6 +200,7 @@ describe('RunWatchdogService (TASK-119)', () => {
   afterEach(() => {
     harness?.service.dispose()
     harness = undefined
+    for (const connection of connections.splice(0)) connection.close()
     vi.useRealTimers()
   })
 
@@ -444,5 +495,156 @@ describe('RunWatchdogService (TASK-119)', () => {
     off()
     await vi.advanceTimersByTimeAsync(WATCHDOG_TICK_MS)
     expect(ticks).toHaveLength(2)
+  })
+
+  it('TASK-130: idleAction ask opens exactly one stalled_run decision per run', async () => {
+    harness = createHarness(
+      { idleAction: 'ask' },
+      [
+        makeRun({
+          id: 'run-idle',
+          status: 'running',
+          startedAt: iso(-IDLE_TIMEOUT_MS - 60_000),
+          lastOutputAt: iso(-IDLE_TIMEOUT_MS),
+        }),
+      ],
+      undefined,
+      { withDecisions: true },
+    )
+
+    await vi.advanceTimersByTimeAsync(WATCHDOG_TICK_MS)
+
+    const decisions = harness.decisions as DecisionService
+    const open = decisions.list({ kind: 'stalled_run', status: 'open' })
+    expect(open.ok && open.data.length === 1).toBe(true)
+    if (!open.ok || open.data[0] === undefined) return
+    expect(open.data[0]).toMatchObject({
+      workspaceId: 'ws-1',
+      kind: 'stalled_run',
+      severity: 'warning',
+      runId: 'run-idle',
+      dedupeKey: 'run-idle',
+      detail: { kind: 'stalled_run', silentForMs: IDLE_TIMEOUT_MS + 15_000 },
+      options: [
+        { id: 'keep_waiting', label: 'Keep waiting' },
+        { id: 'stop', label: 'Stop the run' },
+      ],
+    })
+    // decisions.stalledRunTimeoutMs defaults to 0: the decision never expires.
+    expect(open.data[0].expiresAt).toBeUndefined()
+
+    // The same stall episode never opens a second row.
+    await vi.advanceTimersByTimeAsync(WATCHDOG_TICK_MS * 3)
+    const stillOpen = decisions.list({ kind: 'stalled_run', status: 'open' })
+    expect(stillOpen.ok && stillOpen.data.length === 1).toBe(true)
+  })
+
+  it('TASK-130: keep_waiting acknowledges the idle baseline and ends the stall episode', async () => {
+    harness = createHarness(
+      { idleAction: 'ask' },
+      [
+        makeRun({
+          id: 'run-idle',
+          status: 'running',
+          startedAt: iso(-IDLE_TIMEOUT_MS - 60_000),
+          lastOutputAt: iso(-IDLE_TIMEOUT_MS),
+        }),
+      ],
+      undefined,
+      { withDecisions: true },
+    )
+    await vi.advanceTimersByTimeAsync(WATCHDOG_TICK_MS)
+    const decisions = harness.decisions as DecisionService
+    const open = decisions.list({ kind: 'stalled_run', status: 'open' })
+    const decision = open.ok ? open.data[0] : undefined
+    expect(decision).toBeDefined()
+    if (decision === undefined) return
+
+    const resolved = decisions.resolve(decision.id, 'keep_waiting', 'user')
+    expect(resolved.ok).toBe(true)
+
+    // acknowledgeIdle ran: last_input_at persisted at the current (fake) time.
+    expect(harness.update).toHaveBeenCalledWith(
+      'run-idle',
+      { lastInputAt: iso(WATCHDOG_TICK_MS) },
+      iso(WATCHDOG_TICK_MS),
+    )
+    expect(harness.failAndStop).not.toHaveBeenCalled()
+
+    // The baseline moved: the follow-up ticks stay silent.
+    await vi.advanceTimersByTimeAsync(WATCHDOG_TICK_MS * 3)
+    expect(harness.stalledEvents).toHaveLength(1)
+  })
+
+  it('TASK-130: stop resolves to failAndStop with an unknown, retryable classification', async () => {
+    harness = createHarness(
+      { idleAction: 'ask' },
+      [
+        makeRun({
+          id: 'run-idle',
+          status: 'running',
+          startedAt: iso(-IDLE_TIMEOUT_MS - 60_000),
+          lastOutputAt: iso(-IDLE_TIMEOUT_MS),
+        }),
+      ],
+      undefined,
+      { withDecisions: true },
+    )
+    await vi.advanceTimersByTimeAsync(WATCHDOG_TICK_MS)
+    const decisions = harness.decisions as DecisionService
+    const open = decisions.list({ kind: 'stalled_run', status: 'open' })
+    const decision = open.ok ? open.data[0] : undefined
+    if (decision === undefined) throw new Error('expected an open stalled_run decision')
+
+    const resolved = decisions.resolve(decision.id, 'stop', 'user')
+    expect(resolved.ok).toBe(true)
+    // The handler's failAndStop promise settles on the microtask queue.
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(harness.failAndStop).toHaveBeenCalledWith('run-idle', {
+      kind: 'unknown',
+      retryable: true,
+      evidence: 'stopped from the stalled-run decision after 120 min idle',
+    })
+  })
+
+  it('TASK-130: an expired stalled_run decision applies keep_waiting (the §9.1 default)', async () => {
+    harness = createHarness(
+      { idleAction: 'ask' },
+      [
+        makeRun({
+          id: 'run-idle',
+          status: 'running',
+          startedAt: iso(-IDLE_TIMEOUT_MS - 60_000),
+          lastOutputAt: iso(-IDLE_TIMEOUT_MS),
+        }),
+      ],
+      undefined,
+      { withDecisions: true, decisionTimeoutMs: 60_000 },
+    )
+    await vi.advanceTimersByTimeAsync(WATCHDOG_TICK_MS)
+    const decisions = harness.decisions as DecisionService
+    const open = decisions.list({ kind: 'stalled_run', status: 'open' })
+    const decision = open.ok ? open.data[0] : undefined
+    if (decision === undefined) throw new Error('expected an open stalled_run decision')
+    // Opened at BASE + 15s with a 60s timeout.
+    expect(decision.expiresAt).toBe(iso(WATCHDOG_TICK_MS + 60_000))
+
+    const expired = decisions.expire(iso(WATCHDOG_TICK_MS + 60_000))
+    expect(expired.ok && expired.data.length === 1).toBe(true)
+    if (!expired.ok || expired.data[0] === undefined) return
+    expect(expired.data[0].status).toBe('expired')
+    expect(expired.data[0].resolution).toMatchObject({
+      optionId: 'keep_waiting',
+      decidedBy: 'timeout',
+    })
+    // The timeout default executes the same keep_waiting action: the run's
+    // silence baseline was refreshed, the run was not stopped.
+    expect(harness.update).toHaveBeenCalledWith(
+      'run-idle',
+      { lastInputAt: iso(WATCHDOG_TICK_MS) },
+      iso(WATCHDOG_TICK_MS),
+    )
+    expect(harness.failAndStop).not.toHaveBeenCalled()
   })
 })

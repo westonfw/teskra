@@ -82,7 +82,7 @@ describe('migrations 012/013 (TASK-095)', () => {
     const upgraded = migrateDatabase(db)
     expect(upgraded).toEqual({
       ok: true,
-      data: { fromVersion: 11, toVersion: 19, applied: [12, 13, 14, 15, 16, 17, 19] },
+      data: { fromVersion: 11, toVersion: 19, applied: [12, 13, 14, 15, 16, 17, 18, 19] },
     })
 
     const runs = db.prepare('SELECT id FROM agent_runs ORDER BY id').all() as { id: string }[]

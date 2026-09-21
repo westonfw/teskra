@@ -11,6 +11,9 @@ import type { WorkflowDefinition } from '@teskra/contracts'
 import { migrateDatabase } from '../db/migrations'
 import { createTaskRepository } from '../db/repositories/task-repository'
 import { createWorkflowRunRepository } from '../db/repositories/workflow-run-repository'
+import { createDecisionRepository } from '../decisions/decision-repository'
+import { createDecisionService } from '../decisions/decision-service'
+import { createEventBus } from '../events/event-bus'
 import { createWorkflowRunStore, type WorkflowRunStore } from './workflow-run-store'
 
 /**
@@ -296,5 +299,52 @@ describe('WorkflowRunStore (TASK-056)', () => {
       'implement',
       'review',
     ])
+  })
+})
+
+describe('WorkflowRunStore decision teardown (TASK-130, ADR-0014)', () => {
+  it('a terminal setRunStatus cancels the run’s open decisions; non-terminal transitions do not', () => {
+    const connection = memoryDb()
+    seedTask(connection)
+    const decisions = createDecisionService({
+      decisions: createDecisionRepository(connection),
+      events: createEventBus(),
+    })
+    const store = createWorkflowRunStore({
+      workflowRuns: createWorkflowRunRepository(connection),
+      tasks: createTaskRepository(connection),
+      decisions,
+    })
+    const created = store.createRun({ definition: DEFINITION })
+    if (!created.ok) throw new Error(created.error.message)
+    const runId = created.data.run.id
+
+    // The pass parked a shell confirmation (TASK-129) on this workflow run.
+    const opened = decisions.open({
+      workspaceId: 'ws-1',
+      kind: 'shell_confirmation',
+      severity: 'blocking',
+      dedupeKey: 'shell_confirmation:step-1',
+      title: 'Confirm shell step',
+      detail: { kind: 'shell_confirmation', command: 'npm run build', cwd: '/repo' },
+      options: [
+        { id: 'approve', label: 'Approve' },
+        { id: 'reject', label: 'Reject' },
+      ],
+      workflowRunId: runId,
+    })
+    if (!opened.ok) throw new Error(opened.error.message)
+
+    // Non-terminal transitions leave the decision open.
+    expect(store.setRunStatus(runId, 'running').ok).toBe(true)
+    expect(store.setRunStatus(runId, 'waiting').ok).toBe(true)
+    expect(decisions.get(opened.data.id)).toMatchObject({ ok: true, data: { status: 'open' } })
+
+    // The terminal transition closes it as cancelled (no resolution action).
+    expect(store.setRunStatus(runId, 'cancelled').ok).toBe(true)
+    expect(decisions.get(opened.data.id)).toMatchObject({
+      ok: true,
+      data: { status: 'cancelled' },
+    })
   })
 })

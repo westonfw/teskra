@@ -153,6 +153,22 @@ function createBridge() {
         ]),
       ),
     },
+    usage: {
+      summary: vi.fn(async () =>
+        ok([
+          {
+            workspaceId: WORKSPACE_ID,
+            agentType: 'codex',
+            runs: 2,
+            turns: 3,
+            inputTokens: 1_200,
+            outputTokens: 300,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+          },
+        ]),
+      ),
+    },
     events: {
       subscribe: vi.fn((name: WorkbenchEventName, handler: (payload: never) => void) => {
         let listeners = handlers.get(name)
@@ -186,6 +202,7 @@ describe('dashboard store (TASK-071)', () => {
         state.mergeReady,
         state.agentAvailability,
         state.recentFailures,
+        state.usage,
       ]) {
         expect(block.status).toBe('ready')
       }
@@ -223,6 +240,13 @@ describe('dashboard store (TASK-071)', () => {
       runtime: workspace.runtime,
       refresh: true,
     })
+    // TASK-124: the usage card queries the workspace-scoped weekly window.
+    expect(bridge.usage.summary).toHaveBeenCalledWith({
+      workspaceId: WORKSPACE_ID,
+      since: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    })
+    expect(state.usage.data?.[0]?.agentType).toBe('codex')
+    expect(state.usage.data?.[0]?.inputTokens).toBe(1_200)
   })
 
   it('keeps other blocks ready when one block fails', async () => {

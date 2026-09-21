@@ -224,6 +224,10 @@ const bridge: TeskraBridge = {
     list: (request = {}) => invoke(IPC_CHANNELS.decisionList, request),
     resolve: (request) => invoke(IPC_CHANNELS.decisionResolve, request),
   },
+  usage: {
+    summary: (request) => invoke(IPC_CHANNELS.usageSummary, request),
+    getByRun: (request) => invoke(IPC_CHANNELS.usageGetByRun, request),
+  },
   events: eventSubscriptions,
 }
 

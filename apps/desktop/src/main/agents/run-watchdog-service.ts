@@ -1,6 +1,7 @@
 import type {
   AgentFailureClassification,
   AgentRun,
+  DecisionOption,
   IpcResult,
   WatchdogConfig,
   WorkbenchEvents,
@@ -8,6 +9,7 @@ import type {
 import { inspectRunWatchdog } from '@teskra/shared'
 
 import type { AgentRunRepository } from '../db/repositories/agent-run-repository'
+import type { DecisionService } from '../decisions/decision-service'
 import type { EventBus } from '../events/event-bus'
 import { type InternalAppError, toPublicError } from '../errors'
 import { getLogger } from '../logger'
@@ -29,8 +31,12 @@ import type { AgentManager } from './agent-manager'
  *   `agent.stalled` event and the watchdog stops forcing this run.
  * - idle watchdog (§5.3): `inspectRunWatchdog(run, now, watchdog.idleTimeoutMs)`
  *   over running / waiting_* / reviewing runs (idleTimeoutMs 0 disables it).
- *   `idleAction: 'stop'` fails the run; `'ask'` only emits `agent.stalled`
- *   once per stall episode — opening a Decision is TASK-130's job.
+ *   `idleAction: 'stop'` fails the run; `'ask'` emits `agent.stalled` once per
+ *   stall episode and — when composed with a DecisionService (TASK-130,
+ *   ADR-0014 §3) — opens a persisted `stalled_run` PendingDecision whose
+ *   resolutions are executed here: `keep_waiting` (also the timeout default,
+ *   §9.1) refreshes the silence baseline through acknowledgeIdle(), `stop`
+ *   goes through the same failAndStop path as `idleAction: 'stop'`.
  *
  * The watchdog never touches a process itself — every action goes through
  * AgentManager.failAndStop/cancel. No electron import.
@@ -47,6 +53,12 @@ export const WATCHDOG_TICK_MS = 15_000
 
 /** §5.2: consecutive in-flight-launch CONFLICTs before escalating to agent.stalled. */
 export const WATCHDOG_MAX_PREPARING_CONFLICTS = 3
+
+/** §9.2 vocabulary; the timeout default is keep_waiting (DECISION_TIMEOUT_DEFAULT_OPTIONS). */
+const STALLED_RUN_OPTIONS: readonly DecisionOption[] = [
+  { id: 'keep_waiting', label: 'Keep waiting' },
+  { id: 'stop', label: 'Stop the run' },
+]
 
 export interface RunWatchdogService {
   /**
@@ -80,6 +92,17 @@ export interface RunWatchdogServiceDeps {
   readonly events: EventBus<WorkbenchEvents>
   /** Watchdog config resolved per workspace through the Config Layers. */
   readonly resolveConfig: (workspaceId: string) => IpcResult<WatchdogConfig>
+  /**
+   * TASK-130 (ADR-0014 §3): with a DecisionService composed, the idle 'ask'
+   * branch also opens a persisted `stalled_run` decision and its resolution
+   * actions are subscribed here. Without it the branch stays report-only.
+   */
+  readonly decisions?: Pick<DecisionService, 'open' | 'onResolved'>
+  /**
+   * Reads `decisions.stalledRunTimeoutMs` for the workspace when the decision
+   * opens; absent / 0 = the decision never expires (ADR-0014 §4).
+   */
+  readonly resolveDecisionTimeoutMs?: (workspaceId: string) => number
 }
 
 function fail<T>(error: InternalAppError): IpcResult<T> {
@@ -207,7 +230,28 @@ export function createRunWatchdogService(deps: RunWatchdogServiceDeps): RunWatch
       })
     }
     if (config.idleAction === 'ask') {
-      // TASK-130 opens the Decision; this Task only reports (§5.3).
+      if (firstNotification) {
+        // TASK-130 (ADR-0014 §3, design §9.2): the persisted decision
+        // accompanies the agent.stalled event. dedupeKey = runId keeps one
+        // open row per run no matter how often this fires (ADR-0014 §2).
+        const opened = deps.decisions?.open({
+          workspaceId: run.workspaceId,
+          kind: 'stalled_run',
+          severity: 'warning',
+          dedupeKey: run.id,
+          title: 'The Agent run has gone silent',
+          detail: { kind: 'stalled_run', silentForMs: inspection.silentForMs },
+          options: STALLED_RUN_OPTIONS,
+          runId: run.id,
+          timeoutMs: deps.resolveDecisionTimeoutMs?.(run.workspaceId) ?? 0,
+        })
+        if (opened !== undefined && !opened.ok) {
+          logger.error(
+            { runId: run.id, error: opened.error },
+            'Failed to open the stalled-run decision.',
+          )
+        }
+      }
       return
     }
     // 'stop': keep retrying across ticks until the run leaves the active set —
@@ -288,6 +332,62 @@ export function createRunWatchdogService(deps: RunWatchdogServiceDeps): RunWatch
 
   const timer = setInterval(() => void tick(), WATCHDOG_TICK_MS)
 
+  const acknowledgeIdle = (runId: string): IpcResult<void> => {
+    const timestamp = new Date().toISOString()
+    const updated = deps.runs.update(runId, { lastInputAt: timestamp }, timestamp)
+    if (!updated.ok) return updated
+    if (updated.data === null) {
+      return fail({
+        code: 'VALIDATION_FAILED',
+        message: `Agent run "${runId}" was not found.`,
+        messageKey: 'errorMessage.agentRunNotFound',
+        params: { id: runId },
+        retryable: false,
+        detail: `acknowledgeIdle run=${runId} matched no row`,
+      })
+    }
+    notedActivity.set(runId, timestamp)
+    stalledNotified.delete(runId)
+    return { ok: true, data: undefined }
+  }
+
+  // TASK-130 (ADR-0014 §3): the stalled_run resolution actions live in the
+  // source module. keep_waiting — the user's choice OR the timeout default
+  // (§9.1) — persists a fresh silence baseline; stop goes through the same
+  // failAndStop path as idleAction 'stop'.
+  const unsubscribeDecisions = deps.decisions?.onResolved('stalled_run', (decision) => {
+    const optionId = decision.resolution?.optionId
+    if (optionId === undefined) return
+    const runId = decision.runId ?? decision.dedupeKey
+    if (optionId === 'stop') {
+      const silentForMs = decision.detail.kind === 'stalled_run' ? decision.detail.silentForMs : 0
+      void deps.agents
+        .failAndStop(runId, {
+          kind: 'unknown',
+          retryable: true,
+          evidence: `stopped from the stalled-run decision after ${String(Math.floor(silentForMs / 60_000))} min idle`,
+        })
+        .then((stopped) => {
+          if (!stopped.ok) {
+            logger.warn(
+              { runId, error: stopped.error },
+              'Failed to stop a stalled run from its decision.',
+            )
+          }
+        })
+      return
+    }
+    if (optionId === 'keep_waiting') {
+      const acknowledged = acknowledgeIdle(runId)
+      if (!acknowledged.ok) {
+        logger.warn(
+          { runId, error: acknowledged.error },
+          'Failed to acknowledge the stalled run; it may already be terminal.',
+        )
+      }
+    }
+  })
+
   return {
     noteActivity,
     onTick(listener) {
@@ -299,29 +399,13 @@ export function createRunWatchdogService(deps: RunWatchdogServiceDeps): RunWatch
         tickListeners.delete(listener)
       }
     },
-    acknowledgeIdle(runId) {
-      const timestamp = new Date().toISOString()
-      const updated = deps.runs.update(runId, { lastInputAt: timestamp }, timestamp)
-      if (!updated.ok) return updated
-      if (updated.data === null) {
-        return fail({
-          code: 'VALIDATION_FAILED',
-          message: `Agent run "${runId}" was not found.`,
-          messageKey: 'errorMessage.agentRunNotFound',
-          params: { id: runId },
-          retryable: false,
-          detail: `acknowledgeIdle run=${runId} matched no row`,
-        })
-      }
-      notedActivity.set(runId, timestamp)
-      stalledNotified.delete(runId)
-      return { ok: true, data: undefined }
-    },
+    acknowledgeIdle,
     dispose() {
       if (disposed) return
       disposed = true
       clearInterval(timer)
       stopOutput()
+      unsubscribeDecisions?.()
       tickListeners.clear()
     },
   }

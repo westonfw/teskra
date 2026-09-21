@@ -17,6 +17,7 @@ import {
   type AgentStructuredOutput,
   type ConcurrencyConfig,
   type ContinueAgentRunRequest,
+  type DecisionOption,
   type IpcResult,
   type ListAgentRunsRequest,
   type ObservabilityConfig,
@@ -45,6 +46,7 @@ import type { HandoffRepository } from '../db/repositories/handoff-repository'
 import type { TaskRepository } from '../db/repositories/task-repository'
 import type { WorkspaceRepository } from '../db/repositories/workspace-repository'
 import type { WorktreeRepository } from '../db/repositories/worktree-repository'
+import type { DecisionService } from '../decisions/decision-service'
 import type { EventBus } from '../events/event-bus'
 import { type InternalAppError, toPublicError } from '../errors'
 import { getLogger } from '../logger'
@@ -221,11 +223,32 @@ export interface AgentManagerDeps {
   >
   /** Resolves the workspace runtime object for profile env projection (§13). */
   readonly resolveRuntime?: (ref: WorkspaceRuntimeRef) => IpcResult<WorkspaceRuntime>
+  /**
+   * TASK-130 (ADR-0014 §3, design §9.2): with a DecisionService composed, a
+   * run whose terminal classification is `rate-limited` (settleFailedStop /
+   * stopExited) additionally opens a persisted `rate_limit` PendingDecision
+   * with the TASK-108 Alert's option vocabulary (the Alert stays), every
+   * terminal settle cancels the run's open decisions (stalled_run /
+   * agent_blocker), and the rate_limit resolution actions are subscribed here.
+   */
+  readonly decisions?: Pick<DecisionService, 'open' | 'onResolved' | 'cancelBySource'>
 }
 
 function fail<T>(error: InternalAppError): IpcResult<T> {
   return { ok: false, error: toPublicError(error) }
 }
+
+/**
+ * §9.2: the TASK-108 Alert action vocabulary, persisted as decision options.
+ * continue_with_account has no Main-side action — picking the target account is
+ * the renderer's ContinueWithAccountModal flow; wait is the §9.1 timeout
+ * default.
+ */
+const RATE_LIMIT_OPTIONS: readonly DecisionOption[] = [
+  { id: 'continue_with_account', label: 'Continue with another account' },
+  { id: 'retry', label: 'Retry' },
+  { id: 'wait', label: 'Wait' },
+]
 
 const MISSING_MESSAGE_KEYS = {
   'Agent run': 'errorMessage.agentRunNotFound',
@@ -683,6 +706,49 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     })
   }
 
+  /**
+   * TASK-130 (ADR-0014 §3): a run reaching its terminal state cancels every
+   * decision its live phase opened (stalled_run / agent_blocker). Best-effort;
+   * the caller continues either way.
+   */
+  const cancelRunDecisions = (runId: string): void => {
+    if (deps.decisions === undefined) return
+    const cancelled = deps.decisions.cancelBySource({ runId })
+    if (!cancelled.ok) {
+      logger.error({ runId, error: cancelled.error }, "Failed to cancel the run's open decisions.")
+    }
+  }
+
+  /**
+   * TASK-130 (§9.2): the persisted sibling of the TASK-108 RateLimitAlert —
+   * same option vocabulary, the Alert stays. Opens once per run (dedupeKey).
+   */
+  const openRateLimitDecision = (run: AgentRun): void => {
+    const classification = run.failureClassification
+    if (deps.decisions === undefined || classification?.kind !== 'rate-limited') return
+    const opened = deps.decisions.open({
+      workspaceId: run.workspaceId,
+      kind: 'rate_limit',
+      severity: 'warning',
+      dedupeKey: `rate_limit:${run.id}`,
+      title: 'The Agent account hit a rate limit',
+      detail: {
+        kind: 'rate_limit',
+        message: classification.evidence ?? 'The Agent account hit a rate limit.',
+        ...(classification.resetAt === undefined ? {} : { limitedUntil: classification.resetAt }),
+        ...(run.accountProfileId === undefined ? {} : { accountProfileId: run.accountProfileId }),
+      },
+      options: RATE_LIMIT_OPTIONS,
+      runId: run.id,
+    })
+    if (!opened.ok) {
+      logger.error(
+        { runId: run.id, error: opened.error },
+        'Failed to open the rate-limit decision.',
+      )
+    }
+  }
+
   const finishFailed = (runId: string, error: PublicAppError): IpcResult<AgentRun> => {
     const finishedAt = now()
     // TASK-105: a launch-time failure has no exit code; the adapter error
@@ -753,6 +819,10 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     if (!updated.ok) return updated
     if (updated.data === null) return missing('Agent run', run.id)
     auditRateLimited(updated.data)
+    // TASK-130: cancel the live phase's open decisions BEFORE opening the
+    // rate-limit one — cancelBySource must not swallow the decision below.
+    cancelRunDecisions(run.id)
+    openRateLimitDecision(updated.data)
     synchronizeTaskStatus(updated.data)
     scheduleQueueAdvance()
     return { ok: true, data: updated.data }
@@ -1285,6 +1355,10 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     } else if (updated.data !== null) {
       persistRunManifest(updated.data)
       auditRateLimited(updated.data)
+      // TASK-130: cancel the live phase's open decisions BEFORE opening the
+      // rate-limit one — cancelBySource must not swallow the decision below.
+      cancelRunDecisions(agentRunId)
+      openRateLimitDecision(updated.data)
       synchronizeTaskStatus(updated.data)
     }
     closeRunLogs(agentRunId)
@@ -1297,6 +1371,56 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       deps.events.emit('agent.failed', { runId: agentRunId, error })
     }
     scheduleQueueAdvance()
+  })
+
+  /**
+   * TASK-130 (ADR-0014 §3): the rate_limit resolution actions. 'retry' mirrors
+   * the TASK-108 Alert's retry (the renderer's restartAgentRunRequest): a fresh
+   * interactive run carrying the terminal run's launch parameters. 'wait' is
+   * the no-op (and the §9.1 timeout default); 'continue_with_account' needs the
+   * user's target-profile pick — the renderer's ContinueWithAccountModal flow —
+   * so Main only records the resolution.
+   */
+  const stopRateLimitDecisions = deps.decisions?.onResolved('rate_limit', (decision) => {
+    if (decision.resolution?.optionId !== 'retry') return
+    const runId = decision.runId
+    if (runId === undefined) return
+    const found = deps.runs.getById(runId)
+    if (!found.ok) {
+      logger.error({ runId, error: found.error }, 'Rate-limit retry could not read the source run.')
+      return
+    }
+    if (found.data === null) {
+      logger.warn({ runId }, 'Rate-limit retry skipped: the source run no longer exists.')
+      return
+    }
+    const source = found.data
+    const request: StartAgentRunRequest = {
+      workspaceId: source.workspaceId,
+      agentType: source.agentType,
+      ...(source.taskId === undefined ? {} : { taskId: source.taskId }),
+      ...(source.accountProfileId === undefined
+        ? {}
+        : { accountProfileId: source.accountProfileId }),
+      ...(source.executionProfileId === undefined
+        ? {}
+        : { executionProfileId: source.executionProfileId }),
+      ...(source.role === undefined ? {} : { role: source.role }),
+      ...(source.model === undefined ? {} : { model: source.model }),
+      ...(source.approvalMode === undefined ? {} : { approvalMode: source.approvalMode }),
+      executionMode: source.executionMode,
+      ...(source.worktreeId === undefined ? {} : { worktreeId: source.worktreeId }),
+      ...(source.prompt === undefined ? {} : { prompt: source.prompt }),
+      mode: 'interactive',
+    }
+    void manager.start(request).then((started) => {
+      if (!started.ok) {
+        logger.error(
+          { runId, error: started.error },
+          'The rate-limit retry failed to start the new run.',
+        )
+      }
+    })
   })
 
   /**
@@ -1337,6 +1461,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     closeRunLogs(run.id)
     collectHandoff(run.id)
     deps.events.emit('agent.cancelled', { runId: run.id })
+    // TASK-130: the run is terminal — its open decisions are cancelled.
+    cancelRunDecisions(run.id)
     if (updated.ok && updated.data !== null) synchronizeTaskStatus(updated.data)
     // This run may have been the zombie blocking the queue: with no process
     // left, no process.exited will ever advance it.
@@ -2172,6 +2298,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         if (updated.ok && updated.data !== null) persistRunManifest(updated.data)
         closeRunLogs(runId)
         deps.events.emit('agent.cancelled', { runId })
+        // TASK-130: the run is terminal — its open decisions are cancelled.
+        cancelRunDecisions(runId)
         if (updated.ok && updated.data !== null) synchronizeTaskStatus(updated.data)
         scheduleQueueAdvance()
         if (!updated.ok) return updated
@@ -2220,6 +2348,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       closeRunLogs(runId)
       collectHandoff(runId)
       deps.events.emit('agent.cancelled', { runId })
+      // TASK-130: the run is terminal — its open decisions are cancelled.
+      cancelRunDecisions(runId)
       if (updated.ok && updated.data !== null) synchronizeTaskStatus(updated.data)
       if (!updated.ok) return updated
       return updated.data === null ? missing('Agent run', runId) : { ok: true, data: updated.data }
@@ -2487,6 +2617,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       stopOutput()
       stopCommand()
       stopExited()
+      // TASK-130: detach the rate_limit resolution subscription.
+      stopRateLimitDecisions?.()
       activeAdapters.clear()
       pendingRuns.clear()
       cancelRequested.clear()

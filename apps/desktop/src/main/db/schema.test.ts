@@ -709,6 +709,30 @@ const SCHEMA: Record<string, TableSpec> = {
       },
     ],
   },
+  agent_run_usage: {
+    source: '§139.1 lines 5673–5693 (migration 018, TASK-124)',
+    columns: [
+      ['run_id', 'TEXT', 0, null, 1],
+      ['source', 'TEXT', 1, null, 0],
+      ['model', 'TEXT', 0, null, 0],
+      ['input_tokens', 'INTEGER', 1, '0', 0],
+      ['output_tokens', 'INTEGER', 1, '0', 0],
+      ['cache_read_tokens', 'INTEGER', 1, '0', 0],
+      ['cache_write_tokens', 'INTEGER', 1, '0', 0],
+      ['cost_usd_micros', 'INTEGER', 0, null, 0],
+      ['turns', 'INTEGER', 1, '0', 0],
+      ['updated_at', 'TEXT', 1, null, 0],
+    ],
+    foreignKeys: [{ from: 'run_id', table: 'agent_runs', to: 'id', onDelete: 'CASCADE' }],
+    indexes: [
+      {
+        name: 'idx_agent_run_usage_updated',
+        unique: false,
+        partial: false,
+        columns: ['updated_at'],
+      },
+    ],
+  },
 }
 
 const openConnections: Database.Database[] = []

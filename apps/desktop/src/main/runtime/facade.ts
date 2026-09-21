@@ -140,6 +140,7 @@ import type {
   SystemPaths,
   StartAgentRunRequest,
   StartReviewRunRequest,
+  SummarizeUsageRequest,
   Task,
   TaskIdRequest,
   TerminalCloseRequest,
@@ -156,6 +157,8 @@ import type {
   UpdateTaskRequest,
   UnbindProfileAliasRequest,
   UpdateWorkspaceTrustRequest,
+  AgentRunUsage,
+  UsageSummaryBucket,
   Workspace,
   WorkspaceIdRequest,
   WorkspaceValidationResult,
@@ -295,6 +298,17 @@ export interface RecoveryPort {
 export interface DecisionPort {
   list(request?: ListDecisionsRequest): IpcResult<readonly PendingDecision[]>
   resolve(request: ResolveDecisionRequest): IpcResult<PendingDecision>
+}
+
+/**
+ * TASK-124 (Milestone 25 §7): usage accounting, display-only — never a
+ * rate-limit input (ADR-0010). The port is a thin pass-through to the
+ * UsageRepository; buckets carry the joined agent_runs dimensions and an
+ * absent costUsdMicros means "not reported", not zero.
+ */
+export interface UsagePort {
+  summary(request: SummarizeUsageRequest): IpcResult<readonly UsageSummaryBucket[]>
+  getByRun(request: AgentRunIdRequest): IpcResult<AgentRunUsage | null>
 }
 
 export interface SettingsPort {
@@ -549,6 +563,7 @@ export interface TeskraRuntime {
   readonly workflow: WorkflowPort
   readonly recovery: RecoveryPort
   readonly decision: DecisionPort
+  readonly usage: UsagePort
   /** P0-2: async — stops Agent/Terminal child processes before closing the DB. */
   dispose(): Promise<IpcResult<void>>
 }

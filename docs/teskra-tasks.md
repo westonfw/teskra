@@ -4630,14 +4630,14 @@ IPC `teskra:usage:summary` / `teskra:usage:get-by-run`；事件 `usage.updated`�
 
 ### 验收标准
 
-- [ ] `usage` 观测到达时累加（Claude 一次 `result`；Codex 每个 `turn.completed`）；累加语义测试。
-- [ ] `cost_usd_micros` 只在 provider 报告时写，缺失存 NULL；**不**自行估价（有断言无价目表常量）。
-- [ ] `summarize` 通过 join `agent_runs` 按 workspace / agentType / accountProfileId 分组，
+- [x] `usage` 观测到达时累加（Claude 一次 `result`；Codex 每个 `turn.completed`）；累加语义测试。
+- [x] `cost_usd_micros` 只在 provider 报告时写，缺失存 NULL；**不**自行估价（有断言无价目表常量）。
+- [x] `summarize` 通过 join `agent_runs` 按 workspace / agentType / accountProfileId 分组，
       `since` 过滤；无冗余维度列。
-- [ ] 表 CHECK 拒绝负数（有「让它失败」的测试）；`ON DELETE CASCADE` 随 Run 删除。
-- [ ] UI：Run 详情头部 tokens / cost（NULL 显示「未报告」）；账号卡片最近 24h / 7d；
+- [x] 表 CHECK 拒绝负数（有「让它失败」的测试）；`ON DELETE CASCADE` 随 Run 删除。
+- [x] UI：Run 详情头部 tokens / cost（NULL 显示「未报告」）；账号卡片最近 24h / 7d；
       Dashboard `usage` 卡片。
-- [ ] 用量不进入限额判定（ADR-0010）；Repository 无 SQL 外泄到 Manager。
+- [x] 用量不进入限额判定（ADR-0010）；Repository 无 SQL 外泄到 Manager。
 
 ---
 
@@ -4702,13 +4702,13 @@ IPC:       teskra:agent:list-progress { runId, afterSeq?, limit? }
 
 ### 验收标准
 
-- [ ] 协议文档列出 `TESKRA_RUN_ID` / `TESKRA_HANDOFF_PATH` / `TESKRA_ARTIFACT_DIR` /
+- [x] 协议文档列出 `TESKRA_RUN_ID` / `TESKRA_HANDOFF_PATH` / `TESKRA_ARTIFACT_DIR` /
       `TESKRA_PROGRESS_PATH`、Handoff 必填字段、进度事件四种 `kind`、以及「stdout 不会被当作结果」。
-- [ ] 一致性测试：`cli-agent-adapter.ts` 注入的 `TESKRA_*` 变量集合 == 文档提及集合；
+- [x] 一致性测试：`cli-agent-adapter.ts` 注入的 `TESKRA_*` 变量集合 == 文档提及集合；
       文档中的 `kind` 列表 == `agentProgressEventSchema` 枚举；任一漂移测试失败。
-- [ ] `buildVariables` 增加 `env.TESKRA_PROGRESS_PATH` 与 `protocol`；未提供时 `VALIDATION_FAILED`（沿用既有规则）。
-- [ ] `{{protocol}}` 位于 memory 之后、Handoff 段之前，纳入 ContextBuilder 预算统计。
-- [ ] 仓库本地覆盖模板（受 Workspace Trust 门控）未包含 `{{protocol}}` 时记 WARN，不阻塞。
+- [x] `buildVariables` 增加 `env.TESKRA_PROGRESS_PATH` 与 `protocol`；未提供时 `VALIDATION_FAILED`（沿用既有规则）。
+- [x] `{{protocol}}` 位于 memory 之后、Handoff 段之前，纳入 ContextBuilder 预算统计。
+- [x] 仓库本地覆盖模板（受 Workspace Trust 门控）未包含 `{{protocol}}` 时记 WARN，不阻塞。
 
 ---
 
@@ -4776,17 +4776,17 @@ config:    decisions.shellConfirmationTimeoutMs, decisions.stalledRunTimeoutMs (
 
 ### 验收标准
 
-- [ ] `stalled_run`：TASK-119 `idleAction === 'ask'` 时开 Decision（选项 `keep_waiting` / `stop`），
+- [x] `stalled_run`：TASK-119 `idleAction === 'ask'` 时开 Decision（选项 `keep_waiting` / `stop`），
       同一 Run 只一条 open；`keep_waiting` → `acknowledgeIdle`，`stop` → `failAndStop`。
-- [ ] `agent_blocker`：TASK-126 的 `blocker` / `question` 开 Decision（`question` 为 `info`）；
+- [x] `agent_blocker`：TASK-126 的 `blocker` / `question` 开 Decision（`question` 为 `info`）；
       选项 `acknowledge` / `stop`；`stop` → `cancel(runId)`；Run 状态在开 Decision 时不变。
-- [ ] `merge_blocked`：`merge-service.ts` 仅含可覆盖 blocker 时开 Decision（`force_merge` 为 danger），
+- [x] `merge_blocked`：`merge-service.ts` 仅含可覆盖 blocker 时开 Decision（`force_merge` 为 danger），
       硬 blocker 仍直接 `MERGE_BLOCKED`；`force_merge` → `merge({ force: true })`。
-- [ ] `rate_limit`：`settleFailedStop` / `stopExited` 分类为 `rate-limited` 时开 Decision，
+- [x] `rate_limit`：`settleFailedStop` / `stopExited` 分类为 `rate-limited` 时开 Decision，
       选项与 TASK-108 Alert 一致（`continue_with_account` / `retry` / `wait`）；Alert 保留。
-- [ ] `handoff_degraded`：`handoff-collector` 产出 `degraded` 时开 Decision（`open_raw` / `dismiss`）。
-- [ ] Run / Workflow 终结时 `cancelBySource`（`stopExited`、`cancel`、`settleFailedStop` 各一处，有测试）。
-- [ ] 每种来源各有「开 → 解决 → 动作执行」的端到端单测。
+- [x] `handoff_degraded`：`handoff-collector` 产出 `degraded` 时开 Decision（`open_raw` / `dismiss`）。
+- [x] Run / Workflow 终结时 `cancelBySource`（`stopExited`、`cancel`、`settleFailedStop` 各一处，有测试）。
+- [x] 每种来源各有「开 → 解决 → 动作执行」的端到端单测。
 
 ---
 
