@@ -34,14 +34,19 @@ describe('HostProcessControl (P0-2)', () => {
       expect(await control.terminate(DEAD_PID)).toEqual({ ok: true, data: undefined })
     })
 
-    it('reads a stable start-time token from /proc for a live pid, null for a dead one', async () => {
-      const first = await control.identity(process.pid)
-      expect(first.ok).toBe(true)
-      if (first.ok) expect(typeof first.data).toBe('string')
-      const second = await control.identity(process.pid)
-      expect(second).toEqual(first)
-      expect(await control.identity(DEAD_PID)).toEqual({ ok: true, data: null })
-    })
+    // /proc/<pid>/stat only exists on a Linux host; on Windows the read is
+    // ENOENT and the identity token resolves to null, failing this test.
+    it.skipIf(process.platform !== 'linux')(
+      'reads a stable start-time token from /proc for a live pid, null for a dead one',
+      async () => {
+        const first = await control.identity(process.pid)
+        expect(first.ok).toBe(true)
+        if (first.ok) expect(typeof first.data).toBe('string')
+        const second = await control.identity(process.pid)
+        expect(second).toEqual(first)
+        expect(await control.identity(DEAD_PID)).toEqual({ ok: true, data: null })
+      },
+    )
   })
 
   describe('POSIX non-Linux (ps via CommandRunner)', () => {
