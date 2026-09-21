@@ -17,10 +17,12 @@ interface LoginTerminalViewProps {
 
 /**
  * §24.2 — interactive xterm surface for a structured account-login session.
- * The session starts on mount (duplicate starts reuse the Main-side sessionId)
- * and is ALWAYS cancelled on unmount so no orphan login PTY survives a closed
- * view. A natural exit is reported via onExited; Main then re-detects the
- * profile status on its own.
+ * The session starts on mount; duplicate starts attach to the same Main-side
+ * session (attach lease +1). Unmount releases this mount's lease via cancel —
+ * Main only kills the PTY when the LAST lease is released, so a StrictMode
+ * double-mount or a fast remount cannot kill the session another mount is
+ * still using. A natural exit is reported via onExited; Main then re-detects
+ * the profile status on its own.
  */
 export function LoginTerminalView({
   profileId,
@@ -54,8 +56,9 @@ export function LoginTerminalView({
       try {
         const result = await activeBridge.account.startLogin({ profileId })
         if (disposed) {
-          // The view closed while startLogin was in flight — stop the session
-          // immediately so it never outlives its surface.
+          // The view closed while startLogin was in flight — this mount still
+          // acquired an attach lease, so release it immediately; Main only
+          // kills the PTY when the last lease is released.
           if (result.ok) void activeBridge.account.cancelLogin({ sessionId: result.data.sessionId })
           return
         }

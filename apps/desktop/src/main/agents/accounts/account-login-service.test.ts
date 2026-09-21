@@ -432,6 +432,77 @@ describe('AccountLoginService (TASK-102 §24)', () => {
     expect(service.sessionForProfile('acct-1')?.sessionId).toBe('sess-1')
   })
 
+  it('attach leases: the first cancel only releases a lease, the second stops the process', async () => {
+    const { events, processes, profiles, service } = setup()
+    const exited = vi.fn()
+    events.subscribe('account.login.exited', exited)
+
+    // Two attaches on the same session — the StrictMode double-mount shape.
+    const first = await service.start({ profileId: 'acct-1' })
+    const second = await service.start({ profileId: 'acct-1' })
+    if (!first.ok || !second.ok) throw new Error('expected sessions')
+    expect(second.data.sessionId).toBe(first.data.sessionId)
+    expect(processes.starts).toHaveLength(1)
+
+    // The first unmount releases its lease: the PTY and the session survive.
+    const released = await service.cancel('sess-1')
+    expect(released.ok).toBe(true)
+    expect(processes.stops).toHaveLength(0)
+    expect(exited).not.toHaveBeenCalled()
+    expect(service.sessionForProfile('acct-1')?.sessionId).toBe('sess-1')
+
+    // The last lease release stops the process and removes the session.
+    const stopped = await service.cancel('sess-1')
+    expect(stopped.ok).toBe(true)
+    expect(processes.stops).toEqual(['proc-1'])
+    expect(exited).toHaveBeenCalledWith({ sessionId: 'sess-1', exitCode: 0 })
+    expect(profiles.statuses).toEqual([])
+    expect(service.sessionForProfile('acct-1')).toBeUndefined()
+  })
+
+  it('natural exit with two outstanding leases settles once; later cancels are no-ops', async () => {
+    const { events, processes, profiles, service } = setup()
+    const exited = vi.fn()
+    const statusChanged = vi.fn()
+    events.subscribe('account.login.exited', exited)
+    events.subscribe('account.status_changed', statusChanged)
+
+    await service.start({ profileId: 'acct-1' })
+    await service.start({ profileId: 'acct-1' })
+
+    // A natural exit settles the session regardless of the lease count.
+    events.emit('process.exited', { processId: 'proc-1', exitCode: 0 })
+    await vi.waitFor(() => expect(profiles.statuses).toEqual([{ id: 'acct-1', status: 'ready' }]))
+
+    expect(exited).toHaveBeenCalledTimes(1)
+    expect(statusChanged).toHaveBeenCalledTimes(1)
+    expect(service.sessionForProfile('acct-1')).toBeUndefined()
+
+    // Releasing the stranded leases afterwards is a no-op: no stop call, and
+    // the stale-cancel error contract is unchanged.
+    const staleFirst = await service.cancel('sess-1')
+    const staleSecond = await service.cancel('sess-1')
+    expect(staleFirst.ok).toBe(false)
+    expect(staleSecond.ok).toBe(false)
+    expect(processes.stops).toHaveLength(0)
+  })
+
+  it('the Main-side timeout force-stops the session even with outstanding leases', async () => {
+    vi.useFakeTimers()
+    const { processes, profiles, service } = setup({ sessionTimeoutMs: 1_000 })
+
+    // Two attaches, then the Renderer window reloads: its leases are stranded
+    // (never cancelled). The timeout is the backstop that still reaps the PTY.
+    await service.start({ profileId: 'acct-1' })
+    await service.start({ profileId: 'acct-1' })
+
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(processes.stops).toEqual(['proc-1'])
+    expect(profiles.statuses).toEqual([])
+    expect(service.sessionForProfile('acct-1')).toBeUndefined()
+  })
+
   it('forwards process output as account.login.output and write/resize to the owning process', async () => {
     const { events, processes, service } = setup()
     const output = vi.fn()

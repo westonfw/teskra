@@ -32,12 +32,17 @@ import type { AccountProfileAdapterRegistry } from './account-profile-adapter'
  *
  * - start() resolves IMMEDIATELY with the session handle — the OAuth/device
  *   flow runs in the spawned CLI and streams via account.login.output.
- * - Mutex: one login session per profileId; a repeated start returns the
- *   existing session instead of spawning a second process.
+ * - Mutex + attach leases: one login session per profileId; a repeated start
+ *   attaches to the existing session (lease +1) instead of spawning a second
+ *   process. cancel() releases ONE lease — the PTY is only stopped when the
+ *   last lease is released, so a Renderer StrictMode double-mount or a fast
+ *   remount cannot kill a session another mount is still using.
  * - Timeout: Main owns a per-session timer (never relies on the Renderer to
- *   cancel); a timed-out session is stopped like a cancel.
- * - cancel: stops the process and leaves Profile.status at its pre-login
- *   value (no detect, never writes expired).
+ *   cancel); it force-stops the session even with outstanding leases — the
+ *   backstop for leases stranded by a Renderer window reload.
+ * - cancel: releases one attach lease; only the last release stops the
+ *   process and leaves Profile.status at its pre-login value (no detect,
+ *   never writes expired).
  * - Only a NATURAL exit runs the post-exit detect that updates Profile.status.
  * - dispose() stops every session (P0-2) — no orphaned login processes.
  * - External profiles (§49) are refused: Teskra never modifies the login
@@ -120,6 +125,13 @@ interface ActiveLogin {
   timer: NodeJS.Timeout | undefined
   /** cancel / timeout / dispose — the post-exit detect is skipped. */
   settled: boolean
+  /**
+   * Attach leases: one per start() that returned this session (a new session
+   * starts at 1; a dedup hit increments it). cancel() releases one lease; the
+   * PTY is only stopped when the count reaches zero. A natural exit settles
+   * the session regardless of the outstanding count.
+   */
+  attachments: number
 }
 
 function fail<T>(error: InternalAppError): IpcResult<T> {
@@ -280,7 +292,7 @@ export function createAccountLoginService(deps: AccountLoginServiceDeps): Accoun
     }
   })
 
-  /** cancel / timeout: stop the process, keep the pre-login profile status. */
+  /** timeout / last-lease release: stop the process, keep the pre-login profile status. */
   const stopSession = async (sessionId: string): Promise<IpcResult<void>> => {
     const entry = sessions.get(sessionId)
     if (entry === undefined) {
@@ -309,6 +321,26 @@ export function createAccountLoginService(deps: AccountLoginServiceDeps): Accoun
       })
     }
     return { ok: true, data: undefined }
+  }
+
+  /**
+   * cancel: releases one attach lease. The PTY is only stopped when the last
+   * lease is released — a StrictMode double-mount / fast remount in the
+   * Renderer attaches twice to the same session, and one mount's unmount must
+   * not kill the session the other mount is still bound to. Releasing after
+   * the session has already settled (natural exit / timeout) is a no-op that
+   * reports sessionNotFound, matching the pre-lease stale-cancel contract.
+   */
+  const releaseSession = async (sessionId: string): Promise<IpcResult<void>> => {
+    const entry = sessions.get(sessionId)
+    if (entry === undefined) {
+      return sessionNotFound(sessionId)
+    }
+    entry.attachments -= 1
+    if (entry.attachments > 0) {
+      return { ok: true, data: undefined }
+    }
+    return stopSession(sessionId)
   }
 
   /**
@@ -398,6 +430,9 @@ export function createAccountLoginService(deps: AccountLoginServiceDeps): Accoun
     if (existing !== undefined) {
       const entry = sessions.get(existing)
       if (entry !== undefined) {
+        // Mutex hit: attach to the existing session instead of spawning —
+        // the caller now holds one lease on it.
+        entry.attachments += 1
         return { ok: true, data: entry.session }
       }
     }
@@ -485,6 +520,7 @@ export function createAccountLoginService(deps: AccountLoginServiceDeps): Accoun
     if (raced !== undefined) {
       const entry = sessions.get(raced)
       if (entry !== undefined) {
+        entry.attachments += 1
         return { ok: true, data: entry.session }
       }
     }
@@ -495,7 +531,14 @@ export function createAccountLoginService(deps: AccountLoginServiceDeps): Accoun
       startedAt: now(),
     }
     const processId = createId()
-    const entry: ActiveLogin = { session, processId, profileId, timer: undefined, settled: false }
+    const entry: ActiveLogin = {
+      session,
+      processId,
+      profileId,
+      timer: undefined,
+      settled: false,
+      attachments: 1,
+    }
     // Register before spawning so even immediate process output/exit can be
     // mapped to this session instead of being lost.
     sessions.set(session.sessionId, entry)
@@ -526,7 +569,12 @@ export function createAccountLoginService(deps: AccountLoginServiceDeps): Accoun
       agentId: profile.agentId,
       sessionId: session.sessionId,
     })
-    // §24.2: Main-side timeout — never rely on the Renderer to cancel.
+    // §24.2: Main-side timeout — never rely on the Renderer to cancel. The
+    // timer force-stops the session even with outstanding attach leases
+    // (stopSession, not releaseSession): a Renderer window reload strands its
+    // leases without ever cancelling them, so the timeout is the backstop
+    // that still reaps the PTY. Known tradeoff: a force-stop also kills the
+    // session for a mount that is still attached within the 10-minute window.
     entry.timer = setTimeout(() => {
       void stopSession(session.sessionId).then((result) => {
         if (!result.ok) {
@@ -562,7 +610,7 @@ export function createAccountLoginService(deps: AccountLoginServiceDeps): Accoun
     },
 
     cancel(sessionId) {
-      return stopSession(sessionId)
+      return releaseSession(sessionId)
     },
 
     detectProfileStatus(profileId) {
