@@ -33,6 +33,26 @@ describe('config contracts (TASK-080)', () => {
       completedRunLogsDays: 30,
       discardedRunDays: 30,
     })
+    // TASK-122 (Milestone 25 §6.1): structured streams on by default.
+    expect(DEFAULT_CONFIG.observability).toEqual({ structuredStream: true })
+    // TASK-128 (ADR-0014 §4): decisions never expire unless opted in.
+    expect(DEFAULT_CONFIG.decisions).toEqual({
+      shellConfirmationTimeoutMs: 0,
+      stalledRunTimeoutMs: 0,
+    })
+  })
+
+  it('decisions timeouts are integers >= 0 (0 = never expire)', () => {
+    expect(
+      teskraConfigLayerSchema.safeParse({ decisions: { shellConfirmationTimeoutMs: 60_000 } })
+        .success,
+    ).toBe(true)
+    expect(
+      teskraConfigLayerSchema.safeParse({ decisions: { stalledRunTimeoutMs: -1 } }).success,
+    ).toBe(false)
+    expect(
+      teskraConfigLayerSchema.safeParse({ decisions: { stalledRunTimeoutMs: 1.5 } }).success,
+    ).toBe(false)
   })
 
   it('layer schema accepts deep-partial layers and rejects unknown keys', () => {
@@ -43,6 +63,12 @@ describe('config contracts (TASK-080)', () => {
     expect(
       teskraConfigLayerSchema.safeParse({ environment: { defaultDistro: 'Ubuntu-24.04' } }).success,
     ).toBe(true)
+    expect(
+      teskraConfigLayerSchema.safeParse({ observability: { structuredStream: false } }).success,
+    ).toBe(true)
+    expect(
+      teskraConfigLayerSchema.safeParse({ observability: { structuredStream: 'off' } }).success,
+    ).toBe(false)
   })
 
   it('requires a workspace id only for workspace-layer writes', () => {

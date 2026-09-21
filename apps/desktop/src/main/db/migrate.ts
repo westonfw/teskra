@@ -16,7 +16,10 @@ import { type InternalAppError, toPublicError } from '../errors'
  * Guarantees:
  * - Applied versions are recorded in the `schema_migrations` table, whose
  *   creation is built into the mechanism (it is not itself a migration file).
- * - Already-applied migrations never re-run (version comparison only).
+ * - Already-applied migrations never re-run (checked per version, not by
+ *   MAX comparison — so a numbered gap left by parallel Task branches, e.g.
+ *   019 landing before 018, backfills correctly when the missing migration
+ *   appears in a later build).
  * - Every migration runs in its own transaction; a failure rolls that
  *   migration back and stops the chain with a structured error.
  * - A database newer than the code (DB version > highest known migration)
@@ -131,9 +134,14 @@ export function runMigrations(
   const sorted = normalized.data
 
   let fromVersion: number
+  let appliedVersions: ReadonlySet<number>
   try {
     ensureSchemaMigrationsTable(connection)
     fromVersion = currentVersion(connection)
+    const rows = connection.prepare('SELECT version FROM schema_migrations').all() as {
+      version: number
+    }[]
+    appliedVersions = new Set(rows.map((row) => row.version))
   } catch (cause) {
     return {
       ok: false,
@@ -164,7 +172,10 @@ export function runMigrations(
     'INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)',
   )
   for (const migration of sorted) {
-    if (migration.version <= fromVersion) {
+    // Per-version check (not version <= MAX): a gap below the current MAX —
+    // left by a Task branch that landed a higher-numbered migration first —
+    // must still apply when its migration appears (TASK-128: 019 before 018).
+    if (appliedVersions.has(migration.version)) {
       continue
     }
     try {

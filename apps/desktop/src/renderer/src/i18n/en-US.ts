@@ -278,6 +278,8 @@ export const enUS = {
     'This environment cannot securely store secrets; sensitive environment variables were not persisted.',
   'errorMessage.terminalNotActive': 'Terminal "{id}" is not active.',
   'errorMessage.agentRunNotFound': 'Agent run "{id}" was not found.',
+  'errorMessage.decisionNotFound': 'The decision "{id}" was not found.',
+  'errorMessage.decisionAlreadyClosed': 'This decision was already closed.',
   'errorMessage.agentRunNotActive': 'Agent run "{runId}" is not active.',
   'errorMessage.onlyInterruptedResumable': 'Only interrupted Agent runs can be resumed.',
   'errorMessage.workspaceRequiredForRunHistory':

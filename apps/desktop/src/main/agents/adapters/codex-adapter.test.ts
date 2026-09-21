@@ -13,6 +13,7 @@ import { createEventBus } from '../../events/event-bus'
 import { createProcessManager, type ProcessManagerDeps } from '../../process/process-manager'
 import { createWorkspaceRuntime } from '../../workspace/runtime'
 import type { AgentDetector } from '../agent-detector'
+import { CODEX_AGENT } from '../definitions/codex'
 import { agentProcessId } from './cli-agent-adapter'
 import {
   buildCodexArguments,
@@ -257,6 +258,107 @@ describe('CodexAdapter handoff writable root (ADR-0004)', () => {
       'never',
       '-c',
       'sandbox_workspace_write.writable_roots=["/mnt/c/Users/u/.teskra/runs/run-codex-1"]',
+    ])
+  })
+})
+
+describe('CodexAdapter structured output (TASK-122)', () => {
+  const codexExecJson = {
+    structured: 'codex-exec-json' as const,
+    structuredArgs: ['--json'],
+  }
+  const windowsRequest: AgentStartRequest = {
+    ...baseRequest,
+    workspace: { ...baseRequest.workspace, runtime: { kind: 'windows' } },
+    handoffPath: 'C:\\Users\\u\\.teskra\\runs\\run-codex-1\\handoff.json',
+  }
+
+  it('declares the codex-exec-json family on the built-in definition', () => {
+    expect(CODEX_AGENT.output).toEqual(codexExecJson)
+  })
+
+  it('keeps the writable-root -c before exec and places --json after exec, before the prompt', () => {
+    const args = buildCodexArguments({
+      ...windowsRequest,
+      mode: 'exec',
+      prompt: 'Ship it',
+      approvalMode: 'safe-auto',
+      structuredOutput: codexExecJson,
+    })
+
+    expect(args).toEqual([
+      '--sandbox',
+      'workspace-write',
+      '--ask-for-approval',
+      'on-request',
+      '-c',
+      'sandbox_workspace_write.writable_roots=["C:\\\\Users\\\\u\\\\.teskra\\\\runs\\\\run-codex-1"]',
+      'exec',
+      '--json',
+      'Ship it',
+    ])
+    expect(args.indexOf('-c')).toBeLessThan(args.indexOf('exec'))
+    expect(args.indexOf('exec')).toBeLessThan(args.indexOf('--json'))
+    expect(args.indexOf('--json')).toBeLessThan(args.indexOf('Ship it'))
+  })
+
+  it('appends --json on exec resume (after exec, before resume)', () => {
+    expect(
+      buildCodexResumeArguments({
+        ...baseRequest,
+        mode: 'exec',
+        prompt: undefined,
+        approvalMode: 'full-auto',
+        providerSession: { provider: 'codex', sessionId: '0199-codex-session' },
+        structuredOutput: codexExecJson,
+      }),
+    ).toEqual([
+      '--sandbox',
+      'workspace-write',
+      '--ask-for-approval',
+      'never',
+      'exec',
+      '--json',
+      'resume',
+      '0199-codex-session',
+    ])
+  })
+
+  it('never emits --json for interactive launches, even if a request carries structuredOutput', () => {
+    expect(
+      buildCodexArguments({
+        ...baseRequest,
+        prompt: 'Implement TASK-122',
+        approvalMode: 'manual',
+        structuredOutput: codexExecJson,
+      }),
+    ).toEqual([
+      '--sandbox',
+      'workspace-write',
+      '--ask-for-approval',
+      'on-request',
+      'Implement TASK-122',
+    ])
+  })
+
+  it('keeps the exec command line byte-identical when no structuredOutput is resolved (config off)', () => {
+    // Verbatim pin of the pre-TASK-122 exec command line (writable root included).
+    expect(
+      buildCodexArguments({
+        ...windowsRequest,
+        mode: 'exec',
+        prompt: 'Ship it',
+        approvalMode: 'safe-auto',
+      }),
+    ).toEqual([
+      '--sandbox',
+      'workspace-write',
+      '--ask-for-approval',
+      'on-request',
+      '-c',
+      'sandbox_workspace_write.writable_roots=["C:\\\\Users\\\\u\\\\.teskra\\\\runs\\\\run-codex-1"]',
+      'exec',
+      'Ship it',
     ])
   })
 })

@@ -24,6 +24,8 @@ export interface RunPaths {
   readonly handoff: string
   readonly diff: string
   readonly artifacts: string
+  /** ADR-0012 / TASK-126: append-only Agent progress file (never pre-created). */
+  readonly progress: string
 }
 
 /** File names inside a run directory; the single source for both writers and GC. */
@@ -34,12 +36,14 @@ const RUN_FILE_NAMES = {
   handoff: 'handoff.json',
   diff: 'diff.patch',
   artifacts: 'artifacts',
+  progress: 'progress.jsonl',
 } as const
 
 /** The volatile log files RetentionService (TASK-069) may collect. */
 export interface RunLogFiles {
   readonly events: string
   readonly terminal: string
+  readonly progress: string
 }
 
 /**
@@ -182,6 +186,7 @@ export function createTeskraPaths(env: NodeJS.ProcessEnv = process.env): TeskraP
       return {
         events: join(runDirectory, RUN_FILE_NAMES.events),
         terminal: join(runDirectory, RUN_FILE_NAMES.terminal),
+        progress: join(runDirectory, RUN_FILE_NAMES.progress),
       }
     },
     runFiles(runId) {
@@ -199,6 +204,7 @@ export function createTeskraPaths(env: NodeJS.ProcessEnv = process.env): TeskraP
           handoff: join(directory.data, RUN_FILE_NAMES.handoff),
           diff: join(directory.data, RUN_FILE_NAMES.diff),
           artifacts: artifacts.data,
+          progress: join(directory.data, RUN_FILE_NAMES.progress),
         },
       }
     },

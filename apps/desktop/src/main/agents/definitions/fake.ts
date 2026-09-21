@@ -15,6 +15,8 @@ export const FAKE_AGENT: AgentDefinition = {
   detection: { versionArgs: ['--version'] },
   defaults: { role: 'tester', permissionProfile: 'isolated' },
   permissionEnforcement: 'none',
+  // TASK-122 (§6.1): raw output; the `structured-stream` fake scenario is TASK-123 scope.
+  output: { structured: 'none' },
   routing: {
     agentId: 'fake',
     useWhen: 'Deterministic development, CI, and failure-path testing.',

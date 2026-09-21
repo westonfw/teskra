@@ -14,6 +14,7 @@ import { createArtifactStore } from '../artifacts/artifact-store'
 import { createAgentDetector } from '../agents/agent-detector'
 import { createAgentHealthManager } from '../agents/agent-health-manager'
 import { createAgentManager } from '../agents/agent-manager'
+import { createProgressFollower } from '../agents/progress-follower'
 import { createRunWatchdogService } from '../agents/run-watchdog-service'
 import { createDefaultAgentRegistry } from '../agents/agent-registry'
 import { createAccountProfileAdapterRegistry } from '../agents/accounts/account-profile-adapter'
@@ -63,6 +64,8 @@ import { createMergePreflightService } from '../git/merge-preflight-service'
 import { createMergeService } from '../git/merge-service'
 import { createWorktreeManager } from '../git/worktree-manager'
 import { createDoctorService } from '../doctor/doctor-service'
+import { createDecisionRepository } from '../decisions/decision-repository'
+import { createDecisionService } from '../decisions/decision-service'
 import { getLogger, initializeLogging } from '../logger'
 import { createRetentionService } from '../maintenance/retention-service'
 import { createTeskraPaths, type TeskraPaths } from '../paths'
@@ -152,6 +155,7 @@ function createRepositories(connection: TeskraDatabase['connection']) {
     handoffs: createHandoffRepository(connection),
     memory: createMemoryRepository(connection),
     permissions: createPermissionRepository(connection),
+    decisions: createDecisionRepository(connection),
   }
 }
 
@@ -586,6 +590,11 @@ export async function composeTeskraRuntime(
       const resolved = config.resolve({ workspaceId })
       return resolved.ok ? { ok: true, data: resolved.data.config.concurrency } : resolved
     },
+    // TASK-122 (§6.1): the structured-stream gate for exec-mode launches.
+    resolveObservability: (workspaceId) => {
+      const resolved = config.resolve({ workspaceId })
+      return resolved.ok ? { ok: true, data: resolved.data.config.observability } : resolved
+    },
   })
   // TASK-119 (Milestone 25 §5): the single periodic task in the Main process —
   // preparing-timeout and idle watchdog over the active runs. All stop actions
@@ -598,6 +607,31 @@ export async function composeTeskraRuntime(
       const resolved = config.resolve({ workspaceId })
       return resolved.ok ? { ok: true, data: resolved.data.config.watchdog } : resolved
     },
+  })
+  // TASK-128 (ADR-0014): the persisted Decision Inbox. The service owns the
+  // lifecycle only — the action behind a resolution belongs to the source
+  // modules' onResolved handlers (TASK-129/130 wire those). Expiry rides the
+  // watchdog's single timer (ADR-0014 §4) instead of opening a second one.
+  const decisionService = createDecisionService({
+    decisions: repositories.decisions,
+    events,
+  })
+  runWatchdog.onTick((now) => {
+    const expired = decisionService.expire(now)
+    if (!expired.ok) {
+      getLogger('runtime').error({ error: expired.error }, 'Decision expiry pass failed.')
+    }
+  })
+  // TASK-126 (Milestone 25 §8.2 / ADR-0012): follows each running run's
+  // append-only progress file (1s polling), persists valid lines as
+  // agent.progress events and refreshes the watchdog's silence baseline.
+  // blocker/question opening a Decision is TASK-130 — no onBlocker yet.
+  const progressFollower = createProgressFollower({
+    paths,
+    runLogs,
+    agentEvents: repositories.agentEvents,
+    events,
+    watchdog: runWatchdog,
   })
   // TASK-106 (§18): project terminal Run outcomes onto account profiles.
   // §18.0 auxiliary sweep at startup; the only other sweep trigger is the
@@ -850,6 +884,16 @@ export async function composeTeskraRuntime(
   ) {
     getLogger('runtime').warn(reconciled.data, 'Startup reconciliation repaired stale state.')
   }
+  // TASK-128 (ADR-0014 §5): after a restart the in-memory shell-step promises
+  // are gone, so open shell confirmations can never be approved again —
+  // expire them; the persisted system-resolution row is the audit record.
+  const decisionsReconciled = decisionService.reconcileOnStartup()
+  if (!decisionsReconciled.ok) {
+    getLogger('runtime').error(
+      { error: decisionsReconciled.error },
+      'Decision startup reconciliation failed.',
+    )
+  }
 
   let disposed = false
   const runtime: TeskraRuntime = {
@@ -1004,6 +1048,13 @@ export async function composeTeskraRuntime(
     recovery: {
       list: (request) => recoveryCenter.list(request),
     },
+    decision: {
+      list: (request = {}) => decisionService.list(request),
+      // decidedBy is pinned to 'user' — timeout / system closures originate
+      // in Main (watchdog tick, startup reconciliation), never from IPC.
+      resolve: (request) =>
+        decisionService.resolve(request.id, request.optionId, 'user', request.note),
+    },
     git: {
       status: ({ workspaceId }) => gitManager.status(workspaceId),
       branch: ({ workspaceId }) => gitManager.branch(workspaceId),
@@ -1049,6 +1100,7 @@ export async function composeTeskraRuntime(
       list: (request = {}) => agentManager.list(request),
       getOutput: ({ runId, tailBytes }) =>
         agentManager.getOutput(runId, tailBytes === undefined ? undefined : { tailBytes }),
+      listProgress: (request) => progressFollower.list(request),
     },
     account: {
       list: (request = {}) => accountProfileManager.list(request),
@@ -1269,6 +1321,10 @@ export async function composeTeskraRuntime(
       // issue a failAndStop against runs that are being shut down below.
       runWatchdog.dispose()
       await agentManager.dispose()
+      // TASK-126: agentManager.dispose() settled every run (terminal events
+      // already triggered the followers' final drains); stop the poll timer
+      // before the shared RunLogStore releases its handles.
+      progressFollower.dispose()
       // Belt and braces: compose owns the shared RunLogStore — make sure its
       // throttled writes are fsynced and handles released even if the Agent
       // manager's own shutdown path bailed out early.
@@ -1289,6 +1345,9 @@ export async function composeTeskraRuntime(
       // TASK-106: detach the profile-status projection before the bus clears
       // so no late agent.* event writes to a closing database.
       accountProfileStatus.dispose()
+      // TASK-128: detach the decision handlers before the bus clears (the
+      // watchdog timer is already stopped above, so no expiry can fire).
+      decisionService.dispose()
       events.clear()
       return database.close()
     },

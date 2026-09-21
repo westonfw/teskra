@@ -87,6 +87,28 @@ describe('runMigrations (TASK-006)', () => {
     expect(appliedVersions(db)).toEqual([1, 2])
   })
 
+  it('backfills a numbered gap: a lower version appearing after a higher one was applied still runs', () => {
+    // TASK-128 scenario: 019 lands while 018 is on a parallel branch; the DB
+    // reaches MAX(version)=19 with 18 unapplied. When 018 later appears in the
+    // chain it must still apply — a MAX-based skip would strand it forever.
+    const db = memoryDb()
+    const first = runMigrations(db, [
+      fixture(1, 'CREATE TABLE one (id INTEGER PRIMARY KEY)'),
+      fixture(3, 'CREATE TABLE three (id INTEGER PRIMARY KEY)'),
+    ])
+    expect(first).toEqual({ ok: true, data: { fromVersion: 0, toVersion: 3, applied: [1, 3] } })
+    expect(tableExists(db, 'two')).toBe(false)
+
+    const backfilled = runMigrations(db, [
+      fixture(1, 'CREATE TABLE one (id INTEGER PRIMARY KEY)'),
+      fixture(2, 'CREATE TABLE two (id INTEGER PRIMARY KEY)'),
+      fixture(3, 'CREATE TABLE three (id INTEGER PRIMARY KEY)'),
+    ])
+    expect(backfilled).toEqual({ ok: true, data: { fromVersion: 3, toVersion: 3, applied: [2] } })
+    expect(tableExists(db, 'two')).toBe(true)
+    expect(appliedVersions(db)).toEqual([1, 2, 3])
+  })
+
   it('rolls back a failed migration in its own transaction and stops the chain', () => {
     const db = memoryDb()
     const result = runMigrations(db, [
@@ -214,9 +236,9 @@ describe('runMigrations (TASK-006)', () => {
 })
 
 describe('MIGRATIONS registry (TASK-006)', () => {
-  it('is the ordered 001–017 chain', () => {
+  it('is the ordered 001–019 chain (018 reserved for TASK-124, parallel branch)', () => {
     expect(MIGRATIONS.map((m) => m.version)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19,
     ])
     expect(MIGRATIONS.map((m) => m.name)).toEqual([
       '001_init',
@@ -236,6 +258,7 @@ describe('MIGRATIONS registry (TASK-006)', () => {
       '015_workspace_trust',
       '016_external_config_home_normalize',
       '017_agent_run_queue_and_retry',
+      '019_pending_decisions',
     ])
   })
 
@@ -246,14 +269,16 @@ describe('MIGRATIONS registry (TASK-006)', () => {
       ok: true,
       data: {
         fromVersion: 0,
-        toVersion: 17,
-        applied: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
+        toVersion: 19,
+        applied: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19],
       },
     })
-    expect(appliedVersions(db)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17])
+    expect(appliedVersions(db)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19,
+    ])
 
     const second = migrateDatabase(db)
-    expect(second).toEqual({ ok: true, data: { fromVersion: 17, toVersion: 17, applied: [] } })
+    expect(second).toEqual({ ok: true, data: { fromVersion: 19, toVersion: 19, applied: [] } })
   })
 
   it('007/008 upgrade a populated v6 database without losing workflow runs or steps (TASK-056/062)', () => {
@@ -283,7 +308,11 @@ describe('MIGRATIONS registry (TASK-006)', () => {
     const upgraded = migrateDatabase(db)
     expect(upgraded).toEqual({
       ok: true,
-      data: { fromVersion: 6, toVersion: 17, applied: [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17] },
+      data: {
+        fromVersion: 6,
+        toVersion: 19,
+        applied: [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19],
+      },
     })
 
     // Rows survived the table rebuild (DROP TABLE would have cascaded with FK on).

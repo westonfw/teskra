@@ -33,6 +33,11 @@ export const CODEX_AGENT: AgentDefinition = {
    * the audit coverage note in ADR-0002.
    */
   auditCommandPatterns: [{ pattern: '^(.+) in .+$', afterMarker: '^exec$' }],
+  // TASK-122 (§6.1): `--json` lands after the `exec` subcommand, before the prompt.
+  output: {
+    structured: 'codex-exec-json',
+    structuredArgs: ['--json'],
+  },
   routing: {
     agentId: 'codex',
     useWhen: 'Implementation, refactoring, and autonomous coding loops.',

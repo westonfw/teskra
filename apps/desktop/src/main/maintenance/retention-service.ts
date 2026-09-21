@@ -279,7 +279,10 @@ export function createRetentionService(deps: RetentionServiceDeps): RetentionSer
       const logFiles = deps.paths.runLogFiles(run.runDir)
       if (LOG_COLLECTABLE_STATUSES.has(run.status)) {
         const age = ageDays(current, run.finishedAt ?? run.updatedAt)
-        const hasLogs = pathExists(logFiles.events) || pathExists(logFiles.terminal)
+        const hasLogs =
+          pathExists(logFiles.events) ||
+          pathExists(logFiles.terminal) ||
+          pathExists(logFiles.progress)
         if (age !== undefined && age >= context.policy.completedRunLogsDays && hasLogs) {
           items.push({
             kind: 'run-logs',
@@ -433,7 +436,7 @@ export function createRetentionService(deps: RetentionServiceDeps): RetentionSer
     const logFiles = deps.paths.runLogFiles(run.data.runDir)
     const removed: string[] = []
     try {
-      for (const file of [logFiles.events, logFiles.terminal]) {
+      for (const file of [logFiles.events, logFiles.terminal, logFiles.progress]) {
         if (pathExists(file)) {
           rmSync(file, { force: true })
           removed.push(file)

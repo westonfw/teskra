@@ -23,6 +23,7 @@ function stubPaths(): TeskraPaths {
     runLogFiles: (runDirectory) => ({
       events: `${runDirectory}/events.jsonl`,
       terminal: `${runDirectory}/terminal.log`,
+      progress: `${runDirectory}/progress.jsonl`,
     }),
     runFiles: (runId) => ({
       ok: true,
@@ -34,6 +35,7 @@ function stubPaths(): TeskraPaths {
         handoff: `${HOST_HOME}/runs/${runId}/handoff.json`,
         diff: `${HOST_HOME}/runs/${runId}/diff.patch`,
         artifacts: `${HOST_HOME}/runs/${runId}/artifacts`,
+        progress: `${HOST_HOME}/runs/${runId}/progress.jsonl`,
       },
     }),
     config: () => `${HOST_HOME}/config.json`,

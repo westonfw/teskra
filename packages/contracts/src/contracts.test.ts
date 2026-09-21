@@ -77,6 +77,92 @@ describe('agent contracts', () => {
 
     expect(result.success).toBe(true)
   })
+
+  it('accepts an Agent definition without output (treated as none) — TASK-122', () => {
+    const definition = {
+      id: 'plain-agent',
+      name: 'Plain Agent',
+      executable: { command: 'plain' },
+      capabilities: {
+        interactive: true,
+        headless: true,
+        resume: false,
+        readOnlyMode: false,
+        modelSelection: false,
+      },
+      prompt: {},
+      detection: { versionArgs: ['--version'] },
+      defaults: {},
+      permissionEnforcement: 'none',
+    }
+    const result = agentDefinitionSchema.safeParse(definition)
+    expect(result.success).toBe(true)
+    expect(result.success && result.data.output).toBeUndefined()
+  })
+
+  it('requires structuredArgs when output.structured is not "none" — TASK-122 superRefine', () => {
+    const base = {
+      id: 'stream-agent',
+      name: 'Stream Agent',
+      executable: { command: 'stream' },
+      capabilities: {
+        interactive: true,
+        headless: true,
+        resume: false,
+        readOnlyMode: false,
+        modelSelection: false,
+      },
+      prompt: {},
+      detection: { versionArgs: ['--version'] },
+      defaults: {},
+      permissionEnforcement: 'none',
+    }
+
+    const missing = agentDefinitionSchema.safeParse({
+      ...base,
+      output: { structured: 'claude-stream-json' },
+    })
+    expect(missing.success).toBe(false)
+    if (!missing.success) {
+      expect(missing.error.issues[0]?.path).toEqual(['output', 'structuredArgs'])
+    }
+
+    expect(
+      agentDefinitionSchema.safeParse({
+        ...base,
+        output: { structured: 'codex-exec-json', structuredArgs: ['--json'] },
+      }).success,
+    ).toBe(true)
+    // `none` never needs structuredArgs.
+    expect(
+      agentDefinitionSchema.safeParse({ ...base, output: { structured: 'none' } }).success,
+    ).toBe(true)
+    // Unknown protocol families are rejected (enum, not free-form string).
+    expect(
+      agentDefinitionSchema.safeParse({ ...base, output: { structured: 'acp' } }).success,
+    ).toBe(false)
+  })
+
+  it('AgentStartRequest carries the resolved structuredOutput for TASK-123', () => {
+    const result = agentStartRequestSchema.safeParse({
+      runId: 'RUN-003',
+      workspace: {
+        id: 'ws1',
+        name: 'demo',
+        runtime: { kind: 'wsl', distro: 'Ubuntu' },
+        path: '/home/user/demo',
+        trustLevel: 'trusted',
+        createdAt: '2026-09-09T00:00:00.000Z',
+        updatedAt: '2026-09-09T00:00:00.000Z',
+      },
+      mode: 'exec',
+      structuredOutput: {
+        structured: 'codex-exec-json',
+        structuredArgs: ['--json'],
+      },
+    })
+    expect(result.success).toBe(true)
+  })
 })
 
 describe('ipc contracts', () => {

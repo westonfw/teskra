@@ -1,5 +1,6 @@
 import {
   appendFileSync,
+  existsSync,
   mkdtempSync,
   openSync,
   readFileSync,
@@ -94,6 +95,9 @@ describe('RunLogStore (TASK-039)', () => {
       'run.json',
       'terminal.log',
     ])
+    // TASK-126 (ADR-0012): progress.jsonl is deliberately NOT pre-created, so
+    // "never wrote" stays distinguishable from "wrote an empty file".
+    expect(existsSync(join(home, 'runs', 'run-1', 'progress.jsonl'))).toBe(false)
     const manifest = readFileSync(join(home, 'runs', 'run-1', 'run.json'), 'utf8')
     expect(manifest).not.toContain('sk-secret123')
     expect(JSON.parse(manifest)).toMatchObject({

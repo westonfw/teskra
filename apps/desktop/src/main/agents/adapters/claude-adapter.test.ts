@@ -5,6 +5,7 @@ import type { AgentDetectionResult, AgentResumeRequest, AgentStartRequest } from
 import type { ProcessManager } from '../../process/process-manager'
 import type { WorkspaceRuntime } from '../../workspace/runtime'
 import type { AgentDetector } from '../agent-detector'
+import { CLAUDE_AGENT } from '../definitions/claude'
 import { agentProcessId } from './cli-agent-adapter'
 import {
   buildClaudeArguments,
@@ -193,6 +194,98 @@ describe('ClaudeAdapter arguments (TASK-027)', () => {
   })
 })
 
+describe('ClaudeAdapter structured output (TASK-122)', () => {
+  const sessionId = '550e8400-e29b-41d4-a716-446655440010'
+  const claudeStreamJson = {
+    structured: 'claude-stream-json' as const,
+    structuredArgs: ['--output-format', 'stream-json', '--verbose'],
+  }
+
+  it('declares the claude-stream-json family on the built-in definition', () => {
+    expect(CLAUDE_AGENT.output).toEqual(claudeStreamJson)
+  })
+
+  it('appends structuredArgs after --print and before the prompt, alongside --session-id/--permission-mode/--settings/--add-dir', () => {
+    expect(
+      buildClaudeArguments(
+        {
+          ...request,
+          mode: 'exec',
+          prompt: 'Analyze only',
+          approvalMode: 'safe-auto',
+          permissionConfigPath: '/runs/run-claude-1/permission-settings.json',
+          handoffPath: '/runs/run-claude-1/handoff.json',
+          structuredOutput: claudeStreamJson,
+        },
+        sessionId,
+      ),
+    ).toEqual([
+      '--permission-mode',
+      'acceptEdits',
+      '--settings',
+      '/runs/run-claude-1/permission-settings.json',
+      '--add-dir',
+      '/runs/run-claude-1',
+      '--session-id',
+      sessionId,
+      '--print',
+      '--output-format',
+      'stream-json',
+      '--verbose',
+      'Analyze only',
+    ])
+  })
+
+  it('appends structuredArgs on exec resume as well', () => {
+    expect(
+      buildClaudeResumeArguments({
+        ...request,
+        mode: 'exec',
+        prompt: 'Continue review',
+        approvalMode: 'manual',
+        providerSession: { provider: 'claude', sessionId: 'claude-session' },
+        structuredOutput: claudeStreamJson,
+      }),
+    ).toEqual([
+      '--permission-mode',
+      'default',
+      '--print',
+      '--output-format',
+      'stream-json',
+      '--verbose',
+      '--resume',
+      'claude-session',
+      'Continue review',
+    ])
+  })
+
+  it('never emits structuredArgs for interactive launches, even if a request carries them', () => {
+    expect(
+      buildClaudeArguments(
+        { ...request, prompt: 'Review this change', structuredOutput: claudeStreamJson },
+        sessionId,
+      ),
+    ).toEqual(['--permission-mode', 'default', '--session-id', sessionId, 'Review this change'])
+  })
+
+  it('keeps the exec command line byte-identical when no structuredOutput is resolved (config off)', () => {
+    // Verbatim pin of the pre-TASK-122 exec command line.
+    expect(
+      buildClaudeArguments(
+        { ...request, mode: 'exec', prompt: 'Analyze only', approvalMode: 'read-only' },
+        sessionId,
+      ),
+    ).toEqual([
+      '--permission-mode',
+      'default',
+      '--session-id',
+      sessionId,
+      '--print',
+      'Analyze only',
+    ])
+  })
+})
+
 describe('ClaudeAdapter process contract (TASK-027)', () => {
   it('starts, returns provider session identity, sends input, and stops', async () => {
     const deps = dependencies()
@@ -274,6 +367,7 @@ describe('ClaudeAdapter process contract (TASK-027)', () => {
       handoffPath: 'C:\\Users\\u\\.teskra\\runs\\run-claude-1\\handoff.json',
       artifactDir: 'C:\\Users\\u\\.teskra\\runs\\run-claude-1\\artifacts',
       permissionConfigPath: 'C:\\Users\\u\\.teskra\\runs\\run-claude-1\\permission-settings.json',
+      progressPath: 'C:\\Users\\u\\.teskra\\runs\\run-claude-1\\progress.jsonl',
     })
     expect(result.ok).toBe(true)
 
@@ -297,6 +391,8 @@ describe('ClaudeAdapter process contract (TASK-027)', () => {
           TESKRA_HANDOFF_PATH: '/mnt/c/Users/u/.teskra/runs/run-claude-1/handoff.json',
           TESKRA_ARTIFACT_DIR: '/mnt/c/Users/u/.teskra/runs/run-claude-1/artifacts',
           TESKRA_RUN_ID: 'run-claude-1',
+          // TASK-126 (ADR-0012): the progress path gets the same translation.
+          TESKRA_PROGRESS_PATH: '/mnt/c/Users/u/.teskra/runs/run-claude-1/progress.jsonl',
         }),
       }),
     )

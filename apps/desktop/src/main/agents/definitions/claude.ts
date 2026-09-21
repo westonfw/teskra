@@ -25,6 +25,11 @@ export const CLAUDE_AGENT: AgentDefinition = {
    * with a `…` continuation and are conservatively missed.
    */
   auditCommandPatterns: [{ pattern: '^\\s*[⏺●]\\s+Bash\\((.+)\\)\\s*$' }],
+  // TASK-122 (§6.1): under `--print`, `stream-json` output requires `--verbose`.
+  output: {
+    structured: 'claude-stream-json',
+    structuredArgs: ['--output-format', 'stream-json', '--verbose'],
+  },
   routing: {
     agentId: 'claude',
     useWhen: 'Architecture, review, and work requiring broad context.',

@@ -72,6 +72,12 @@ import {
 } from './agent'
 import { continueAgentRunRequestSchema, type ContinueAgentRunRequest } from './agent-continuation'
 import {
+  agentProgressRecordSchema,
+  listAgentProgressRequestSchema,
+  type AgentProgressRecord,
+  type ListAgentProgressRequest,
+} from './agent-progress'
+import {
   bindProfileAliasRequestSchema,
   listProfileAliasesRequestSchema,
   profileAliasSchema,
@@ -117,6 +123,14 @@ import {
   type DeleteCredentialRequest,
   type SetCredentialRequest,
 } from './credential'
+import {
+  listDecisionsRequestSchema,
+  pendingDecisionSchema,
+  resolveDecisionRequestSchema,
+  type ListDecisionsRequest,
+  type PendingDecision,
+  type ResolveDecisionRequest,
+} from './decision'
 import {
   buildContextRequestSchema,
   builtContextSchema,
@@ -462,6 +476,7 @@ export const IPC_CHANNELS = {
   agentRunOutput: 'teskra:agent-run:output',
   agentRunResume: 'teskra:agent-run:resume',
   agentRunContinueWithProfile: 'teskra:agent:continue-with-profile',
+  agentListProgress: 'teskra:agent:list-progress',
   accountList: 'teskra:account:list',
   accountListAdapterAgents: 'teskra:account:adapter-agents:list',
   accountListRateLimitStats: 'teskra:account:rate-limit-stats:list',
@@ -553,6 +568,8 @@ export const IPC_CHANNELS = {
   workflowIterate: 'teskra:workflow:iterate',
   workflowStartFull: 'teskra:workflow:start-full',
   workflowRunSummary: 'teskra:workflow:run:summary',
+  decisionList: 'teskra:decision:list',
+  decisionResolve: 'teskra:decision:resolve',
 } as const
 export type IpcChannelName = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
 
@@ -855,6 +872,12 @@ export const agentRunContinueWithProfileChannel = channel(
   IPC_CHANNELS.agentRunContinueWithProfile,
   continueAgentRunRequestSchema,
   agentRunSchema,
+)
+// TASK-126 (ADR-0012): page the persisted agent.progress events of a run.
+export const agentListProgressChannel = channel(
+  IPC_CHANNELS.agentListProgress,
+  listAgentProgressRequestSchema,
+  z.array(agentProgressRecordSchema),
 )
 // TASK-102 (Milestone 24 §28): account profile CRUD + default + status detect.
 // The alias channels (TASK-111) live right after the login session block.
@@ -1330,6 +1353,18 @@ export const workflowRunSummaryChannel = channel(
   workflowRunIdRequestSchema,
   fullWorkflowRunSummarySchema,
 )
+// TASK-128 (ADR-0014): the Decision Inbox — one persisted queue for every
+// moment that needs a human decision.
+export const decisionListChannel = channel(
+  IPC_CHANNELS.decisionList,
+  listDecisionsRequestSchema,
+  z.array(pendingDecisionSchema),
+)
+export const decisionResolveChannel = channel(
+  IPC_CHANNELS.decisionResolve,
+  resolveDecisionRequestSchema,
+  pendingDecisionSchema,
+)
 
 export const ipcChannelDefinitions = {
   ping: pingChannel,
@@ -1388,6 +1423,7 @@ export const ipcChannelDefinitions = {
   agentRunOutput: agentRunOutputChannel,
   agentRunResume: agentRunResumeChannel,
   agentRunContinueWithProfile: agentRunContinueWithProfileChannel,
+  agentListProgress: agentListProgressChannel,
   accountList: accountListChannel,
   accountListAdapterAgents: accountListAdapterAgentsChannel,
   accountListRateLimitStats: accountListRateLimitStatsChannel,
@@ -1479,6 +1515,8 @@ export const ipcChannelDefinitions = {
   workflowIterate: workflowIterateChannel,
   workflowStartFull: workflowStartFullChannel,
   workflowRunSummary: workflowRunSummaryChannel,
+  decisionList: decisionListChannel,
+  decisionResolve: decisionResolveChannel,
 } as const
 
 export interface TeskraBridge {
@@ -1579,6 +1617,8 @@ export interface TeskraBridge {
     getOutput(request: AgentRunOutputRequest): Promise<IpcResult<string>>
     resume(request: ResumeAgentRunRequest): Promise<IpcResult<AgentRun>>
     continueWithProfile(request: ContinueAgentRunRequest): Promise<IpcResult<AgentRun>>
+    /** TASK-126 (ADR-0012): persisted agent.progress events, paged by seq. */
+    listProgress(request: ListAgentProgressRequest): Promise<IpcResult<AgentProgressRecord[]>>
   }
   /**
    * TASK-102 (Milestone 24 §28/§24.2): account profile CRUD + default + detect,
@@ -1755,6 +1795,15 @@ export interface TeskraBridge {
       request: StartFullWorkflowRequest,
     ): Promise<IpcResult<FullWorkflowStartResult>>
     runSummary(request: WorkflowRunIdRequest): Promise<IpcResult<FullWorkflowRunSummary>>
+  }
+  /**
+   * TASK-128 (ADR-0014): the persisted Decision Inbox. `resolve` is the
+   * user's pick (decidedBy is always 'user' over IPC); expiries and source
+   * cancellations arrive as decision.resolved events.
+   */
+  readonly decision: {
+    list(request?: ListDecisionsRequest): Promise<IpcResult<PendingDecision[]>>
+    resolve(request: ResolveDecisionRequest): Promise<IpcResult<PendingDecision>>
   }
   readonly events: {
     subscribe<Name extends WorkbenchEventName>(

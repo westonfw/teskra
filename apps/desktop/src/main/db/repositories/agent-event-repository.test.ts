@@ -69,6 +69,22 @@ describe('AgentEventRepository', () => {
     expect(dup.error.code).toBe('UNKNOWN')
   })
 
+  it('pages one event type by seq (TASK-126 list-progress)', () => {
+    setup()
+    repo.append({ runId: 'run-1', seq: 1, eventType: 'agent.progress', payload: { n: 1 } })
+    repo.append({ runId: 'run-1', seq: 2, eventType: 'agent.output', payload: { data: 'x' } })
+    repo.append({ runId: 'run-1', seq: 3, eventType: 'agent.progress', payload: { n: 3 } })
+    repo.append({ runId: 'run-1', seq: 4, eventType: 'agent.progress', payload: { n: 4 } })
+
+    const all = repo.listByRunAndType('run-1', 'agent.progress')
+    expect(all.ok && all.data.map((event) => event.seq)).toEqual([1, 3, 4])
+
+    const paged = repo.listByRunAndType('run-1', 'agent.progress', { afterSeq: 1, limit: 1 })
+    expect(paged.ok && paged.data.map((event) => event.seq)).toEqual([3])
+    const rest = repo.listByRunAndType('run-1', 'agent.progress', { afterSeq: 3 })
+    expect(rest.ok && rest.data.map((event) => event.seq)).toEqual([4])
+  })
+
   it('returns VALIDATION_FAILED for corrupted payload_json', () => {
     setup()
     connection

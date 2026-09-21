@@ -61,6 +61,15 @@ export interface RunWatchdogService {
    * this baseline (§5.3).
    */
   acknowledgeIdle(runId: string): IpcResult<void>
+  /**
+   * TASK-128 (ADR-0014 §4): registers a synchronous listener invoked at the
+   * end of every tick — the DecisionService expiry rides this single timer
+   * instead of opening a second one. Listeners run INSIDE the re-entrancy
+   * guard (a fired tick that is still in flight still skips the next
+   * interval); a throwing listener is logged and does not break the tick.
+   * Returns an idempotent unsubscribe.
+   */
+  onTick(listener: (now: string) => void): () => void
   /** Stops the timer and detaches from the EventBus; idempotent. */
   dispose(): void
 }
@@ -102,6 +111,8 @@ export function createRunWatchdogService(deps: RunWatchdogServiceDeps): RunWatch
   const stalledNotified = new Set<string>()
   /** runId → ISO baseline refreshed by noteActivity (PTY output now; TASK-123/126 later). */
   const notedActivity = new Map<string, string>()
+  /** TASK-128: end-of-tick listeners (decision expiry); run inside the tick guard. */
+  const tickListeners = new Set<(now: string) => void>()
   let ticking = false
   let disposed = false
 
@@ -257,6 +268,17 @@ export function createRunWatchdogService(deps: RunWatchdogServiceDeps): RunWatch
     ticking = true
     try {
       await inspect()
+      // TASK-128: decision expiry and friends ride this tick (ADR-0014 §4).
+      // Synchronous listeners only — the tick awaits nothing here, so the
+      // "at most one slow await per tick" shape of inspect() is preserved.
+      const now = new Date().toISOString()
+      for (const listener of [...tickListeners]) {
+        try {
+          listener(now)
+        } catch (cause) {
+          logger.error({ cause }, 'Run watchdog tick listener failed.')
+        }
+      }
     } catch (cause) {
       logger.error({ cause }, 'Run watchdog tick failed unexpectedly.')
     } finally {
@@ -268,6 +290,15 @@ export function createRunWatchdogService(deps: RunWatchdogServiceDeps): RunWatch
 
   return {
     noteActivity,
+    onTick(listener) {
+      tickListeners.add(listener)
+      let subscribed = true
+      return () => {
+        if (!subscribed) return
+        subscribed = false
+        tickListeners.delete(listener)
+      }
+    },
     acknowledgeIdle(runId) {
       const timestamp = new Date().toISOString()
       const updated = deps.runs.update(runId, { lastInputAt: timestamp }, timestamp)
@@ -291,6 +322,7 @@ export function createRunWatchdogService(deps: RunWatchdogServiceDeps): RunWatch
       disposed = true
       clearInterval(timer)
       stopOutput()
+      tickListeners.clear()
     },
   }
 }

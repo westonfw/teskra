@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { workerHandoffSchema } from '@teskra/contracts'
+import { agentProgressEventSchema, workerHandoffSchema } from '@teskra/contracts'
 import { inspectRunWatchdog } from '@teskra/shared'
 
 const fakeAgent = fileURLToPath(new URL('../../../../../tools/fake-agent.js', import.meta.url))
@@ -149,5 +149,20 @@ describe('Fake Agent scenarios (TASK-083)', () => {
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain('quota exceeded')
     expect(result.stdout).toContain('Fake Agent completed')
+  })
+
+  it('progress-blocker appends two progress lines and one blocker, then waits (TASK-126)', async () => {
+    const directory = temporaryDirectory()
+    const progressPath = join(directory, 'progress.jsonl')
+    const result = await runScenario('progress-blocker', {
+      env: { TESKRA_PROGRESS_PATH: progressPath },
+      killAfterMs: 150,
+    })
+    expect(result.exitCode).toBeNull()
+    expect(result.signal).not.toBeNull()
+    const lines = readFileSync(progressPath, 'utf8').trim().split('\n')
+    expect(lines).toHaveLength(3)
+    const events = lines.map((line) => agentProgressEventSchema.parse(JSON.parse(line)))
+    expect(events.map((event) => event.kind)).toEqual(['progress', 'progress', 'blocker'])
   })
 })

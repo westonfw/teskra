@@ -1,5 +1,7 @@
 import type { DiffPatchResult } from './git'
 import type { AccountProfileStatus } from './agent-account'
+import type { AgentProgressEvent } from './agent-progress'
+import type { PendingDecision } from './decision'
 import type { PublicAppError } from './error'
 import type { ReviewPanelStatus } from './review'
 import type { WorkflowRunStatus, WorkflowStepStatus } from './workflow'
@@ -106,6 +108,25 @@ export interface WorkbenchEvents {
     runId: string
     silentForMs: number
     action: 'ask' | 'stop'
+  }
+  /**
+   * TASK-126 (ADR-0012): one validated line of the run's progress file,
+   * redacted and persisted (events.jsonl + agent_events); `seq` aligns with
+   * the events.jsonl line number so `list-progress` paging can resume.
+   */
+  'agent.progress': {
+    runId: string
+    seq: number
+    event: AgentProgressEvent
+  }
+  /**
+   * TASK-126 (ADR-0012): the follower stopped reading the progress file
+   * because it exceeded the 4 MiB ceiling; emitted once per run.
+   */
+  'agent.progress_summary': {
+    runId: string
+    truncated: boolean
+    sizeBytes: number
   }
 
   'task.created': {
@@ -221,6 +242,19 @@ export interface WorkbenchEvents {
     sessionId: string
     exitCode: number
   }
+
+  /** TASK-128 (ADR-0014): a PendingDecision entered the persisted inbox. */
+  'decision.opened': {
+    decision: PendingDecision
+  }
+  /**
+   * TASK-128 (ADR-0014): a decision left `open`. Covers user resolutions,
+   * watchdog-tick expiries and source cancellations alike — the payload's
+   * `decision.status` distinguishes resolved / expired / cancelled.
+   */
+  'decision.resolved': {
+    decision: PendingDecision
+  }
 }
 
 export type WorkbenchEventName = keyof WorkbenchEvents
@@ -246,6 +280,8 @@ export const WORKBENCH_EVENT_NAMES = [
   'agent.interrupted',
   'agent.watchdog',
   'agent.stalled',
+  'agent.progress',
+  'agent.progress_summary',
   'task.created',
   'task.updated',
   'git.changed',
@@ -266,6 +302,8 @@ export const WORKBENCH_EVENT_NAMES = [
   'account.limited',
   'account.login.output',
   'account.login.exited',
+  'decision.opened',
+  'decision.resolved',
 ] as const satisfies readonly WorkbenchEventName[]
 
 export const RENDERER_EVENT_CHANNEL = 'teskra:event' as const

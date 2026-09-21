@@ -93,7 +93,7 @@ function upgradedDb(seed: (db: Database.Database) => void): Database.Database {
     throw new Error(upgraded.error.message)
   }
   expect(upgraded.data.fromVersion).toBe(15)
-  expect(upgraded.data.applied).toEqual([16, 17])
+  expect(upgraded.data.applied).toEqual([16, 17, 19])
   return db
 }
 
@@ -177,7 +177,7 @@ describe('migration 016 — external config_home normalization (P2-2 follow-up)'
     const db = memoryDb()
     expect(migrateDatabase(db).ok).toBe(true)
     const again = migrateDatabase(db)
-    expect(again).toEqual({ ok: true, data: { fromVersion: 17, toVersion: 17, applied: [] } })
+    expect(again).toEqual({ ok: true, data: { fromVersion: 19, toVersion: 19, applied: [] } })
   })
 
   it('normalizeExternalConfigHomes can be invoked directly against an up-to-date database', () => {

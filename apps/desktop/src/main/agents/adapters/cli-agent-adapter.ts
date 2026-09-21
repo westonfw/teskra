@@ -66,6 +66,17 @@ export function agentHandoffDir(request: AgentStartRequest): string | undefined 
 }
 
 /**
+ * TASK-122 (§6.1): the resolved structured-output args, appended by each
+ * Adapter AFTER its headless args and BEFORE the prompt. The AgentManager
+ * only populates `structuredOutput` for `mode === 'exec'` launches with
+ * `observability.structuredStream` enabled; the mode check here is the
+ * backstop so an interactive launch never picks them up.
+ */
+export function structuredOutputArguments(request: AgentStartRequest): string[] {
+  return request.mode === 'exec' ? [...(request.structuredOutput?.structuredArgs ?? [])] : []
+}
+
+/**
  * TASK-088 backstop: the AgentManager resolves workspace env secret refs to
  * plaintext before launch, so only plain strings should arrive here. A ref
  * that still leaks through is dropped (never passed to the process as a
@@ -107,6 +118,8 @@ function processEnvironment(
     ...(request.handoffPath !== undefined ? { TESKRA_HANDOFF_PATH: request.handoffPath } : {}),
     ...(request.artifactDir !== undefined ? { TESKRA_ARTIFACT_DIR: request.artifactDir } : {}),
     TESKRA_RUN_ID: request.runId,
+    // TASK-126 (ADR-0012): the system layer writes last and always wins.
+    ...(request.progressPath !== undefined ? { TESKRA_PROGRESS_PATH: request.progressPath } : {}),
   }
   // P0-1 (docs/code-review-2026-09-21.md §2): object spread only dedupes
   // exact-case keys. The env block is looked up case-insensitively (first
@@ -140,7 +153,7 @@ function processEnvironment(
 }
 
 /**
- * P0-1: handoff / artifact / permission-config paths are HOST-side (the run
+ * P0-1: handoff / artifact / permission-config / progress paths are HOST-side (the run
  * directory lives in the host data root and the host collects from it), so a
  * WSL-on-Windows agent cannot use them verbatim — translate them into the
  * runtime's own path form (`C:\…` → `/mnt/c/…`) before building launch args
@@ -161,6 +174,9 @@ function runtimeScopedPaths(
     ...(request.permissionConfigPath === undefined
       ? {}
       : { permissionConfigPath: resolveRuntimePath(runtime, request.permissionConfigPath) }),
+    ...(request.progressPath === undefined
+      ? {}
+      : { progressPath: resolveRuntimePath(runtime, request.progressPath) }),
   }
 }
 

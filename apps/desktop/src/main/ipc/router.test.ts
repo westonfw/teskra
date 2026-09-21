@@ -339,6 +339,7 @@ function fakeRuntime(): TeskraRuntime {
       get: vi.fn(() => ok(null)),
       list: vi.fn(() => ok([])),
       getOutput: vi.fn(() => ok('')),
+      listProgress: vi.fn(() => ok([])),
     },
     account: {
       list: vi.fn(async () => ok([])),
@@ -457,6 +458,12 @@ function fakeRuntime(): TeskraRuntime {
         ok({ generatedAt: '2026-09-10T00:00:00.000Z', workspaceId: 'ws1', issues: [] }),
       ),
     },
+    decision: {
+      list: vi.fn(() => ok([])),
+      resolve: vi.fn(() => {
+        throw new Error('not used')
+      }),
+    },
     credential: {
       status: vi.fn(() => ok({ available: true })),
       set: vi.fn(() => ok(undefined)),
@@ -483,6 +490,8 @@ function fakeRuntime(): TeskraRuntime {
             },
             review: { mediumBlockThreshold: 0 },
             retention: { mergedWorktreeDays: 1, completedRunLogsDays: 30, discardedRunDays: 30 },
+            observability: { structuredStream: true },
+            decisions: { shellConfirmationTimeoutMs: 0, stalledRunTimeoutMs: 0 },
           },
           sources: {
             'logging.level': 'default' as const,
@@ -515,6 +524,8 @@ function fakeRuntime(): TeskraRuntime {
             },
             review: { mediumBlockThreshold: 0 },
             retention: { mergedWorktreeDays: 1, completedRunLogsDays: 30, discardedRunDays: 30 },
+            observability: { structuredStream: true },
+            decisions: { shellConfirmationTimeoutMs: 0, stalledRunTimeoutMs: 0 },
           },
           sources: { 'logging.level': 'global' as const },
           warnings: [],
@@ -656,6 +667,29 @@ describe('Typed IPC Router (TASK-020)', () => {
       data: [],
     })
     expect(runtime.agent.list).toHaveBeenCalledWith({ activeOnly: true })
+  })
+
+  it('pages Agent progress events through the runtime facade (TASK-126)', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    expect(
+      await ipc.invoke(IPC_CHANNELS.agentListProgress, { runId: 'run-1', afterSeq: 2, limit: 50 }),
+    ).toEqual({ ok: true, data: [] })
+    expect(runtime.agent.listProgress).toHaveBeenCalledWith({
+      runId: 'run-1',
+      afterSeq: 2,
+      limit: 50,
+    })
+
+    const invalid = await ipc.invoke(IPC_CHANNELS.agentListProgress, { runId: 'run-1', extra: 1 })
+    expect(invalid).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    const overLimit = await ipc.invoke(IPC_CHANNELS.agentListProgress, {
+      runId: 'run-1',
+      limit: 10_000,
+    })
+    expect(overLimit).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
   })
 
   it('routes a validated Doctor request through the runtime facade', async () => {

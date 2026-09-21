@@ -64,9 +64,16 @@ describe('createTeskraPaths (ADR-0003 / TASK-078)', () => {
         handoff: join(dir, 'runs', 'run-1', 'handoff.json'),
         diff: join(dir, 'runs', 'run-1', 'diff.patch'),
         artifacts: join(dir, 'runs', 'run-1', 'artifacts'),
+        progress: join(dir, 'runs', 'run-1', 'progress.jsonl'),
       },
     })
     expect(existsSync(join(dir, 'runs', 'run-1', 'artifacts'))).toBe(true)
+    // TASK-126: progress.jsonl joins the volatile log set (RetentionService GC).
+    expect(paths.runLogFiles(join(dir, 'runs', 'run-1'))).toEqual({
+      events: join(dir, 'runs', 'run-1', 'events.jsonl'),
+      terminal: join(dir, 'runs', 'run-1', 'terminal.log'),
+      progress: join(dir, 'runs', 'run-1', 'progress.jsonl'),
+    })
   })
 
   it('returns a structured error when directory creation fails (ENOTDIR)', () => {

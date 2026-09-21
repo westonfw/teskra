@@ -128,6 +128,33 @@ export const agentRoutingProfileSchema = z.strictObject({
 export type AgentRoutingProfile = z.infer<typeof agentRoutingProfileSchema>
 
 /**
+ * TASK-122 (Milestone 25 §6.1): the structured-output protocol family an
+ * Agent's exec-mode stdout speaks. `'none'` = raw TUI/text only. The enum
+ * deliberately leaves room for future families (ACP / JSON-RPC).
+ */
+export const STRUCTURED_OUTPUT_PROTOCOLS = [
+  'none',
+  'claude-stream-json',
+  'codex-exec-json',
+] as const
+export const structuredOutputProtocolSchema = z.enum(STRUCTURED_OUTPUT_PROTOCOLS)
+export type StructuredOutputProtocol = z.infer<typeof structuredOutputProtocolSchema>
+
+/**
+ * The protocol declaration on AgentDefinition (`output`, ability claim), and
+ * the RESOLVED value on AgentStartRequest (`structuredOutput`, after the
+ * AgentManager applied the exec-mode and `observability.structuredStream`
+ * gates). `structuredArgs` are appended after `headlessArgs`, before the
+ * prompt; required whenever `structured !== 'none'` (enforced on
+ * AgentDefinition by superRefine).
+ */
+export const agentStructuredOutputSchema = z.strictObject({
+  structured: structuredOutputProtocolSchema,
+  structuredArgs: z.array(z.string()).optional(),
+})
+export type AgentStructuredOutput = z.infer<typeof agentStructuredOutputSchema>
+
+/**
  * plan §116.2 — the single Agent Registry entry. `id` is a free-form string
  * (per TASK-003 / plan §21: agentType must NOT be a hardcoded enum, otherwise
  * TASK-022 Fake Agent cannot pass).
@@ -164,8 +191,25 @@ export const agentDefinitionSchema = z
      */
     auditCommandPatterns: z.array(agentAuditCommandPatternSchema).optional(),
     routing: agentRoutingProfileSchema.optional(),
+    /**
+     * TASK-122 (§6.1): structured-output protocol family declaration. Absent
+     * is treated as `{ structured: 'none' }`. Only consulted for `mode ===
+     * 'exec'` launches while `observability.structuredStream` is enabled.
+     */
+    output: agentStructuredOutputSchema.optional(),
   })
   .superRefine((definition, context) => {
+    if (
+      definition.output !== undefined &&
+      definition.output.structured !== 'none' &&
+      definition.output.structuredArgs === undefined
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['output', 'structuredArgs'],
+        message: 'output.structuredArgs is required when output.structured is not "none"',
+      })
+    }
     if (definition.routing !== undefined && definition.routing.agentId !== definition.id) {
       context.addIssue({
         code: 'custom',
@@ -274,6 +318,8 @@ export const agentStartRequestSchema = z.strictObject({
   worktreePath: z.string().optional(),
   handoffPath: z.string().optional(),
   artifactDir: z.string().optional(),
+  /** ADR-0012 / TASK-126: TESKRA_PROGRESS_PATH — the append-only progress file. */
+  progressPath: z.string().optional(),
   environment: z.record(z.string(), z.string()).optional(),
   /**
    * Milestone 24 §13.1: the resolved account-profile env (CODEX_HOME /
@@ -283,6 +329,13 @@ export const agentStartRequestSchema = z.strictObject({
    * workspace/request env.
    */
   profileEnvironment: z.record(z.string(), z.string()).optional(),
+  /**
+   * TASK-122 (§6.1): the structured-output protocol resolved for THIS launch
+   * by the AgentManager — the AgentDefinition `output` declaration after the
+   * `mode === 'exec'` and `observability.structuredStream` gates. Absent =
+   * raw output only. TASK-123 attaches its parser from this field.
+   */
+  structuredOutput: agentStructuredOutputSchema.optional(),
 })
 export type AgentStartRequest = z.infer<typeof agentStartRequestSchema>
 

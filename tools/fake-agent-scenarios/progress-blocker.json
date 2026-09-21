@@ -1,0 +1,9 @@
+{
+  "stdout": ["Fake Agent reporting structured progress"],
+  "progress": [
+    { "kind": "progress", "message": "Fake Agent started working", "percent": 10 },
+    { "kind": "progress", "message": "Fake Agent halfway done", "percent": 50 },
+    { "kind": "blocker", "message": "Fake Agent needs a human decision to continue" }
+  ],
+  "hang": true
+}

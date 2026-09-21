@@ -30,6 +30,8 @@ export const KIMI_AGENT: AgentDefinition = {
   detection: { versionArgs: ['--version'] },
   defaults: { role: 'implementer', permissionProfile: 'safe-auto' },
   permissionEnforcement: 'native',
+  // TASK-122 (§6.1): no structured-output protocol family yet.
+  output: { structured: 'none' },
   routing: {
     agentId: 'kimi',
     useWhen: 'Implementation, refactoring, and autonomous coding loops with Kimi models.',

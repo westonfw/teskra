@@ -9,6 +9,7 @@ import type {
   AgentDefinition,
   ConcurrencyConfig,
   IpcResult,
+  ObservabilityConfig,
   ProviderSessionRef,
   WorkbenchEvents,
 } from '@teskra/contracts'
@@ -112,6 +113,7 @@ function setup(
   failAgentEventWrites = false,
   credentials?: CredentialStore,
   hostProcesses?: Pick<HostProcessControl, 'probe' | 'identity' | 'terminate'>,
+  observability?: ObservabilityConfig,
 ): TestContext {
   const connection = new Database(':memory:')
   connection.pragma('foreign_keys = ON')
@@ -187,6 +189,9 @@ function setup(
     ...(concurrency === undefined
       ? {}
       : { resolveConcurrency: () => ({ ok: true as const, data: concurrency }) }),
+    ...(observability === undefined
+      ? {}
+      : { resolveObservability: () => ({ ok: true as const, data: observability }) }),
   })
   const context = {
     connection,
@@ -1906,5 +1911,70 @@ describe('AgentManager workspace env secrets (TASK-088)', () => {
     expect(started.ok).toBe(false)
     if (!started.ok) expect(started.error.code).toBe('CAPABILITY_NOT_AVAILABLE')
     expect(vi.mocked(context.adapters.codex.start).mock.calls).toEqual([])
+  })
+})
+
+describe('AgentManager structured output resolution (TASK-122)', () => {
+  it('passes the resolved structuredOutput to exec-mode starts when the config gate is on', async () => {
+    const context = setup(undefined, false, undefined, undefined, { structuredStream: true })
+    const started = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      prompt: 'Implement',
+      mode: 'exec',
+    })
+    expect(started.ok).toBe(true)
+
+    const startMock = vi.mocked(context.adapters.codex.start)
+    expect(startMock).toHaveBeenCalledOnce()
+    expect(startMock.mock.calls[0]?.[0].structuredOutput).toEqual(CODEX_AGENT.output)
+    expect(startMock.mock.calls[0]?.[0].structuredOutput).toEqual({
+      structured: 'codex-exec-json',
+      structuredArgs: ['--json'],
+    })
+  })
+
+  it('omits structuredOutput when observability.structuredStream is off', async () => {
+    const context = setup(undefined, false, undefined, undefined, { structuredStream: false })
+    const started = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'codex',
+      prompt: 'Implement',
+      mode: 'exec',
+    })
+    expect(started.ok).toBe(true)
+
+    const request = vi.mocked(context.adapters.codex.start).mock.calls[0]?.[0]
+    expect(request).toBeDefined()
+    expect(request && 'structuredOutput' in request).toBe(false)
+  })
+
+  it('omits structuredOutput for interactive starts even when the gate is on', async () => {
+    const context = setup(undefined, false, undefined, undefined, { structuredStream: true })
+    const started = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'claude',
+      prompt: 'Review',
+    })
+    expect(started.ok).toBe(true)
+
+    const request = vi.mocked(context.adapters.claude.start).mock.calls[0]?.[0]
+    expect(request).toBeDefined()
+    expect(request && 'structuredOutput' in request).toBe(false)
+  })
+
+  it('defaults to the built-in observability config (structuredStream on) without a resolver', async () => {
+    const context = setup()
+    const started = await context.manager.start({
+      workspaceId: 'workspace-1',
+      agentType: 'claude',
+      prompt: 'Review',
+      mode: 'exec',
+    })
+    expect(started.ok).toBe(true)
+
+    expect(vi.mocked(context.adapters.claude.start).mock.calls[0]?.[0].structuredOutput).toEqual(
+      CLAUDE_AGENT.output,
+    )
   })
 })

@@ -18,7 +18,7 @@ import { ipcIdSchema } from './limits'
  * apps/desktop/src/main/config/.
  *
  * The schema covers the keys current Tasks already need (TASK-004 logging,
- * TASK-084 concurrency, TASK-085 watchdog). New Tasks extend it by adding a
+ * TASK-084 concurrency, TASK-085 watchdog, TASK-122 observability). New Tasks extend it by adding a
  * field to a group schema (or a new group) plus a default — nothing else
  * changes.
  */
@@ -118,6 +118,26 @@ export const retentionConfigSchema = z.strictObject({
 })
 export type RetentionConfig = z.infer<typeof retentionConfigSchema>
 
+/**
+ * TASK-122 (Milestone 25 §6.1): `structuredStream` gates the structured-output
+ * protocol families declared on AgentDefinition (`output`). When false, exec
+ * launches get byte-identical command lines to the pre-TASK-122 behavior.
+ */
+export const observabilityConfigSchema = z.strictObject({
+  structuredStream: z.boolean(),
+})
+export type ObservabilityConfig = z.infer<typeof observabilityConfigSchema>
+
+/**
+ * TASK-128 (Milestone 25 §9.1, ADR-0014 §4): PendingDecision expiry timeouts,
+ * in milliseconds. `0` (the default) means the kind never expires on its own.
+ */
+export const decisionsConfigSchema = z.strictObject({
+  shellConfirmationTimeoutMs: z.number().int().min(0),
+  stalledRunTimeoutMs: z.number().int().min(0),
+})
+export type DecisionsConfig = z.infer<typeof decisionsConfigSchema>
+
 export const teskraConfigSchema = z.strictObject({
   logging: loggingConfigSchema,
   concurrency: concurrencyConfigSchema,
@@ -126,6 +146,8 @@ export const teskraConfigSchema = z.strictObject({
   agents: agentsConfigSchema,
   review: reviewConfigSchema,
   retention: retentionConfigSchema,
+  observability: observabilityConfigSchema,
+  decisions: decisionsConfigSchema,
 })
 export type TeskraConfig = z.infer<typeof teskraConfigSchema>
 
@@ -142,6 +164,8 @@ export const teskraConfigLayerSchema = z.strictObject({
   agents: agentsConfigSchema.partial().optional(),
   review: reviewConfigSchema.partial().optional(),
   retention: retentionConfigSchema.partial().optional(),
+  observability: observabilityConfigSchema.partial().optional(),
+  decisions: decisionsConfigSchema.partial().optional(),
 })
 export type TeskraConfigLayer = z.infer<typeof teskraConfigLayerSchema>
 
@@ -161,6 +185,9 @@ export const DEFAULT_CONFIG: TeskraConfig = {
   // plan §135: merged worktrees are collected quickly; run logs and discarded
   // runs get a longer window for post-hoc audit (ADR-0002).
   retention: { mergedWorktreeDays: 1, completedRunLogsDays: 30, discardedRunDays: 30 },
+  observability: { structuredStream: true },
+  // ADR-0014 §4: decisions never expire unless the user opts into a timeout.
+  decisions: { shellConfirmationTimeoutMs: 0, stalledRunTimeoutMs: 0 },
 }
 
 /**

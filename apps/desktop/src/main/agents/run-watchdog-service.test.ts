@@ -426,4 +426,23 @@ describe('RunWatchdogService (TASK-119)', () => {
     expect(harness.listActive).not.toHaveBeenCalled()
     expect(harness.failAndStop).not.toHaveBeenCalled()
   })
+
+  it('TASK-128: onTick listeners run at the end of every tick with the tick time', async () => {
+    harness = createHarness({}, [])
+    const ticks: string[] = []
+    const off = harness.service.onTick((now) => ticks.push(now))
+    harness.service.onTick(() => {
+      throw new Error('boom')
+    })
+
+    await vi.advanceTimersByTimeAsync(WATCHDOG_TICK_MS * 2)
+
+    // A throwing listener neither breaks the tick nor the other listeners.
+    expect(ticks).toEqual([iso(WATCHDOG_TICK_MS), iso(WATCHDOG_TICK_MS * 2)])
+
+    // Unsubscribe is honored; dispose stops the timer and drops the rest.
+    off()
+    await vi.advanceTimersByTimeAsync(WATCHDOG_TICK_MS)
+    expect(ticks).toHaveLength(2)
+  })
 })

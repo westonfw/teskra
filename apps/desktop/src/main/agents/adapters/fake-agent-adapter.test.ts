@@ -174,4 +174,30 @@ describe('FakeAgentAdapter (TASK-025)', () => {
       error: { code: 'UNKNOWN', message: 'spawn failed', retryable: false },
     })
   })
+
+  it('writes TESKRA_PROGRESS_PATH as the system layer, overriding request env (TASK-126)', async () => {
+    const deps = dependencies()
+    const adapter = createFakeAgentAdapter({
+      ...deps,
+      scriptPath: '/teskra/tools/fake-agent.js',
+      resolveRuntime: () => ({ ok: true, data: runtime }),
+    })
+
+    await adapter.start({
+      ...request,
+      progressPath: '/run/progress.jsonl',
+      environment: { TESKRA_PROGRESS_PATH: '/smuggled/progress.jsonl' },
+    })
+
+    expect(deps.processes.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: expect.objectContaining({ TESKRA_PROGRESS_PATH: '/run/progress.jsonl' }),
+      }),
+    )
+    const env = (deps.processes.start as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+      env: Record<string, string>
+    }
+    // The exact-case system value is the only TESKRA_PROGRESS_PATH present.
+    expect(Object.keys(env.env).filter((key) => key === 'TESKRA_PROGRESS_PATH')).toHaveLength(1)
+  })
 })

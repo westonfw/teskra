@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { mkdirSync, readFileSync, writeFileSync } = require('node:fs')
+const { appendFileSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs')
 const { dirname, join, resolve } = require('node:path')
 
 const scenarioDirectory = join(__dirname, 'fake-agent-scenarios')
@@ -23,6 +23,18 @@ function writeHandoff(value) {
   if (handoffPath === undefined || handoffPath.length === 0) return
   mkdirSync(dirname(handoffPath), { recursive: true })
   writeFileSync(handoffPath, value, 'utf8')
+}
+
+// TASK-126 (ADR-0012): append one JSON object per line to TESKRA_PROGRESS_PATH.
+function appendProgress(events) {
+  const progressPath = process.env.TESKRA_PROGRESS_PATH
+  if (progressPath === undefined || progressPath.length === 0) return
+  mkdirSync(dirname(progressPath), { recursive: true })
+  appendFileSync(
+    progressPath,
+    `${events.map((event) => JSON.stringify(event)).join('\n')}\n`,
+    'utf8',
+  )
 }
 
 async function writeOutput(bytes) {
@@ -79,6 +91,7 @@ async function main() {
     )
   }
   if (scenario.rawHandoff !== undefined) writeHandoff(scenario.rawHandoff)
+  if (scenario.progress !== undefined) appendProgress(scenario.progress)
   if (scenario.hang === true) await new Promise(() => setInterval(() => {}, 60_000))
 
   process.exitCode = scenario.exitCode ?? 0

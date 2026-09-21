@@ -20,6 +20,7 @@ import agentExecutionProfilesSql from './migrations/014_agent_execution_profiles
 import workspaceTrustSql from './migrations/015_workspace_trust.sql?raw'
 import { normalizeExternalConfigHomes } from './migrations/016_external_config_home_normalize'
 import agentRunQueueAndRetrySql from './migrations/017_agent_run_queue_and_retry.sql?raw'
+import pendingDecisionsSql from './migrations/019_pending_decisions.sql?raw'
 
 /**
  * The canonical migration chain (TASK-006). The .sql files under
@@ -70,6 +71,10 @@ export const MIGRATIONS: readonly Migration[] = [
     run: normalizeExternalConfigHomes,
   },
   { version: 17, name: '017_agent_run_queue_and_retry', sql: agentRunQueueAndRetrySql },
+  // TASK-128. Version 18 is reserved for 018_agent_run_usage (TASK-124), under
+  // parallel development; the runner applies migrations per-version (not by
+  // MAX), so the gap backfills when 018 lands.
+  { version: 19, name: '019_pending_decisions', sql: pendingDecisionsSql },
 ]
 
 /** Brings the database schema up to the latest known version. */

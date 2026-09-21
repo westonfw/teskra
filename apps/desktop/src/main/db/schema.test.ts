@@ -658,6 +658,57 @@ const SCHEMA: Record<string, TableSpec> = {
     ],
     indexes: [],
   },
+  pending_decisions: {
+    source: '§139.1 lines 5695–5728 (migration 019, TASK-128)',
+    columns: [
+      ['id', 'TEXT', 0, null, 1],
+      ['workspace_id', 'TEXT', 1, null, 0],
+      ['kind', 'TEXT', 1, null, 0],
+      ['status', 'TEXT', 1, null, 0],
+      ['severity', 'TEXT', 1, null, 0],
+      ['run_id', 'TEXT', 0, null, 0],
+      ['workflow_run_id', 'TEXT', 0, null, 0],
+      ['workflow_step_id', 'TEXT', 0, null, 0],
+      ['worktree_id', 'TEXT', 0, null, 0],
+      ['dedupe_key', 'TEXT', 1, null, 0],
+      ['title', 'TEXT', 1, null, 0],
+      ['detail_json', 'TEXT', 1, null, 0],
+      ['options_json', 'TEXT', 1, null, 0],
+      ['resolution_json', 'TEXT', 0, null, 0],
+      ['expires_at', 'TEXT', 0, null, 0],
+      ['created_at', 'TEXT', 1, null, 0],
+      ['resolved_at', 'TEXT', 0, null, 0],
+    ],
+    // ADR-0014 §6: source references SET NULL (the audit row survives Run /
+    // Worktree retention deletes); only the workspace cascades.
+    foreignKeys: [
+      { from: 'workspace_id', table: 'workspaces', to: 'id', onDelete: 'CASCADE' },
+      { from: 'run_id', table: 'agent_runs', to: 'id', onDelete: 'SET NULL' },
+      { from: 'workflow_run_id', table: 'workflow_runs', to: 'id', onDelete: 'SET NULL' },
+      { from: 'workflow_step_id', table: 'workflow_steps', to: 'id', onDelete: 'SET NULL' },
+      { from: 'worktree_id', table: 'worktrees', to: 'id', onDelete: 'SET NULL' },
+    ],
+    indexes: [
+      {
+        name: 'idx_pending_decisions_open_dedupe',
+        unique: true,
+        partial: true,
+        columns: ['dedupe_key'],
+      },
+      {
+        name: 'idx_pending_decisions_run',
+        unique: false,
+        partial: false,
+        columns: ['run_id'],
+      },
+      {
+        name: 'idx_pending_decisions_workspace_open',
+        unique: false,
+        partial: true,
+        columns: ['workspace_id', 'created_at'],
+      },
+    ],
+  },
 }
 
 const openConnections: Database.Database[] = []

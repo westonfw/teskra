@@ -108,6 +108,7 @@ const bridge: TeskraBridge = {
     get: (request) => invoke(IPC_CHANNELS.agentRunGet, request),
     list: (request = {}) => invoke(IPC_CHANNELS.agentRunList, request),
     getOutput: (request) => invoke(IPC_CHANNELS.agentRunOutput, request),
+    listProgress: (request) => invoke(IPC_CHANNELS.agentListProgress, request),
   },
   account: {
     list: (request = {}) => invoke(IPC_CHANNELS.accountList, request),
@@ -217,6 +218,10 @@ const bridge: TeskraBridge = {
     iterate: (request) => invoke(IPC_CHANNELS.workflowIterate, request),
     startFullWorkflow: (request) => invoke(IPC_CHANNELS.workflowStartFull, request),
     runSummary: (request) => invoke(IPC_CHANNELS.workflowRunSummary, request),
+  },
+  decision: {
+    list: (request = {}) => invoke(IPC_CHANNELS.decisionList, request),
+    resolve: (request) => invoke(IPC_CHANNELS.decisionResolve, request),
   },
   events: eventSubscriptions,
 }

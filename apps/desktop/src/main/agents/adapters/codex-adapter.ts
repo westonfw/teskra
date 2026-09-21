@@ -14,6 +14,7 @@ import {
 import {
   agentHandoffDir,
   createCliAgentAdapter,
+  structuredOutputArguments,
   type CliAgentAdapterOptions,
 } from './cli-agent-adapter'
 import type { CodingAgentAdapter } from './coding-agent-adapter'
@@ -69,6 +70,8 @@ export function buildCodexArguments(request: AgentStartRequest): readonly string
   return [
     ...commonArguments(request),
     ...(request.mode === 'exec' ? (CODEX_AGENT.prompt.headlessArgs ?? ['exec']) : []),
+    // TASK-122 (§6.1): `--json` follows the `exec` subcommand, before the prompt.
+    ...structuredOutputArguments(request),
     ...(request.prompt === undefined ? [] : [request.prompt]),
   ]
 }
@@ -87,6 +90,7 @@ export function buildCodexResumeArguments(
   return [
     ...commonArguments(request),
     ...(request.mode === 'exec' ? (CODEX_AGENT.prompt.headlessArgs ?? ['exec']) : []),
+    ...structuredOutputArguments(request),
     'resume',
     ...(sessionId !== undefined ? [sessionId] : lastFallbackAllowed ? ['--last'] : []),
     ...(request.prompt === undefined ? [] : [request.prompt]),

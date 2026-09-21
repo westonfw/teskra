@@ -24,6 +24,7 @@ function stubPaths(): TeskraPaths {
     runLogFiles: (runDirectory) => ({
       events: `${runDirectory}/events.jsonl`,
       terminal: `${runDirectory}/terminal.log`,
+      progress: `${runDirectory}/progress.jsonl`,
     }),
     runFiles: (runId) => ({
       ok: true,
@@ -35,6 +36,7 @@ function stubPaths(): TeskraPaths {
         handoff: `/teskra-home/runs/${runId}/handoff.json`,
         diff: `/teskra-home/runs/${runId}/diff.patch`,
         artifacts: `/teskra-home/runs/${runId}/artifacts`,
+        progress: `/teskra-home/runs/${runId}/progress.jsonl`,
       },
     }),
     config: () => GLOBAL_CONFIG_PATH,
@@ -147,6 +149,8 @@ describe('ConfigService.resolve — layer order', () => {
       agents: { executableOverrides: {}, defaultAccountProfiles: {}, defaultExecutionProfiles: {} },
       review: { mediumBlockThreshold: 0 }, // default untouched
       retention: { mergedWorktreeDays: 1, completedRunLogsDays: 30, discardedRunDays: 30 },
+      observability: { structuredStream: true }, // default untouched
+      decisions: { shellConfirmationTimeoutMs: 0, stalledRunTimeoutMs: 0 }, // default untouched
     })
     expect(sources).toEqual({
       'logging.level': 'global',
@@ -162,6 +166,9 @@ describe('ConfigService.resolve — layer order', () => {
       'retention.mergedWorktreeDays': 'default',
       'retention.completedRunLogsDays': 'default',
       'retention.discardedRunDays': 'default',
+      'observability.structuredStream': 'default',
+      'decisions.shellConfirmationTimeoutMs': 'default',
+      'decisions.stalledRunTimeoutMs': 'default',
     })
   })
 

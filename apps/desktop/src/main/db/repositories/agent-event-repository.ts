@@ -51,6 +51,15 @@ export interface AgentEventRepository {
   append(input: AppendAgentEventInput, now?: string): IpcResult<AgentEvent>
   /** Ordered by seq ascending — the canonical replay order. */
   listByRun(runId: string): IpcResult<AgentEvent[]>
+  /**
+   * TASK-126: one event type of a run, paged by seq (`afterSeq` exclusive,
+   * ordered ascending). Powers `teskra:agent:list-progress`.
+   */
+  listByRunAndType(
+    runId: string,
+    eventType: string,
+    options?: { afterSeq?: number; limit?: number },
+  ): IpcResult<AgentEvent[]>
   /** Next free seq for a run (MAX(seq) + 1, starting at 1). */
   nextSeq(runId: string): IpcResult<number>
 }
@@ -85,6 +94,9 @@ export function createAgentEventRepository(connection: Database.Database): Agent
   const listByRunStatement = connection.prepare(
     'SELECT * FROM agent_events WHERE run_id = ? ORDER BY seq ASC',
   )
+  const listByRunAndTypeStatement = connection.prepare(
+    'SELECT * FROM agent_events WHERE run_id = ? AND event_type = ? AND seq > ? ORDER BY seq ASC LIMIT ?',
+  )
   const maxSeqStatement = connection.prepare(
     'SELECT MAX(seq) AS max_seq FROM agent_events WHERE run_id = ?',
   )
@@ -116,6 +128,23 @@ export function createAgentEventRepository(connection: Database.Database): Agent
     listByRun(runId) {
       const rows = execute(ENTITY, 'listByRun', () => {
         return listByRunStatement.all(runId) as AgentEventRow[]
+      })
+      if (!rows.ok) {
+        return rows
+      }
+      return mapRows(rows.data, toDomain)
+    },
+
+    listByRunAndType(runId, eventType, options = {}) {
+      const rows = execute(ENTITY, 'listByRunAndType', () => {
+        return listByRunAndTypeStatement.all(
+          runId,
+          eventType,
+          options.afterSeq ?? 0,
+          // SQLite LIMIT rejects non-positive values for our purposes; an
+          // absent limit means "the rest of the run's events of this type".
+          options.limit ?? -1,
+        ) as AgentEventRow[]
       })
       if (!rows.ok) {
         return rows

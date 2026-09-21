@@ -12,6 +12,7 @@ import type {
   AgentDetectionRequest,
   AgentDetectionResult,
   AgentExecutionProfile,
+  AgentProgressRecord,
   AgentRun,
   AgentRunIdRequest,
   AgentRunOutputRequest,
@@ -64,10 +65,12 @@ import type {
   ListRecoveryIssuesRequest,
   ListRecentWorkspacesRequest,
   ListAgentDetectionsRequest,
+  ListAgentProgressRequest,
   ListAgentRunsRequest,
   ListArtifactsRequest,
   ListCriteriaSetsRequest,
   ListCriterionScoresRequest,
+  ListDecisionsRequest,
   ListMemoriesRequest,
   ListPermissionAuditRequest,
   ListPermissionRulesRequest,
@@ -91,6 +94,7 @@ import type {
   PendingShellConfirmation,
   PermissionRule,
   PermissionRuleIdRequest,
+  PendingDecision,
   ProfileAlias,
   PromptTemplateInfo,
   RecordArtifactRequest,
@@ -100,6 +104,7 @@ import type {
   RenderPromptTemplateRequest,
   ResizeAccountLoginRequest,
   ResolveConfigRequest,
+  ResolveDecisionRequest,
   ResolvePermissionDecisionRequest,
   ResolvePermissionProfileRequest,
   ResolvedConfig,
@@ -280,6 +285,16 @@ export interface RecoveryPort {
   list(request?: ListRecoveryIssuesRequest): Promise<IpcResult<RecoveryReport>>
 }
 
+/**
+ * TASK-128 (ADR-0014): the persisted Decision Inbox. `resolve` is the user's
+ * pick — the facade pins decidedBy to 'user'; timeout / system closures never
+ * cross IPC as requests (they arrive as decision.resolved events).
+ */
+export interface DecisionPort {
+  list(request?: ListDecisionsRequest): IpcResult<readonly PendingDecision[]>
+  resolve(request: ResolveDecisionRequest): IpcResult<PendingDecision>
+}
+
 export interface SettingsPort {
   resolveConfig(request?: ResolveConfigRequest): IpcResult<ResolvedConfig>
   updateConfig(request: UpdateConfigRequest): IpcResult<ResolvedConfig>
@@ -418,6 +433,8 @@ export interface AgentCatalogPort {
   get(request: AgentRunIdRequest): IpcResult<AgentRun | null>
   list(request?: ListAgentRunsRequest): IpcResult<readonly AgentRun[]>
   getOutput(request: AgentRunOutputRequest): IpcResult<string>
+  /** TASK-126 (ADR-0012): persisted agent.progress events, paged by seq. */
+  listProgress(request: ListAgentProgressRequest): IpcResult<readonly AgentProgressRecord[]>
 }
 
 export interface WorktreePort {
@@ -520,6 +537,7 @@ export interface TeskraRuntime {
   readonly maintenance: MaintenancePort
   readonly workflow: WorkflowPort
   readonly recovery: RecoveryPort
+  readonly decision: DecisionPort
   /** P0-2: async — stops Agent/Terminal child processes before closing the DB. */
   dispose(): Promise<IpcResult<void>>
 }

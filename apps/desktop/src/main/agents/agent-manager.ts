@@ -14,10 +14,12 @@ import {
   type AgentResumeProfileContext,
   type AgentRun,
   type AgentRunProfileSnapshot,
+  type AgentStructuredOutput,
   type ConcurrencyConfig,
   type ContinueAgentRunRequest,
   type IpcResult,
   type ListAgentRunsRequest,
+  type ObservabilityConfig,
   type ProviderSessionRef,
   type PublicAppError,
   type QueuedReason,
@@ -137,6 +139,12 @@ export interface AgentManagerDeps {
   readonly createRunId?: () => string
   readonly now?: () => string
   readonly resolveConcurrency?: (workspaceId: string) => IpcResult<ConcurrencyConfig>
+  /**
+   * TASK-122 (Milestone 25 §6.1): resolves the observability config group for
+   * the structured-output gate. Without it, DEFAULT_CONFIG.observability
+   * (structuredStream on) applies.
+   */
+  readonly resolveObservability?: (workspaceId: string) => IpcResult<ObservabilityConfig>
   /**
    * TASK-065: when injected, the PermissionManager resolves the layered rules
    * into the Run's profile before projection. Without it, the profile is the
@@ -396,6 +404,40 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
   const now = deps.now ?? (() => new Date().toISOString())
   const resolveConcurrency =
     deps.resolveConcurrency ?? (() => ({ ok: true, data: DEFAULT_CONFIG.concurrency }))
+  const resolveObservability =
+    deps.resolveObservability ?? (() => ({ ok: true, data: DEFAULT_CONFIG.observability }))
+
+  /**
+   * TASK-122 (§6.1): resolves the structured-output protocol for one launch.
+   * Only exec-mode runs of an agent whose definition declares a non-`none`
+   * family qualify, and only while `observability.structuredStream` is on.
+   * A config read failure is non-fatal for observability — warn and apply the
+   * built-in default (the concurrency resolution above already fails loudly
+   * on the same config source).
+   */
+  const resolveStructuredOutput = (
+    definition: AgentDefinition,
+    mode: 'interactive' | 'exec',
+    workspaceId: string,
+  ): AgentStructuredOutput | undefined => {
+    if (
+      mode !== 'exec' ||
+      definition.output === undefined ||
+      definition.output.structured === 'none'
+    ) {
+      return undefined
+    }
+    const observability = resolveObservability(workspaceId)
+    if (!observability.ok) {
+      logger.warn(
+        { workspaceId, agentType: definition.id, error: observability.error },
+        'Failed to resolve the observability config; applying the built-in default.',
+      )
+    }
+    const structuredStream = (observability.ok ? observability.data : DEFAULT_CONFIG.observability)
+      .structuredStream
+    return structuredStream ? definition.output : undefined
+  }
   const handoffCollector =
     deps.handoffCollector ??
     createHandoffCollector({ handoffs: deps.handoffs, paths: deps.paths, now })
@@ -1653,6 +1695,9 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       }
       synchronizeTaskStatus(created.data)
 
+      // TASK-122 (§6.1): resolve the structured-output protocol once, with the
+      // exec-mode and observability.structuredStream gates applied.
+      const structuredOutput = resolveStructuredOutput(definition, mode, workspace.data.id)
       const pending: PendingRun = {
         adapter,
         resumed: false,
@@ -1662,6 +1707,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           ...(task === undefined ? {} : { task }),
           mode,
           approvalMode,
+          ...(structuredOutput === undefined ? {} : { structuredOutput }),
           ...(permission.data === undefined
             ? {}
             : {
@@ -1675,6 +1721,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           ...(worktreePath === undefined ? {} : { worktreePath }),
           handoffPath: runFiles.data.handoff,
           artifactDir: runFiles.data.artifacts,
+          progressPath: runFiles.data.progress,
           ...(request.environment === undefined ? {} : { environment: request.environment }),
           ...(startProfile.data.profileEnvironment === undefined
             ? {}
@@ -1940,6 +1987,18 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         runDir: runFiles.data.directory,
       })
       if (!resumePermission.ok) return resumePermission
+      // ADR-0007: relaunch with the run's original mode — an exec run that
+      // comes back interactive would idle at the prompt forever. Runs
+      // predating 009 (no recorded mode) and CLIs without headless support
+      // keep the pre-ADR interactive behavior.
+      const resumeMode =
+        run.mode === 'exec' && definition.capabilities.headless ? 'exec' : 'interactive'
+      // TASK-122 (§6.1): same structured-output resolution as start().
+      const resumeStructuredOutput = resolveStructuredOutput(
+        definition,
+        resumeMode,
+        run.workspaceId,
+      )
       const pending: PendingRun = {
         adapter,
         resumed: true,
@@ -1949,12 +2008,11 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
           runId: run.id,
           workspace: launchWorkspace.data,
           ...(task?.data === null || task?.data === undefined ? {} : { task: task.data }),
-          // ADR-0007: relaunch with the run's original mode — an exec run that
-          // comes back interactive would idle at the prompt forever. Runs
-          // predating 009 (no recorded mode) and CLIs without headless support
-          // keep the pre-ADR interactive behavior.
-          mode: run.mode === 'exec' && definition.capabilities.headless ? 'exec' : 'interactive',
+          mode: resumeMode,
           approvalMode: run.approvalMode,
+          ...(resumeStructuredOutput === undefined
+            ? {}
+            : { structuredOutput: resumeStructuredOutput }),
           ...(resumePermission.data === undefined
             ? {}
             : {
@@ -1970,6 +2028,7 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
             : { worktreePath: worktree.data.path }),
           handoffPath: runFiles.data.handoff,
           artifactDir: runFiles.data.artifacts,
+          progressPath: runFiles.data.progress,
           ...(profileEnvironment === undefined ? {} : { profileEnvironment }),
         },
       }

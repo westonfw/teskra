@@ -256,6 +256,8 @@ export const zhCN: Record<TranslationKey, string> = {
   'errorMessage.secretsNotPersisted': '当前环境无法安全存储机密，敏感环境变量未被保存。',
   'errorMessage.terminalNotActive': '终端“{id}”不在活动状态。',
   'errorMessage.agentRunNotFound': '找不到 Agent 运行“{id}”。',
+  'errorMessage.decisionNotFound': '找不到决策“{id}”。',
+  'errorMessage.decisionAlreadyClosed': '该决策已关闭。',
   'errorMessage.agentRunNotActive': 'Agent 运行“{runId}”不在活动状态。',
   'errorMessage.onlyInterruptedResumable': '只有已中断的 Agent 运行可以恢复。',
   'errorMessage.workspaceRequiredForRunHistory': '列出历史 Agent 运行时必须指定工作区。',

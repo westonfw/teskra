@@ -10,6 +10,7 @@ import {
 import {
   agentHandoffDir,
   createCliAgentAdapter,
+  structuredOutputArguments,
   type CliAgentAdapterOptions,
 } from './cli-agent-adapter'
 import type { CodingAgentAdapter } from './coding-agent-adapter'
@@ -52,6 +53,7 @@ export function buildClaudeArguments(
     '--session-id',
     sessionId,
     ...(request.mode === 'exec' ? (CLAUDE_AGENT.prompt.headlessArgs ?? ['--print']) : []),
+    ...structuredOutputArguments(request),
     ...(request.prompt === undefined ? [] : [request.prompt]),
   ]
 }
@@ -61,6 +63,7 @@ export function buildClaudeResumeArguments(request: AgentResumeRequest): readonl
   return [
     ...commonArguments(request),
     ...(request.mode === 'exec' ? (CLAUDE_AGENT.prompt.headlessArgs ?? ['--print']) : []),
+    ...structuredOutputArguments(request),
     ...(sessionId === undefined ? ['--continue'] : ['--resume', sessionId]),
     ...(request.prompt === undefined ? [] : [request.prompt]),
   ]

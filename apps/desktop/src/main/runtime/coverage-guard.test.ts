@@ -22,6 +22,7 @@ const COVERED_MODULES = [
   'prompts',
   'workflows',
   'security',
+  'decisions',
 ]
 
 /** Type declarations and pure data definitions carry no runtime behavior. */

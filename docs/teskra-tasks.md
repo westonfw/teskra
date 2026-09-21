@@ -4569,13 +4569,13 @@ claude → `['--output-format', 'stream-json', '--verbose']`；codex → `['--js
 
 ### 验收标准
 
-- [ ] `agentDefinitionSchema` 接受缺省（视为 `none`）；`structured !== 'none'` 时
+- [x] `agentDefinitionSchema` 接受缺省（视为 `none`）；`structured !== 'none'` 时
       `structuredArgs` 必填（superRefine）。
-- [ ] 仅 `mode === 'exec'` 且配置开启时把 `structuredArgs` 拼进命令行；interactive 不变；
+- [x] 仅 `mode === 'exec'` 且配置开启时把 `structuredArgs` 拼进命令行；interactive 不变；
       配置关闭时命令行与现在逐字相同（快照测试）。
-- [ ] Codex 的 `-c sandbox_workspace_write.writable_roots=[...]` 仍先于 `exec`，`--json` 在其后（参数顺序测试）。
-- [ ] Claude 的 `--session-id` / `--permission-mode` / `--settings` / `--add-dir` 与新参数共存。
-- [ ] `AgentStartRequest` 带上解析后的 `structuredOutput` 供 TASK-123 使用。
+- [x] Codex 的 `-c sandbox_workspace_write.writable_roots=[...]` 仍先于 `exec`，`--json` 在其后（参数顺序测试）。
+- [x] Claude 的 `--session-id` / `--permission-mode` / `--settings` / `--add-dir` 与新参数共存。
+- [x] `AgentStartRequest` 带上解析后的 `structuredOutput` 供 TASK-123 使用。
 
 ---
 
@@ -4675,17 +4675,17 @@ IPC:       teskra:agent:list-progress { runId, afterSeq?, limit? }
 
 ### 验收标准
 
-- [ ] `paths.runFiles()` 增加 `progress`；`runLogFiles()` 纳入 `progress.jsonl`；
+- [x] `paths.runFiles()` 增加 `progress`；`runLogFiles()` 纳入 `progress.jsonl`；
       `RunLogStore.initialize()` **不**预创建它。
-- [ ] `cli-agent-adapter` 作为系统层最后写入 `TESKRA_PROGRESS_PATH`，WSL 路径经 `runtimeScopedPaths` 转换。
-- [ ] 轮询 1 秒（不用 `fs.watch`），只读新增字节，半行保留；终态后最后 drain 一次再停止。
-- [ ] 坏行跳过并计数（每 Run WARN 一次）；单行 > 8 KiB 跳过；文件 > 4 MiB 停止跟随并写
+- [x] `cli-agent-adapter` 作为系统层最后写入 `TESKRA_PROGRESS_PATH`，WSL 路径经 `runtimeScopedPaths` 转换。
+- [x] 轮询 1 秒（不用 `fs.watch`），只读新增字节，半行保留；终态后最后 drain 一次再停止。
+- [x] 坏行跳过并计数（每 Run WARN 一次）；单行 > 8 KiB 跳过；文件 > 4 MiB 停止跟随并写
       `agent.progress_summary { truncated: true }`。
-- [ ] 通过的行 `redactSecrets` 后持久化为 `agent.progress`（`events.jsonl` + `agent_events`）并广播。
-- [ ] 每条进度事件刷新 `lastOutputAt`（TASK-119 入口）。
-- [ ] `blocker` / `question` 通过回调暴露给 TASK-130（本 Task 只发事件）；Run 状态不变。
-- [ ] 文件不存在不是错误、不记 WARN。
-- [ ] Fake Agent 新增场景 `progress-blocker`（写两条 progress + 一条 blocker 后等待）。
+- [x] 通过的行 `redactSecrets` 后持久化为 `agent.progress`（`events.jsonl` + `agent_events`）并广播。
+- [x] 每条进度事件刷新 `lastOutputAt`（TASK-119 入口）。
+- [x] `blocker` / `question` 通过回调暴露给 TASK-130（本 Task 只发事件）；Run 状态不变。
+- [x] 文件不存在不是错误、不记 WARN。
+- [x] Fake Agent 新增场景 `progress-blocker`（写两条 progress + 一条 blocker 后等待）。
 
 ---
 
@@ -4732,18 +4732,18 @@ config:    decisions.shellConfirmationTimeoutMs, decisions.stalledRunTimeoutMs (
 
 ### 验收标准
 
-- [ ] DDL 与 plan §139.1 逐列一致；partial unique index、三个 CHECK、`SET NULL` FK 各有
+- [x] DDL 与 plan §139.1 逐列一致；partial unique index、三个 CHECK、`SET NULL` FK 各有
       「让它失败」的测试；workspace 删除级联。
-- [ ] `open()` 按 `dedupeKey` 幂等：真并发（两个并行 `open`）只产生一行、只发一次 `decision.opened`。
-- [ ] `resolve()` CAS：只有 `open → resolved` 成功一次，第二次返回 `CONFLICT`；
+- [x] `open()` 按 `dedupeKey` 幂等：真并发（两个并行 `open`）只产生一行、只发一次 `decision.opened`。
+- [x] `resolve()` CAS：只有 `open → resolved` 成功一次，第二次返回 `CONFLICT`；
       解决动作由 `onResolved(kind, handler)` 订阅方执行，Service 不依赖 Git / AgentManager。
-- [ ] `expire()` 由 TASK-119 的 tick 调用，按 kind 默认动作：shell 确认 = 拒绝、
+- [x] `expire()` 由 TASK-119 的 tick 调用，按 kind 默认动作：shell 确认 = 拒绝、
       stalled_run = 继续等待、agent_blocker = 无动作；超时 `0` 永不过期。
-- [ ] `cancelBySource(runId | workflowRunId)` 把来源的 open 行置 `cancelled`。
-- [ ] 启动 reconciliation：open 的 `shell_confirmation` → `expired` 并写审计（有重启模拟测试）。
-- [ ] `options` 中不允许「记住选择」类选项（Schema 层没有该字段，文档写明）。
-- [ ] `detail_json` 按 kind 的 Zod 判别联合校验；`resolution_json` 含 `decidedBy: user | timeout | system`。
-- [ ] IPC 请求 `strictObject`；`list` 支持 `workspaceId? / kind? / status?`。
+- [x] `cancelBySource(runId | workflowRunId)` 把来源的 open 行置 `cancelled`。
+- [x] 启动 reconciliation：open 的 `shell_confirmation` → `expired` 并写审计（有重启模拟测试）。
+- [x] `options` 中不允许「记住选择」类选项（Schema 层没有该字段，文档写明）。
+- [x] `detail_json` 按 kind 的 Zod 判别联合校验；`resolution_json` 含 `decidedBy: user | timeout | system`。
+- [x] IPC 请求 `strictObject`；`list` 支持 `workspaceId? / kind? / status?`。
 
 ---
 

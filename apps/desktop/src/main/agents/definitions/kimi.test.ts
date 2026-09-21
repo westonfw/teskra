@@ -20,5 +20,7 @@ describe('KIMI_AGENT', () => {
       modelSelection: true,
     })
     expect(KIMI_AGENT.defaults).toEqual({ role: 'implementer', permissionProfile: 'safe-auto' })
+    // TASK-122: Kimi declares no structured-output protocol family yet.
+    expect(KIMI_AGENT.output).toEqual({ structured: 'none' })
   })
 })

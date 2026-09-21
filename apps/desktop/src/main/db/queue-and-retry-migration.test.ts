@@ -75,7 +75,7 @@ describe('migration 017 — agent run queue and retry (TASK-120/121)', () => {
     expect(upgraded.ok).toBe(true)
     if (!upgraded.ok) return
     expect(upgraded.data.fromVersion).toBe(16)
-    expect(upgraded.data.toVersion).toBe(17)
+    expect(upgraded.data.toVersion).toBe(19)
 
     const row = db
       .prepare('SELECT queued_reason, retry_of_run_id FROM agent_runs WHERE id = ?')
@@ -137,6 +137,6 @@ describe('migration 017 — agent run queue and retry (TASK-120/121)', () => {
     expect(again.ok).toBe(true)
     if (!again.ok) return
     expect(again.data.applied).toEqual([])
-    expect(again.data.toVersion).toBe(17)
+    expect(again.data.toVersion).toBe(19)
   })
 })
