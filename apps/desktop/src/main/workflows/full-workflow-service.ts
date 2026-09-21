@@ -16,6 +16,7 @@ import {
 import { computeCriteriaReviewOutcome } from '@teskra/shared'
 
 import type { AgentRegistry } from '../agents/agent-registry'
+import type { ProfileAliasManager } from '../agents/profile-alias-manager'
 import type { CriteriaRepository } from '../db/repositories/criteria-repository'
 import type { ReviewRepository } from '../db/repositories/review-repository'
 import type { TaskRepository } from '../db/repositories/task-repository'
@@ -34,9 +35,11 @@ import {
   extractFullWorkflowConfig,
   resolveDefaultFullWorkflowConfig,
   type FullWorkflowConfig,
+  type FullWorkflowNodeProfiles,
 } from './default-workflow'
 import type { WorkflowDefinitionLoader } from './definition-loader'
 import type { IterationController } from './iteration-controller'
+import { prevalidateWorkflowAgentNodeProfiles } from './workflow-engine'
 import type { WorkflowRunStore } from './workflow-run-store'
 
 /**
@@ -62,6 +65,9 @@ import type { WorkflowRunStore } from './workflow-run-store'
  * - Agent ids are never hardcoded: per-request override → repo-local
  *   `<repo>/.teskra/workflows/full.*` definition (ADR-0005) → the
  *   AgentRegistry's declared default roles. No candidates = a clear error.
+ *   The repo definition loads for every trusted-workspace start (even when
+ *   the request names both agents) so its profile aliases / env / test
+ *   command merge in — only the agent identities yield to the request.
  *
  * Failure hygiene mirrors DispatchService: anything failing between worktree
  * creation and run persistence discards the fresh worktree (best-effort), so
@@ -105,6 +111,14 @@ export interface FullWorkflowServiceDeps {
    */
   readonly createController: (firstAgentRunId: string) => IterationController
   readonly createAgentRunId?: () => string
+  /**
+   * Code-review P2-11: when wired, the repo override's agent-node aliases are
+   * validated BEFORE the worktree side effect — an unbound alias fails the
+   * start immediately instead of after resources were created. The engine
+   * repeats the same check at pass start, so this is the early exit, not the
+   * only line of defense.
+   */
+  readonly profileAliases?: Pick<ProfileAliasManager, 'resolveAgentNodeProfiles'>
 }
 
 function fail<T>(error: InternalAppError): IpcResult<T> {
@@ -230,6 +244,8 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
       implementer?: string | undefined
       reviewers?: readonly string[] | undefined
       testCommand?: string | undefined
+      implementerProfiles?: FullWorkflowNodeProfiles | undefined
+      fixerProfiles?: FullWorkflowNodeProfiles | undefined
     } = {
       ...(request.implementer === undefined ? {} : { implementer: request.implementer }),
       ...(request.reviewers === undefined ? {} : { reviewers: request.reviewers }),
@@ -239,23 +255,33 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
     // it only loads for trusted workspaces (code-review P0-3). A test command
     // taken from it is a repo-defined shell command, so the Build/Test steps
     // get requireConfirmation: the user sees the full command line first.
+    //
+    // The override loads whenever the workspace is trusted — NOT only when
+    // the request left the agent identities open. Explicit identities from
+    // the launch dialog still win (`??=` below), but the override's profiles
+    // (TASK-111 aliases / env) and test command merge in either way; gating
+    // the load on missing identities silently dropped `accountProfile`
+    // whenever the user picked both agents explicitly — the same silent
+    // default-account fallback P0-2 removed.
     let testCommandFromRepo = false
-    if (merged.implementer === undefined || merged.reviewers === undefined) {
-      if (repoLocalContentAllowed(workspace.data)) {
-        const override = resolveConfig(workspace.data.path)
-        if (!override.ok) return override
-        if (merged.testCommand === undefined && override.data?.testCommand !== undefined) {
-          testCommandFromRepo = true
-        }
-        merged.implementer ??= override.data?.implementer
-        merged.reviewers ??= override.data?.reviewers
-        merged.testCommand ??= override.data?.testCommand
-      } else {
-        getLogger('security').warn(
-          { workspaceId: request.workspaceId },
-          'Workspace is restricted; ignoring the repo-local full workflow definition override.',
-        )
+    if (repoLocalContentAllowed(workspace.data)) {
+      const override = resolveConfig(workspace.data.path)
+      if (!override.ok) return override
+      if (merged.testCommand === undefined && override.data?.testCommand !== undefined) {
+        testCommandFromRepo = true
       }
+      merged.implementer ??= override.data?.implementer
+      merged.reviewers ??= override.data?.reviewers
+      merged.testCommand ??= override.data?.testCommand
+      // P0-2: the agent nodes' TASK-111 aliases / env ride along too —
+      // dropping them would silently run under the default account.
+      merged.implementerProfiles ??= override.data?.implementerProfiles
+      merged.fixerProfiles ??= override.data?.fixerProfiles
+    } else {
+      getLogger('security').warn(
+        { workspaceId: request.workspaceId },
+        'Workspace is restricted; ignoring the repo-local full workflow definition override.',
+      )
     }
     let config: FullWorkflowConfig
     if (merged.implementer !== undefined && merged.reviewers !== undefined) {
@@ -264,6 +290,10 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
         reviewers: merged.reviewers,
         testCommand: merged.testCommand ?? DEFAULT_FULL_TEST_COMMAND,
         ...(testCommandFromRepo ? { shellRequireConfirmation: true } : {}),
+        ...(merged.implementerProfiles === undefined
+          ? {}
+          : { implementerProfiles: merged.implementerProfiles }),
+        ...(merged.fixerProfiles === undefined ? {} : { fixerProfiles: merged.fixerProfiles }),
       }
     } else {
       const defaults = resolveDefaultFullWorkflowConfig(deps.registry.list())
@@ -273,6 +303,10 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
         reviewers: merged.reviewers ?? defaults.data.reviewers,
         testCommand: merged.testCommand ?? defaults.data.testCommand,
         ...(testCommandFromRepo ? { shellRequireConfirmation: true } : {}),
+        ...(merged.implementerProfiles === undefined
+          ? {}
+          : { implementerProfiles: merged.implementerProfiles }),
+        ...(merged.fixerProfiles === undefined ? {} : { fixerProfiles: merged.fixerProfiles }),
       }
     }
     for (const agentId of [config.implementer, ...config.reviewers]) {
@@ -282,6 +316,15 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
           `FullWorkflowService could not resolve agent=${JSON.stringify(agentId)}`,
         )
       }
+    }
+
+    const definition = buildDefaultFullWorkflowDefinition(config)
+    // P2-11: an unbound alias must fail BEFORE the worktree side effect (and
+    // before any earlier DAG node runs). Without a wired resolver the check
+    // is deferred to the engine's pass-start backstop, which fails closed.
+    if (deps.profileAliases !== undefined) {
+      const prevalidated = prevalidateWorkflowAgentNodeProfiles(definition, deps.profileAliases)
+      if (!prevalidated.ok) return prevalidated
     }
 
     const policy: IterationPolicy = {
@@ -317,7 +360,7 @@ export function createFullWorkflowService(deps: FullWorkflowServiceDeps): FullWo
       return shuttingDown('FullWorkflowService is disposing; start aborted before run creation.')
     }
     const created = deps.runs.createRun({
-      definition: buildDefaultFullWorkflowDefinition(config),
+      definition,
       taskId: request.taskId,
       totalIterations: policy.maxTotalRounds,
       criteriaSetId: confirmed.id,

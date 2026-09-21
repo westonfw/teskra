@@ -126,6 +126,8 @@ export function createShellStepExecutor(deps: ShellStepExecutorDeps): WorkflowSt
       // TASK-118: a repo-defined command executes only after the user saw and
       // confirmed the full command line. Without a confirmation channel the
       // step refuses to run — a missing gate must never silently execute.
+      let confirmationRecord:
+        { stepId: string; command: string; cwd: string; decidedAt: string } | undefined
       if (node.requireConfirmation === true) {
         if (deps.confirmation === undefined) {
           logger.error(
@@ -154,6 +156,14 @@ export function createShellStepExecutor(deps: ShellStepExecutorDeps): WorkflowSt
             result: { error: 'The shell step was rejected by the user.', rejected: true },
           }
         }
+        // Code-review P1-6: the approval is part of the step's audit trail
+        // (ADR-0002), persisted in the step result symmetric to a rejection.
+        confirmationRecord = {
+          stepId: step.id,
+          command: node.command,
+          cwd: context.cwd,
+          decidedAt: new Date().toISOString(),
+        }
       }
 
       const abort = new AbortController()
@@ -179,6 +189,7 @@ export function createShellStepExecutor(deps: ShellStepExecutorDeps): WorkflowSt
           result: {
             error: commandResult.error.message,
             ...(commandResult.error.code === 'COMMAND_TIMEOUT' ? { timedOut: true } : {}),
+            ...(confirmationRecord === undefined ? {} : { confirmation: confirmationRecord }),
           },
         }
       }
@@ -195,6 +206,7 @@ export function createShellStepExecutor(deps: ShellStepExecutorDeps): WorkflowSt
         result: {
           exitCode: result.exitCode,
           ...(artifactId === undefined ? {} : { artifactId }),
+          ...(confirmationRecord === undefined ? {} : { confirmation: confirmationRecord }),
         },
       }
     },

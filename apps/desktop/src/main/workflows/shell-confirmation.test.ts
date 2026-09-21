@@ -60,6 +60,26 @@ describe('ShellConfirmationService (TASK-118)', () => {
     const parked = service.request(details)
     service.cancel('step-1')
     await expect(parked).resolves.toBe(false)
+    expect(service.listPending()).toEqual([])
+  })
+
+  it('lists parked confirmations so a (re)subscribing host can pull the backlog', async () => {
+    const service = createShellConfirmationService({ events: createEventBus<WorkbenchEvents>() })
+    expect(service.listPending()).toEqual([])
+
+    const first = service.request(details)
+    const secondDetails = { ...details, stepId: 'step-2', command: 'npm run other-script' }
+    const second = service.request(secondDetails)
+    // A host that mounted after both events fired still sees both pending items.
+    expect(service.listPending()).toEqual([details, secondDetails])
+
+    service.resolve('step-1', true)
+    await expect(first).resolves.toBe(true)
+    expect(service.listPending()).toEqual([secondDetails])
+
+    service.cancel('step-2')
+    await expect(second).resolves.toBe(false)
+    expect(service.listPending()).toEqual([])
   })
 
   it('dispose rejects every parked request', async () => {

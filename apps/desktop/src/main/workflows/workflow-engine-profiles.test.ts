@@ -253,7 +253,7 @@ describe('WorkflowEngine profile aliases (TASK-111)', () => {
     expect(s.captured.requests[0]?.environment).toEqual({ SAFE_VAR: '1' })
   })
 
-  it('fails closed on an unbound alias — no fallback to a default account, AgentManager never called', async () => {
+  it('fails closed on an unbound alias at pass start — no fallback, no side effects, AgentManager never called (P2-11)', async () => {
     const definition: WorkflowDefinition = {
       id: 'unbound-workflow',
       steps: [
@@ -266,14 +266,47 @@ describe('WorkflowEngine profile aliases (TASK-111)', () => {
 
     const pass = await s.engine.start(s.run.id, CONTEXT)
 
-    expect(pass.ok).toBe(true)
-    const step = s.stepByNode('impl')
-    expect(step.status).toBe('failed')
-    expect(step.result?.['errorCode']).toBe('VALIDATION_FAILED')
-    expect(String(step.result?.['error'])).toContain('not bound')
-    // Failure propagates: the dependent node skips, no agent ever launches.
-    expect(s.stepByNode('after').status).toBe('skipped')
+    expect(pass.ok).toBe(false)
+    if (pass.ok) return
+    expect(pass.error.code).toBe('VALIDATION_FAILED')
+    expect(pass.error.message).toContain('not bound')
+    // The pass never began: no steps, no status change, no agent launch.
     expect(s.captured.requests).toHaveLength(0)
+    const detail = s.connection.prepare('SELECT COUNT(*) AS n FROM workflow_steps').get() as {
+      n: number
+    }
+    expect(detail.n).toBe(0)
+  })
+
+  it('prevalidates every node before scheduling — a later unbound node fails before the first node runs (P2-11)', async () => {
+    const definition: WorkflowDefinition = {
+      id: 'late-unbound-workflow',
+      steps: [
+        { id: 'first', type: 'agent', agent: 'codex', runOn: 'always' },
+        {
+          id: 'second',
+          type: 'agent',
+          agent: 'codex',
+          accountProfile: 'work',
+          dependsOn: ['first'],
+          runOn: 'always',
+        },
+      ],
+    }
+    const s = setup(definition)
+
+    const pass = s.engine.begin(s.run.id, CONTEXT)
+
+    expect(pass.ok).toBe(false)
+    if (pass.ok) return
+    expect(pass.error.message).toContain('not bound')
+    // The CLEAN first node never launched either — prevalidation precedes all
+    // side effects, so a multi-node DAG cannot half-execute.
+    expect(s.captured.requests).toHaveLength(0)
+    const row = s.connection
+      .prepare('SELECT status FROM workflow_runs WHERE id = ?')
+      .get(s.run.id) as { status: string }
+    expect(row.status).toBe('created')
   })
 
   it('rejects a repo workflow that names a Profile id instead of an alias (§55)', async () => {
@@ -294,10 +327,9 @@ describe('WorkflowEngine profile aliases (TASK-111)', () => {
 
     const pass = await s.engine.start(s.run.id, CONTEXT)
 
-    expect(pass.ok).toBe(true)
-    const step = s.stepByNode('impl')
-    expect(step.status).toBe('failed')
-    expect(String(step.result?.['error'])).toContain('alias')
+    expect(pass.ok).toBe(false)
+    if (pass.ok) return
+    expect(pass.error.message).toContain('alias')
     expect(s.captured.requests).toHaveLength(0)
   })
 
@@ -320,9 +352,9 @@ describe('WorkflowEngine profile aliases (TASK-111)', () => {
 
     const pass = await s.engine.start(s.run.id, CONTEXT)
 
-    expect(pass.ok).toBe(true)
-    expect(s.stepByNode('impl').status).toBe('failed')
-    expect(s.stepByNode('impl').result?.['errorCode']).toBe('ACCOUNT_PROFILE_NOT_FOUND')
+    expect(pass.ok).toBe(false)
+    if (pass.ok) return
+    expect(pass.error.code).toBe('ACCOUNT_PROFILE_NOT_FOUND')
     expect(s.captured.requests).toHaveLength(0)
   })
 
@@ -344,8 +376,9 @@ describe('WorkflowEngine profile aliases (TASK-111)', () => {
 
     const pass = await s.engine.start(s.run.id, CONTEXT)
 
-    expect(pass.ok).toBe(true)
-    expect(s.stepByNode('impl').result?.['errorCode']).toBe('ACCOUNT_PROFILE_DISABLED')
+    expect(pass.ok).toBe(false)
+    if (pass.ok) return
+    expect(pass.error.code).toBe('ACCOUNT_PROFILE_DISABLED')
     expect(s.captured.requests).toHaveLength(0)
   })
 
@@ -375,10 +408,9 @@ describe('WorkflowEngine profile aliases (TASK-111)', () => {
 
     const pass = await s.engine.start(s.run.id, CONTEXT)
 
-    expect(pass.ok).toBe(true)
-    const step = s.stepByNode('impl')
-    expect(step.status).toBe('failed')
-    expect(String(step.result?.['error'])).toContain('CODEX_HOME')
+    expect(pass.ok).toBe(false)
+    if (pass.ok) return
+    expect(pass.error.message).toContain('CODEX_HOME')
     expect(s.captured.requests).toHaveLength(0)
     const logged = readFileSync(join(logHome, 'logs', 'agent.log'), 'utf8')
       .trim()
@@ -400,8 +432,9 @@ describe('WorkflowEngine profile aliases (TASK-111)', () => {
 
     const pass = await s.engine.start(s.run.id, CONTEXT)
 
-    expect(pass.ok).toBe(true)
-    expect(s.stepByNode('impl').status).toBe('failed')
+    expect(pass.ok).toBe(false)
+    if (pass.ok) return
+    expect(pass.error.message).toContain('profile alias resolution is not available')
     expect(s.captured.requests).toHaveLength(0)
   })
 })

@@ -1,4 +1,9 @@
-import type { AgentDefinition, IpcResult, WorkflowDefinition } from '@teskra/contracts'
+import type {
+  AgentDefinition,
+  AgentWorkflowNode,
+  IpcResult,
+  WorkflowDefinition,
+} from '@teskra/contracts'
 
 import { toPublicError } from '../errors'
 
@@ -50,6 +55,18 @@ export const FULL_WORKFLOW_NODE_IDS = {
   gateFix: 'gate-fix',
 } as const
 
+/**
+ * Profile-alias / env config of one agent node (TASK-111, §53.1 / ADR-0011):
+ * `accountProfile` / `profile` are machine-portable ALIASES, never Profile
+ * ids; `env` is extra launch environment screened against the §13.2 reserved
+ * keys at run time. Resolution happens in Main via ProfileAliasManager.
+ */
+export interface FullWorkflowNodeProfiles {
+  readonly accountProfile?: string
+  readonly profile?: string
+  readonly env?: Record<string, string>
+}
+
 /** Everything the default full workflow needs that is not fixed structure. */
 export interface FullWorkflowConfig {
   /** AgentRegistry id of the implementer/fixer agent. */
@@ -64,12 +81,51 @@ export interface FullWorkflowConfig {
    * user confirms the full command line before it executes.
    */
   readonly shellRequireConfirmation?: boolean
+  /**
+   * Code-review P0-2: profile aliases / env of the round-1 implementer agent
+   * node, carried from the repo-local override into the rebuilt definition.
+   * Dropping them would silently launch the run under the default account —
+   * exactly the fallback §37.1 / ADR-0011 §4 forbid.
+   */
+  readonly implementerProfiles?: FullWorkflowNodeProfiles
+  /**
+   * Same for the round-≥2 fixer node; when the override leaves it unset the
+   * fix node inherits the implementer's — the fixer continues the same work
+   * in the same worktree, so a silent identity switch would be just as bad.
+   */
+  readonly fixerProfiles?: FullWorkflowNodeProfiles
 }
 
 function invalid<T>(message: string, detail: string): IpcResult<T> {
   return {
     ok: false,
     error: toPublicError({ code: 'VALIDATION_FAILED', message, retryable: false, detail }),
+  }
+}
+
+/** Spreads an agent node's alias / env config into node literal fields. */
+function nodeProfileFields(profiles: FullWorkflowNodeProfiles | undefined): {
+  accountProfile?: string
+  profile?: string
+  env?: Record<string, string>
+} {
+  if (profiles === undefined) return {}
+  return {
+    ...(profiles.accountProfile === undefined ? {} : { accountProfile: profiles.accountProfile }),
+    ...(profiles.profile === undefined ? {} : { profile: profiles.profile }),
+    ...(profiles.env === undefined ? {} : { env: { ...profiles.env } }),
+  }
+}
+
+/** Reads an agent node's alias / env config back out; undefined when absent. */
+function extractNodeProfiles(node: AgentWorkflowNode): FullWorkflowNodeProfiles | undefined {
+  if (node.accountProfile === undefined && node.profile === undefined && node.env === undefined) {
+    return undefined
+  }
+  return {
+    ...(node.accountProfile === undefined ? {} : { accountProfile: node.accountProfile }),
+    ...(node.profile === undefined ? {} : { profile: node.profile }),
+    ...(node.env === undefined ? {} : { env: { ...node.env } }),
   }
 }
 
@@ -89,8 +145,16 @@ export function buildDefaultFullWorkflowDefinition(config: FullWorkflowConfig): 
         agent: config.implementer,
         role: 'implementer',
         runOn: 'first',
+        ...nodeProfileFields(config.implementerProfiles),
       },
-      { id: ids.fix, type: 'agent', agent: config.implementer, role: 'fixer', runOn: 'subsequent' },
+      {
+        id: ids.fix,
+        type: 'agent',
+        agent: config.implementer,
+        role: 'fixer',
+        runOn: 'subsequent',
+        ...nodeProfileFields(config.fixerProfiles ?? config.implementerProfiles),
+      },
       {
         id: ids.testImplement,
         type: 'shell',
@@ -176,6 +240,13 @@ export function resolveDefaultFullWorkflowConfig(
  * agents are the reviewers, and the round-1 shell node's command is the
  * Build/Test command. Missing pieces are a clear error — a partial override
  * would silently fall back to defaults the user did not ask for.
+ *
+ * Code-review P0-2: the agent nodes' `accountProfile` / `profile` / `env`
+ * (TASK-111 aliases) ride along — the round-1 node seeds the implementer and
+ * an explicit round-≥2 agent node (when present) the fixer — so the rebuilt
+ * definition never silently drops the repo's account binding. The round-1
+ * shell node's requireConfirmation mark (forced by the loader for
+ * repo-controlled content, P1-7) propagates the same way.
  */
 export function extractFullWorkflowConfig(
   definition: WorkflowDefinition,
@@ -189,6 +260,9 @@ export function extractFullWorkflowConfig(
       `definition ${JSON.stringify(definition.id)}: expected an agent node with runOn 'first'`,
     )
   }
+  const fixer = definition.steps.find(
+    (node) => node.type === 'agent' && node.runOn === 'subsequent',
+  )
   const review = definition.steps.find(
     (node) => node.type === 'review-panel' && node.runOn === 'first',
   )
@@ -205,12 +279,17 @@ export function extractFullWorkflowConfig(
       `definition ${JSON.stringify(definition.id)}: expected a shell node with runOn 'first'`,
     )
   }
+  const implementerProfiles = extractNodeProfiles(implementer)
+  const fixerProfiles = fixer?.type === 'agent' ? extractNodeProfiles(fixer) : undefined
   return {
     ok: true,
     data: {
       implementer: implementer.agent,
       reviewers: review.agents,
       testCommand: test.command,
+      ...(test.requireConfirmation === true ? { shellRequireConfirmation: true } : {}),
+      ...(implementerProfiles === undefined ? {} : { implementerProfiles }),
+      ...(fixerProfiles === undefined ? {} : { fixerProfiles }),
     },
   }
 }

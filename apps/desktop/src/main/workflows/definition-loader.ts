@@ -27,6 +27,11 @@ import type { TeskraPaths } from '../paths'
  * conditional-edge cross-check, and per-iteration runOn connectivity. An
  * invalid file is never silently dropped from `list` — it is reported with
  * `status: 'invalid'` and the rejection reasons.
+ *
+ * TASK-118 / code-review P1-7: these files are repo-controlled content, so
+ * EVERY loaded shell node is stamped `requireConfirmation: true` — the user
+ * confirms the full command line before it executes, and the repo author
+ * cannot opt out by writing `requireConfirmation: false`.
  */
 
 const WORKFLOW_FILE_EXTENSIONS = ['.yaml', '.yml', '.json'] as const
@@ -116,7 +121,14 @@ export function createWorkflowDefinitionLoader(
         path,
         status: 'loaded',
         id: validated.definition.id,
-        definition: validated.definition,
+        definition: {
+          ...validated.definition,
+          steps: validated.definition.steps.map((node) =>
+            // P1-7: repo-controlled shell commands always require an explicit
+            // user confirmation — the file cannot opt out.
+            node.type === 'shell' ? { ...node, requireConfirmation: true } : node,
+          ),
+        },
         issues: [],
       },
     }

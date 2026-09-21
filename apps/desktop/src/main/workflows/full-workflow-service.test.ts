@@ -1,18 +1,27 @@
 import Database from 'better-sqlite3'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type {
   AgentDefinition,
+  AgentRun,
   IpcResult,
+  StartAgentRunRequest,
   Worktree,
   WorktreeCreateRequest,
   WorkflowRunDetail,
 } from '@teskra/contracts'
 
 import { FAKE_AGENT } from '../agents/definitions/fake'
+import { createProfileAliasManager } from '../agents/profile-alias-manager'
 import { migrateDatabase } from '../db/migrations'
 import {
+  createAccountProfileRepository,
   createCriteriaRepository,
+  createExecutionProfileRepository,
+  createProfileAliasRepository,
   createReviewRepository,
   createTaskRepository,
   createWorkflowRunRepository,
@@ -21,6 +30,8 @@ import {
 } from '../db/repositories'
 import { createEventBus, type EventBus } from '../events/event-bus'
 import type { WorkbenchEvents } from '@teskra/contracts'
+import { initializeLogging, resetLoggingStateForTests } from '../logger'
+import { createTeskraPaths } from '../paths'
 import { createTaskManager } from '../tasks/task-manager'
 import { createCriteriaGateStepExecutor } from './criteria-gate-step-executor'
 import {
@@ -29,6 +40,7 @@ import {
   FULL_WORKFLOW_NODE_IDS,
   buildDefaultFullWorkflowDefinition,
 } from './default-workflow'
+import { createWorkflowDefinitionLoader } from './definition-loader'
 import {
   createFullWorkflowService,
   parseDiffPatch,
@@ -51,9 +63,13 @@ import { createWorkflowRunStore } from './workflow-run-store'
 const AT = '2026-09-10T00:00:00.000Z'
 
 const databases: Database.Database[] = []
+const tempDirs: string[] = []
 
 afterEach(() => {
   for (const database of databases.splice(0)) database.close()
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+  }
 })
 
 const DIFF_PATCH = [
@@ -563,6 +579,473 @@ describe('FullWorkflowService (TASK-063)', () => {
     expect(fixture.store.listRuns()).toMatchObject({ ok: true, data: [] })
     expect(fixture.agentCalls).toHaveLength(0)
     expect(fixture.worktreeDiscards).toBe(1)
+  })
+})
+
+describe('FullWorkflowService repo full.yaml profile aliases (P0-2 / TASK-111 / ADR-0011)', () => {
+  /**
+   * A real repo-local `full.yaml` (YAML block syntax) naming profile ALIASES:
+   * the implementer agent node binds account alias `work` and carries extra
+   * env. Loaded through the REAL WorkflowDefinitionLoader (seam reads this
+   * text), extracted by extractFullWorkflowConfig, rebuilt by
+   * buildDefaultFullWorkflowDefinition, and executed by a real engine whose
+   * agent executor resolves aliases through a real ProfileAliasManager —
+   * only AgentManager and the worktree/git seams are fakes.
+   */
+  const ALIASED_YAML = [
+    'id: full',
+    'steps:',
+    '  - id: implement',
+    '    type: agent',
+    '    agent: codex',
+    '    runOn: first',
+    '    accountProfile: work',
+    '    env:',
+    "      SAFE_VAR: '1'",
+    '  - id: fix',
+    '    type: agent',
+    '    agent: codex',
+    '    runOn: subsequent',
+    '  - id: test-implement',
+    '    type: shell',
+    '    command: make test',
+    '    runOn: first',
+    '    dependsOn:',
+    '      - implement',
+    '  - id: review-implement',
+    '    type: review-panel',
+    '    agents:',
+    '      - claude',
+    '    runOn: first',
+    '    dependsOn:',
+    '      - test-implement',
+    '',
+  ].join('\n')
+
+  interface AliasFixture {
+    readonly service: FullWorkflowService
+    readonly store: ReturnType<typeof createWorkflowRunStore>
+    readonly agentRequests: StartAgentRunRequest[]
+    readonly worktreeCreates: WorktreeCreateRequest[]
+    readonly accountProfiles: ReturnType<typeof createAccountProfileRepository>
+    readonly aliasManager: ReturnType<typeof createProfileAliasManager>
+  }
+
+  function setupWithAliases(
+    yaml: string,
+    options?: { serviceResolver?: boolean; restricted?: boolean },
+  ): AliasFixture {
+    const database = new Database(':memory:')
+    database.pragma('foreign_keys = ON')
+    const migrated = migrateDatabase(database)
+    if (!migrated.ok) throw new Error(migrated.error.message)
+    databases.push(database)
+
+    const workspaces = createWorkspaceRepository(database)
+    const tasks = createTaskRepository(database)
+    const criteria = createCriteriaRepository(database)
+    const reviews = createReviewRepository(database)
+    const workflowRuns = createWorkflowRunRepository(database)
+    const worktrees = createWorktreeRepository(database)
+    const events = createEventBus()
+
+    const workspace = workspaces.create(
+      {
+        id: 'ws-1',
+        name: 'FW alias fixture',
+        runtime: { kind: 'wsl', distro: 'Ubuntu' },
+        path: '/repo',
+        trustLevel: options?.restricted === true ? 'restricted' : 'trusted',
+      },
+      AT,
+    )
+    if (!workspace.ok) throw new Error(workspace.error.message)
+    const task = tasks.create(
+      { id: 'task-1', workspaceId: 'ws-1', title: 'Aliased full workflow', status: 'ready' },
+      AT,
+    )
+    if (!task.ok) throw new Error(task.error.message)
+    const set = criteria.createSet(
+      { id: 'set-1', taskId: 'task-1', version: 1, status: 'confirmed' },
+      AT,
+    )
+    if (!set.ok) throw new Error(set.error.message)
+    const criterion = criteria.addCriterion(
+      { id: 'crit-1', criteriaSetId: 'set-1', ordinal: 1, description: 'Tests pass' },
+      AT,
+    )
+    if (!criterion.ok) throw new Error(criterion.error.message)
+    database
+      .prepare(
+        `INSERT INTO agent_runs (id, workspace_id, task_id, agent_type, status, execution_mode, run_dir, created_at, updated_at)
+         VALUES ('agent-run-seed', 'ws-1', 'task-1', 'codex', 'completed', 'orchestrated', 'runs/agent-run-seed', '${AT}', '${AT}')`,
+      )
+      .run()
+    const score = reviews.recordScore(
+      { id: 'score-1', runId: 'agent-run-seed', criterionId: 'crit-1', result: 'pass' },
+      AT,
+    )
+    if (!score.ok) throw new Error(score.error.message)
+
+    const accountProfiles = createAccountProfileRepository(database)
+    const executionProfiles = createExecutionProfileRepository(database)
+    const aliasManager = createProfileAliasManager({
+      aliases: createProfileAliasRepository(database),
+      accountProfiles,
+      executionProfiles,
+      reservedEnvKeys: () => ['CODEX_HOME', 'CLAUDE_CONFIG_DIR'],
+      now: () => AT,
+    })
+
+    const store = createWorkflowRunStore({ workflowRuns, tasks })
+    const taskManager = createTaskManager({ tasks, workspaces, events })
+
+    const agentRequests: StartAgentRunRequest[] = []
+    const agentManager = {
+      start(request: StartAgentRunRequest): Promise<IpcResult<AgentRun>> {
+        agentRequests.push(request)
+        const run = { id: `agent-run-${String(agentRequests.length)}` } as AgentRun
+        // Settle once the executor's subscriptions are in place (macrotask).
+        setTimeout(() => {
+          events.emit('agent.completed', { runId: run.id, exitCode: 0 })
+        }, 0)
+        return Promise.resolve({ ok: true, data: run })
+      },
+      cancel(): Promise<IpcResult<AgentRun>> {
+        return Promise.resolve({
+          ok: false,
+          error: { code: 'UNKNOWN', message: 'n/a', retryable: false },
+        })
+      },
+    }
+    const engine = createWorkflowEngine({
+      runs: store,
+      events,
+      agentManager,
+      profileAliases: aliasManager,
+      executors: {
+        shell: {
+          execute: () => Promise.resolve({ outcome: 'success', result: { exitCode: 0 } }),
+        },
+        'review-panel': {
+          execute: () => Promise.resolve({ outcome: 'approve', result: { panelId: 'panel-1' } }),
+        },
+        'criteria-gate': createCriteriaGateStepExecutor({ reviews, criteria }),
+      },
+    })
+
+    const registryAgents: AgentDefinition[] = [
+      { ...FAKE_AGENT, id: 'codex', defaults: { role: 'implementer' } },
+      { ...FAKE_AGENT, id: 'claude', defaults: { role: 'reviewer' } },
+    ]
+    const registry = {
+      get: (id: string) => registryAgents.find((agent) => agent.id === id),
+      list: () => registryAgents,
+    }
+
+    const home = mkdtempSync(join(tmpdir(), 'teskra-fw-alias-'))
+    tempDirs.push(home)
+    const paths = createTeskraPaths({ TESKRA_HOME: home })
+    const dir = paths.repoWorkflowsDir('/repo')
+    const filePath = join(dir, 'full.yaml')
+    const toPosix = (value: string): string => value.replaceAll('\\', '/')
+    const enoent = (path: string): NodeJS.ErrnoException => {
+      const error = new Error(`ENOENT: ${path}`) as NodeJS.ErrnoException
+      error.code = 'ENOENT'
+      return error
+    }
+    const definitions = createWorkflowDefinitionLoader({
+      paths,
+      readFile: (path) => {
+        if (toPosix(path) !== toPosix(filePath)) throw enoent(path)
+        return yaml
+      },
+      listDir: (path) => {
+        if (toPosix(path) !== toPosix(dir)) throw enoent(path)
+        return ['full.yaml']
+      },
+    })
+
+    let agentRunCounter = 0
+    const createController = (firstAgentRunId: string) => {
+      let firstConsumed = false
+      return createIterationController({
+        runs: store,
+        engine,
+        registry,
+        tasks,
+        taskManager,
+        criteria,
+        workspaces,
+        events,
+        createAgentRunId: () => {
+          if (!firstConsumed) {
+            firstConsumed = true
+            return firstAgentRunId
+          }
+          agentRunCounter += 1
+          return `agent-run-next-${String(agentRunCounter)}`
+        },
+        resolveStepContext: () => ({ ok: true, data: undefined }),
+      })
+    }
+
+    const worktreeCreates: WorktreeCreateRequest[] = []
+    let worktreeCounter = 0
+    const worktreeManager = {
+      create: (request: WorktreeCreateRequest): Promise<IpcResult<Worktree>> => {
+        worktreeCreates.push(request)
+        worktreeCounter += 1
+        const created = worktrees.create(
+          {
+            id: `wt-${String(worktreeCounter)}`,
+            workspaceId: request.workspaceId,
+            ...(request.runId === undefined ? {} : { runId: request.runId }),
+            branch: `agent/${request.taskId ?? 'none'}/${request.agentId ?? 'none'}/${request.runId ?? 'none'}`,
+            baseBranch: 'main',
+            path: `/worktrees/${request.runId ?? 'none'}`,
+            state: 'ready',
+            isolation: request.isolation ?? 'worktree',
+          },
+          AT,
+        )
+        if (!created.ok) throw new Error(created.error.message)
+        return Promise.resolve({ ok: true, data: created.data })
+      },
+      discard: (): Promise<IpcResult<Worktree>> => {
+        throw new Error('unexpected discard in this fixture')
+      },
+    }
+
+    const service = createFullWorkflowService({
+      runs: store,
+      tasks,
+      workspaces,
+      criteria,
+      reviews,
+      worktrees,
+      registry,
+      worktreeManager,
+      definitions,
+      git: { diffRefs: () => Promise.resolve({ ok: true, data: { patch: '' } }) },
+      createController,
+      ...(options?.serviceResolver === false ? {} : { profileAliases: aliasManager }),
+    })
+
+    return { service, store, agentRequests, worktreeCreates, accountProfiles, aliasManager }
+  }
+
+  it('runs a repo full.yaml with accountProfile: work under the bound account (alias reaches AgentManager.start)', async () => {
+    const fixture = setupWithAliases(ALIASED_YAML)
+    const created = fixture.accountProfiles.create(
+      {
+        id: 'acct_codex_work',
+        agentId: 'codex',
+        name: 'Codex Work',
+        authType: 'subscription',
+        runtime: { kind: 'windows' },
+        enabled: true,
+      },
+      AT,
+    )
+    if (!created.ok) throw new Error(created.error.message)
+    const bound = fixture.aliasManager.bind({
+      agentId: 'codex',
+      kind: 'account',
+      alias: 'work',
+      profileId: 'acct_codex_work',
+    })
+    expect(bound.ok).toBe(true)
+
+    const started = await fixture.service.start({ workspaceId: 'ws-1', taskId: 'task-1' })
+    if (!started.ok) throw new Error(started.error.message)
+    expect(started.data.stopReason).toBe('passed')
+
+    // The repo's alias was resolved to the machine-local Profile id and the
+    // node env reached the launch — no silent default-account fallback.
+    expect(fixture.agentRequests).toHaveLength(1)
+    expect(fixture.agentRequests[0]).toMatchObject({
+      agentType: 'codex',
+      accountProfileId: 'acct_codex_work',
+      environment: { SAFE_VAR: '1' },
+    })
+
+    // The persisted snapshot carries the alias on BOTH agent nodes (the fix
+    // node inherits the implementer's identity) and the repo shell command
+    // keeps its loader-forced confirmation mark (P1-7).
+    const detail = getRun(fixture.store, started.data.run.id)
+    const implement = detail.run.definition.steps.find(
+      (node) => node.id === FULL_WORKFLOW_NODE_IDS.implement,
+    )
+    expect(implement?.type === 'agent' && implement.accountProfile).toBe('work')
+    const fix = detail.run.definition.steps.find((node) => node.id === FULL_WORKFLOW_NODE_IDS.fix)
+    expect(fix?.type === 'agent' && fix.accountProfile).toBe('work')
+    const testNode = detail.run.definition.steps.find(
+      (node) => node.id === FULL_WORKFLOW_NODE_IDS.testImplement,
+    )
+    expect(testNode?.type === 'shell' && testNode.requireConfirmation).toBe(true)
+  })
+
+  it('rejects the run immediately when the alias is unbound — no worktree, no run, no agent (§37.1 / ADR-0011 §4)', async () => {
+    const fixture = setupWithAliases(ALIASED_YAML)
+
+    const started = await fixture.service.start({ workspaceId: 'ws-1', taskId: 'task-1' })
+
+    expect(started.ok).toBe(false)
+    if (!started.ok) {
+      expect(started.error.code).toBe('VALIDATION_FAILED')
+      expect(started.error.message).toContain('not bound')
+    }
+    expect(fixture.worktreeCreates).toHaveLength(0)
+    expect(fixture.agentRequests).toHaveLength(0)
+    expect(fixture.store.listRuns()).toMatchObject({ ok: true, data: [] })
+  })
+
+  it('still fails closed at pass start when the service has no early resolver (engine backstop, P2-11)', async () => {
+    const fixture = setupWithAliases(ALIASED_YAML, { serviceResolver: false })
+
+    const started = await fixture.service.start({ workspaceId: 'ws-1', taskId: 'task-1' })
+
+    expect(started.ok).toBe(false)
+    if (!started.ok) expect(started.error.message).toContain('not bound')
+    expect(fixture.agentRequests).toHaveLength(0)
+    // Without the early resolver the worktree side effect already happened,
+    // but the engine's pass-start prevalidation failed the run before any
+    // DAG node executed.
+    expect(fixture.worktreeCreates).toHaveLength(1)
+    const runs = fixture.store.listRuns()
+    expect(runs.ok && runs.data[0]?.status).toBe('failed')
+  })
+
+  it('rejects a repo full.yaml whose node env carries a reserved account-profile key (§13.2 on real repo content)', async () => {
+    const yaml = ALIASED_YAML.replace("SAFE_VAR: '1'", 'CODEX_HOME: /attacker/.codex')
+    const fixture = setupWithAliases(yaml)
+
+    const started = await fixture.service.start({ workspaceId: 'ws-1', taskId: 'task-1' })
+
+    expect(started.ok).toBe(false)
+    if (!started.ok) {
+      expect(started.error.code).toBe('VALIDATION_FAILED')
+      expect(started.error.message).toContain('CODEX_HOME')
+    }
+    expect(fixture.worktreeCreates).toHaveLength(0)
+    expect(fixture.agentRequests).toHaveLength(0)
+  })
+
+  // Code-review follow-up: explicit implementer+reviewers in the request must
+  // not gate the repo override out — identities come from the request, but
+  // the override's aliases / env / test command still merge in.
+  it('merges the repo full.yaml profiles when the request names both agents (explicit identities win)', async () => {
+    const fixture = setupWithAliases(ALIASED_YAML)
+    // The request picks claude as implementer while the repo override says
+    // codex — so the alias must bind for claude (the request's identity).
+    const created = fixture.accountProfiles.create(
+      {
+        id: 'acct_claude_work',
+        agentId: 'claude',
+        name: 'Claude Work',
+        authType: 'subscription',
+        runtime: { kind: 'windows' },
+        enabled: true,
+      },
+      AT,
+    )
+    if (!created.ok) throw new Error(created.error.message)
+    const bound = fixture.aliasManager.bind({
+      agentId: 'claude',
+      kind: 'account',
+      alias: 'work',
+      profileId: 'acct_claude_work',
+    })
+    expect(bound.ok).toBe(true)
+
+    const started = await fixture.service.start({
+      workspaceId: 'ws-1',
+      taskId: 'task-1',
+      implementer: 'claude',
+      reviewers: ['codex'],
+    })
+    if (!started.ok) throw new Error(started.error.message)
+    expect(started.data.stopReason).toBe('passed')
+
+    // The request's identity wins over the override's `agent: codex`…
+    expect(fixture.worktreeCreates[0]?.agentId).toBe('claude')
+    // …while the override's accountProfile alias / env still reach the launch.
+    expect(fixture.agentRequests).toHaveLength(1)
+    expect(fixture.agentRequests[0]).toMatchObject({
+      agentType: 'claude',
+      accountProfileId: 'acct_claude_work',
+      environment: { SAFE_VAR: '1' },
+    })
+
+    // The persisted snapshot carries the merged override: the alias on the
+    // implement node and the repo test command (confirmation mark included).
+    const detail = getRun(fixture.store, started.data.run.id)
+    const implement = detail.run.definition.steps.find(
+      (node) => node.id === FULL_WORKFLOW_NODE_IDS.implement,
+    )
+    expect(implement?.type === 'agent' && implement.agent).toBe('claude')
+    expect(implement?.type === 'agent' && implement.accountProfile).toBe('work')
+    const testNode = detail.run.definition.steps.find(
+      (node) => node.id === FULL_WORKFLOW_NODE_IDS.testImplement,
+    )
+    expect(testNode?.type === 'shell' && testNode.command).toBe('make test')
+    expect(testNode?.type === 'shell' && testNode.requireConfirmation).toBe(true)
+  })
+
+  // Logging is armed BEFORE setup() so the security scope resolves to the
+  // file logger (same pattern as memory-manager's P2-6 test).
+  it('does not load the repo full.yaml for a restricted workspace and security-logs the skip', async () => {
+    resetLoggingStateForTests()
+    const logHome = mkdtempSync(join(tmpdir(), 'teskra-fw-restricted-log-'))
+    tempDirs.push(logHome)
+    const initialized = initializeLogging(createTeskraPaths({ TESKRA_HOME: logHome }), {
+      sync: true,
+    })
+    if (!initialized.ok) throw new Error(initialized.error.message)
+    try {
+      const fixture = setupWithAliases(ALIASED_YAML, { restricted: true })
+
+      const started = await fixture.service.start({
+        workspaceId: 'ws-1',
+        taskId: 'task-1',
+        implementer: 'codex',
+        reviewers: ['claude'],
+      })
+      if (!started.ok) throw new Error(started.error.message)
+
+      // Nothing from the repo file applies: no alias, no env, no repo command.
+      expect(fixture.agentRequests).toHaveLength(1)
+      expect(fixture.agentRequests[0]?.agentType).toBe('codex')
+      expect(fixture.agentRequests[0]?.accountProfileId).toBeUndefined()
+      expect(fixture.agentRequests[0]?.environment).toBeUndefined()
+      const detail = getRun(fixture.store, started.data.run.id)
+      const implement = detail.run.definition.steps.find(
+        (node) => node.id === FULL_WORKFLOW_NODE_IDS.implement,
+      )
+      expect(implement?.type === 'agent' && implement.accountProfile).toBeUndefined()
+      const testNode = detail.run.definition.steps.find(
+        (node) => node.id === FULL_WORKFLOW_NODE_IDS.testImplement,
+      )
+      if (testNode?.type !== 'shell') throw new Error('expected the shell test node')
+      expect(testNode.command).toBe(DEFAULT_FULL_TEST_COMMAND)
+      expect(testNode.requireConfirmation).toBeUndefined()
+
+      const records = readFileSync(join(logHome, 'logs', 'security.log'), 'utf8')
+        .trim()
+        .split('\n')
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      const skips = records.filter(
+        (record) =>
+          record['msg'] ===
+          'Workspace is restricted; ignoring the repo-local full workflow definition override.',
+      )
+      expect(skips).toHaveLength(1)
+      expect(skips[0]).toMatchObject({ level: 40, workspaceId: 'ws-1' })
+    } finally {
+      resetLoggingStateForTests()
+    }
   })
 })
 

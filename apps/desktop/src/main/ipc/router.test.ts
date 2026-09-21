@@ -527,6 +527,7 @@ function fakeRuntime(): TeskraRuntime {
       completeRun: vi.fn(async () => ok({ ...WORKFLOW_RUN, status: 'completed' as const })),
       resolveStep: vi.fn(() => ok(WORKFLOW_STEP)),
       confirmShellStep: vi.fn(() => ok(true)),
+      listPendingShellConfirmations: vi.fn(() => ok([])),
       dispatch: vi.fn(async () => ok(DISPATCH_RESULT)),
       iterate: vi.fn(async () =>
         ok({ run: WORKFLOW_RUN, rounds: 1, stopReason: 'passed' as const }),

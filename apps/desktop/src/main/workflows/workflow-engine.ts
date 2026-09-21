@@ -1,6 +1,8 @@
 import type {
+  AgentWorkflowNode,
   IpcResult,
   StartAgentRunRequest,
+  WorkflowDefinition,
   WorkflowNode,
   WorkflowNodeType,
   WorkflowRun,
@@ -182,6 +184,8 @@ export interface WorkflowEngineDeps {
    * (`accountProfile` / `profile`) to machine-local Profile ids before launch,
    * and screens node `env` against the §13.2 reserved keys. Without it, a
    * node carrying aliases fails closed rather than guessing an identity.
+   * P2-11: every agent node is prevalidated at pass start (begin/start), so
+   * an unbound alias fails the run before any node produces side effects.
    */
   readonly profileAliases?: Pick<ProfileAliasManager, 'resolveAgentNodeProfiles'>
   /** Per-node-type executor overrides (tests, TASK-058 shell executor). */
@@ -220,6 +224,67 @@ function fail<T>(error: InternalAppError): IpcResult<T> {
 
 function invalid<T>(message: string, detail: string): IpcResult<T> {
   return fail({ code: 'VALIDATION_FAILED', message, retryable: false, detail })
+}
+
+type ProfileAliasResolver = Pick<ProfileAliasManager, 'resolveAgentNodeProfiles'>
+
+/**
+ * TASK-111 (§53.1/§54): resolves one agent node's profile ALIASES
+ * (`accountProfile` / `profile`) to machine-local Profile ids and screens its
+ * `env` against the §13.2 reserved keys. Returns undefined when the node
+ * declares neither aliases nor env. Every failure mode is fail-closed:
+ * unbound alias, id-instead-of-alias (§55), deleted/disabled target, a
+ * reserved env key, or a missing resolver all stop the launch instead of
+ * silently falling back to another identity.
+ */
+function resolveAgentNodeProfiles(
+  node: AgentWorkflowNode,
+  profileAliases: ProfileAliasResolver | undefined,
+): IpcResult<
+  | {
+      accountProfileId?: string | undefined
+      executionProfileId?: string | undefined
+      env?: Record<string, string> | undefined
+    }
+  | undefined
+> {
+  if (node.accountProfile === undefined && node.profile === undefined && node.env === undefined) {
+    return { ok: true, data: undefined }
+  }
+  if (profileAliases === undefined) {
+    return invalid(
+      `Workflow node "${node.id}" declares profile aliases or env, ` +
+        'but profile alias resolution is not available in this runtime.',
+      `no profile alias resolver for workflow node ${JSON.stringify(node.id)}`,
+    )
+  }
+  return profileAliases.resolveAgentNodeProfiles({
+    agentId: node.agent,
+    ...(node.accountProfile === undefined ? {} : { accountProfileAlias: node.accountProfile }),
+    ...(node.profile === undefined ? {} : { executionProfileAlias: node.profile }),
+    ...(node.env === undefined ? {} : { env: node.env }),
+    source: `workflow node "${node.id}"`,
+  })
+}
+
+/**
+ * Code-review P2-11: resolves EVERY agent node's aliases / env before a pass
+ * starts, so an unbound alias fails the run immediately instead of after
+ * earlier DAG nodes already produced side effects. Nodes without aliases are
+ * skipped; the failure modes match dispatch-time resolution exactly (the
+ * agent executor re-resolves at dispatch, so a binding change between the
+ * prevalidation and the launch still fails closed).
+ */
+export function prevalidateWorkflowAgentNodeProfiles(
+  definition: WorkflowDefinition,
+  profileAliases: ProfileAliasResolver | undefined,
+): IpcResult<void> {
+  for (const node of definition.steps) {
+    if (node.type !== 'agent') continue
+    const resolved = resolveAgentNodeProfiles(node, profileAliases)
+    if (!resolved.ok) return resolved
+  }
+  return { ok: true, data: undefined }
 }
 
 interface NodeState {
@@ -312,48 +377,17 @@ function createAgentStepExecutor(deps: {
       }
       // TASK-111 (§53.1/§54): the node names profile ALIASES, never ids —
       // resolve them against this machine's binding table before launch.
-      // Failure modes are all fail-closed: unbound alias, id-instead-of-alias
-      // (§55), deleted/disabled target, or a §13.2 reserved env key each stop
-      // the step instead of silently falling back to another identity.
-      let resolvedNodeProfiles:
-        | {
-            accountProfileId?: string | undefined
-            executionProfileId?: string | undefined
-            env?: Record<string, string> | undefined
-          }
-        | undefined
-      if (
-        node.accountProfile !== undefined ||
-        node.profile !== undefined ||
-        node.env !== undefined
-      ) {
-        if (deps.profileAliases === undefined) {
-          return Promise.resolve({
-            outcome: 'failure',
-            result: {
-              error:
-                `Workflow node "${node.id}" declares profile aliases or env, ` +
-                'but profile alias resolution is not available in this runtime.',
-            },
-          })
-        }
-        const profiles = deps.profileAliases.resolveAgentNodeProfiles({
-          agentId: node.agent,
-          ...(node.accountProfile === undefined
-            ? {}
-            : { accountProfileAlias: node.accountProfile }),
-          ...(node.profile === undefined ? {} : { executionProfileAlias: node.profile }),
-          ...(node.env === undefined ? {} : { env: node.env }),
-          source: `workflow node "${node.id}"`,
+      // The engine's pass-start prevalidation (P2-11) already screened every
+      // node; this re-resolution keeps the launch fail-closed if the binding
+      // table changed in between.
+      const profiles = resolveAgentNodeProfiles(node, deps.profileAliases)
+      if (!profiles.ok) {
+        return Promise.resolve({
+          outcome: 'failure',
+          result: { error: profiles.error.message, errorCode: profiles.error.code },
         })
-        if (!profiles.ok) {
-          return Promise.resolve({
-            outcome: 'failure',
-            result: { error: profiles.error.message, errorCode: profiles.error.code },
-          })
-        }
-        resolvedNodeProfiles = profiles.data
       }
+      const resolvedNodeProfiles = profiles.data
       const request: StartAgentRunRequest = {
         workspaceId: context.workspaceId,
         agentType: node.agent,
@@ -699,6 +733,12 @@ export function createWorkflowEngine(deps: WorkflowEngineDeps): WorkflowEngine {
         `run ${runId} iteration ${String(iteration)} running steps: ${inFlight.map((step) => step.id).join(', ')}`,
       )
     }
+
+    // P2-11: every agent node's aliases must resolve BEFORE the pass creates
+    // steps or schedules anything — an unbound alias fails the run here, not
+    // after earlier DAG nodes already launched agents or ran shell commands.
+    const prevalidated = prevalidateWorkflowAgentNodeProfiles(run.definition, deps.profileAliases)
+    if (!prevalidated.ok) return prevalidated
 
     const state: PassState = {
       runId,

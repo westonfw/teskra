@@ -609,6 +609,10 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.workflow.confirmShellStep(request)),
   )
   register(
+    ipcChannelDefinitions.workflowListPendingShellConfirmations,
+    withRuntime((runtime, request) => runtime.workflow.listPendingShellConfirmations(request)),
+  )
+  register(
     ipcChannelDefinitions.workflowDispatch,
     withRuntime((runtime, request) => runtime.workflow.dispatch(request)),
   )

@@ -396,7 +396,17 @@ export async function composeTeskraRuntime(
     return codexAccountAdapter
   }
   const claudeAccountAdapter = accountProfileAdapters.data.register(
-    createClaudeAccountProfileAdapter({ commands, createRuntime: runtimeFor }),
+    createClaudeAccountProfileAdapter({
+      commands,
+      createRuntime: runtimeFor,
+      resolveExecutable: (profile) => {
+        const override = agentDetector.getExecutableOverride({
+          agentId: profile.agentId,
+          runtime: profile.runtime,
+        })
+        return override.ok ? (override.data ?? undefined) : undefined
+      },
+    }),
   )
   if (!claudeAccountAdapter.ok) {
     database.close()
@@ -462,6 +472,7 @@ export async function composeTeskraRuntime(
     events,
     accountEvents: repositories.accountEvents,
     createRuntime: runtimeFor,
+    commands,
   })
   const doctor = createDoctorService({
     paths,
@@ -748,6 +759,8 @@ export async function composeTeskraRuntime(
     worktreeManager,
     definitions: workflowDefinitions,
     git: gitManager,
+    // P2-11: unbound repo-override aliases fail before the worktree side effect.
+    profileAliases: profileAliasManager,
     createController: (firstAgentRunId) => {
       let firstConsumed = false
       return createIterationController({
@@ -944,6 +957,7 @@ export async function composeTeskraRuntime(
           ...(result === undefined ? {} : { result }),
         }),
       confirmShellStep: ({ stepId, approved }) => shellConfirmation.resolve(stepId, approved),
+      listPendingShellConfirmations: () => ({ ok: true, data: shellConfirmation.listPending() }),
       dispatch: (request) => dispatchService.dispatch(request),
       iterate: (request) => iterationController.iterate(request),
       startFullWorkflow: (request) => fullWorkflow.start(request),

@@ -35,6 +35,11 @@ export interface ShellConfirmationService {
   resolve(stepId: string, approved: boolean): IpcResult<boolean>
   /** Settles a pending request as rejected (executor cancel path). */
   cancel(stepId: string): void
+  /**
+   * Code-review P1-6: everything still parked, so a renderer that (re)subscribes
+   * after the event already fired can pull the backlog instead of missing it.
+   */
+  listPending(): readonly ShellConfirmationDetails[]
   /** Rejects everything pending; composition-root shutdown. */
   dispose(): void
 }
@@ -51,14 +56,17 @@ export function createShellConfirmationService(
   deps: ShellConfirmationServiceDeps,
 ): ShellConfirmationService {
   const logger = getLogger('security')
-  /** stepId → settle the parked request() promise. */
-  const pending = new Map<string, (approved: boolean) => void>()
+  /** stepId → parked request: the details (for listPending) + its settle fn. */
+  const pending = new Map<
+    string,
+    { details: ShellConfirmationDetails; settle: (approved: boolean) => void }
+  >()
 
   const settle = (stepId: string, approved: boolean): boolean => {
-    const finish = pending.get(stepId)
-    if (finish === undefined) return false
+    const parked = pending.get(stepId)
+    if (parked === undefined) return false
     pending.delete(stepId)
-    finish(approved)
+    parked.settle(approved)
     return true
   }
 
@@ -82,7 +90,7 @@ export function createShellConfirmationService(
         cwd: details.cwd,
       })
       return new Promise<boolean>((resolvePromise) => {
-        pending.set(details.stepId, resolvePromise)
+        pending.set(details.stepId, { details, settle: resolvePromise })
       })
     },
 
@@ -101,6 +109,10 @@ export function createShellConfirmationService(
 
     cancel(stepId) {
       settle(stepId, false)
+    },
+
+    listPending() {
+      return [...pending.values()].map((parked) => parked.details)
     },
 
     dispose() {

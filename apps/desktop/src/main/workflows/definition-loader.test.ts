@@ -214,4 +214,43 @@ describe('WorkflowDefinitionLoader (TASK-055)', () => {
       expect(loaded.error.message).toContain('"missing"')
     }
   })
+
+  it('forces requireConfirmation on every repo-loaded shell node, even when the file says false (P1-7)', () => {
+    const paths = makePaths()
+    const dir = paths.repoWorkflowsDir('/repo')
+    const withShell = {
+      id: 'shell-workflow',
+      steps: [
+        { id: 'build', type: 'shell', command: 'make all', requireConfirmation: false },
+        { id: 'test', type: 'shell', command: 'make test', dependsOn: ['build'] },
+      ],
+    }
+    const seam = fileSeam({
+      [join(dir, 'shell.yaml')]: [
+        'id: shell-workflow',
+        'steps:',
+        '  - id: build',
+        '    type: shell',
+        '    command: make all',
+        '    requireConfirmation: false',
+        '  - id: test',
+        '    type: shell',
+        '    command: make test',
+        '    dependsOn:',
+        '      - build',
+        '',
+      ].join('\n'),
+      [join(dir, 'shell.json')]: JSON.stringify({ ...withShell, id: 'shell-json' }),
+    })
+    const loader = createWorkflowDefinitionLoader({ paths, ...seam })
+
+    for (const id of ['shell-workflow', 'shell-json']) {
+      const loaded = loader.load('/repo', id)
+      expect(loaded.ok).toBe(true)
+      if (!loaded.ok) continue
+      const shellNodes = loaded.data.steps.filter((step) => step.type === 'shell')
+      expect(shellNodes).toHaveLength(2)
+      expect(shellNodes.every((node) => node.requireConfirmation === true)).toBe(true)
+    }
+  })
 })

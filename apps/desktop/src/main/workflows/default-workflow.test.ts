@@ -111,3 +111,58 @@ describe('extractFullWorkflowConfig (repo-local override)', () => {
     expect(noAgent.ok).toBe(false)
   })
 })
+
+describe('full workflow node profile aliases (P0-2 / TASK-111)', () => {
+  const ALIASED_CONFIG = {
+    ...CONFIG,
+    implementerProfiles: {
+      accountProfile: 'work',
+      profile: 'high-work',
+      env: { SAFE_VAR: '1' },
+    },
+  }
+
+  it('builds the implementer aliases/env onto the implement node and lets the fix node inherit them', () => {
+    const definition = buildDefaultFullWorkflowDefinition(ALIASED_CONFIG)
+    const implement = definition.steps.find((step) => step.id === FULL_WORKFLOW_NODE_IDS.implement)
+    if (implement?.type !== 'agent') throw new Error('expected the implement agent node')
+    expect(implement.accountProfile).toBe('work')
+    expect(implement.profile).toBe('high-work')
+    expect(implement.env).toEqual({ SAFE_VAR: '1' })
+    const fix = definition.steps.find((step) => step.id === FULL_WORKFLOW_NODE_IDS.fix)
+    if (fix?.type !== 'agent') throw new Error('expected the fix agent node')
+    expect(fix.accountProfile).toBe('work')
+    expect(fix.env).toEqual({ SAFE_VAR: '1' })
+    // The rebuilt definition still passes full graph validation.
+    expect(validateWorkflowDefinition(definition).ok).toBe(true)
+  })
+
+  it('prefers an explicit fixer profile config over the implementer inheritance', () => {
+    const definition = buildDefaultFullWorkflowDefinition({
+      ...ALIASED_CONFIG,
+      fixerProfiles: { accountProfile: 'personal' },
+    })
+    const fix = definition.steps.find((step) => step.id === FULL_WORKFLOW_NODE_IDS.fix)
+    if (fix?.type !== 'agent') throw new Error('expected the fix agent node')
+    expect(fix.accountProfile).toBe('personal')
+    expect(fix.profile).toBeUndefined()
+  })
+
+  it('extracts the round-1/round-≥2 agent node aliases and the shell confirmation mark (round-trip)', () => {
+    const definition = buildDefaultFullWorkflowDefinition({
+      ...ALIASED_CONFIG,
+      fixerProfiles: { accountProfile: 'personal' },
+      shellRequireConfirmation: true,
+    })
+    const extracted = extractFullWorkflowConfig(definition)
+    expect(extracted).toEqual({
+      ok: true,
+      data: {
+        ...CONFIG,
+        shellRequireConfirmation: true,
+        implementerProfiles: ALIASED_CONFIG.implementerProfiles,
+        fixerProfiles: { accountProfile: 'personal' },
+      },
+    })
+  })
+})

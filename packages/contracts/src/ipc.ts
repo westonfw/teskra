@@ -353,9 +353,11 @@ import {
 import {
   fullWorkflowRunSummarySchema,
   fullWorkflowStartResultSchema,
+  listPendingShellConfirmationsRequestSchema,
   listWorkflowDefinitionsRequestSchema,
   listWorkflowRunsRequestSchema,
   loadWorkflowDefinitionRequestSchema,
+  pendingShellConfirmationSchema,
   startFullWorkflowRequestSchema,
   workflowDefinitionFileInfoSchema,
   workflowDefinitionSchema,
@@ -372,9 +374,11 @@ import {
   workflowStepSchema,
   type FullWorkflowRunSummary,
   type FullWorkflowStartResult,
+  type ListPendingShellConfirmationsRequest,
   type ListWorkflowDefinitionsRequest,
   type ListWorkflowRunsRequest,
   type LoadWorkflowDefinitionRequest,
+  type PendingShellConfirmation,
   type StartFullWorkflowRequest,
   type WorkflowDefinition,
   type WorkflowDefinitionFileInfo,
@@ -530,6 +534,7 @@ export const IPC_CHANNELS = {
   workflowRunComplete: 'teskra:workflow:run:complete',
   workflowStepResolve: 'teskra:workflow:step:resolve',
   workflowShellConfirmation: 'teskra:workflow:shell:confirm',
+  workflowListPendingShellConfirmations: 'teskra:workflow:shell:pending-confirmations:list',
   workflowDispatch: 'teskra:workflow:dispatch',
   workflowIterate: 'teskra:workflow:iterate',
   workflowStartFull: 'teskra:workflow:start-full',
@@ -1258,6 +1263,11 @@ export const workflowShellConfirmationChannel = channel(
   workflowShellConfirmationRequestSchema,
   z.boolean(),
 )
+export const workflowListPendingShellConfirmationsChannel = channel(
+  IPC_CHANNELS.workflowListPendingShellConfirmations,
+  listPendingShellConfirmationsRequestSchema,
+  z.array(pendingShellConfirmationSchema),
+)
 export const workflowDispatchChannel = channel(
   IPC_CHANNELS.workflowDispatch,
   workflowDispatchRequestSchema,
@@ -1418,6 +1428,7 @@ export const ipcChannelDefinitions = {
   workflowRunComplete: workflowRunCompleteChannel,
   workflowStepResolve: workflowStepResolveChannel,
   workflowShellConfirmation: workflowShellConfirmationChannel,
+  workflowListPendingShellConfirmations: workflowListPendingShellConfirmationsChannel,
   workflowDispatch: workflowDispatchChannel,
   workflowIterate: workflowIterateChannel,
   workflowStartFull: workflowStartFullChannel,
@@ -1662,6 +1673,14 @@ export interface TeskraBridge {
      * workflow.shell_confirmation_required (true = it was awaiting a decision).
      */
     confirmShellStep(request: WorkflowShellConfirmationRequest): Promise<IpcResult<boolean>>
+    /**
+     * Code-review P1-6: parked shell confirmations survive a renderer reload;
+     * the confirmation host pulls this list on (re)subscribe instead of
+     * relying on having seen the live event.
+     */
+    listPendingShellConfirmations(
+      request?: ListPendingShellConfirmationsRequest,
+    ): Promise<IpcResult<PendingShellConfirmation[]>>
     dispatch(request: WorkflowDispatchRequest): Promise<IpcResult<WorkflowDispatchResult>>
     iterate(request: WorkflowIterateRequest): Promise<IpcResult<WorkflowIterateResult>>
     startFullWorkflow(

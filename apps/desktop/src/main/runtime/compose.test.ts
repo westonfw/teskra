@@ -609,6 +609,9 @@ describe('TeskraRuntime composition root (TASK-081)', () => {
     })
     if (!workspace.ok) throw new Error('expected workspace')
     const workspaceId = workspace.data.id
+    // P2-6: repo-local memory loads only for trusted workspaces.
+    const trusted = runtime.workspace.updateTrust({ id: workspaceId, trustLevel: 'trusted' })
+    if (!trusted.ok) throw new Error('expected trust update')
 
     // Repo-local memory file + one stored memory; both must be packed.
     mkdirSync(paths.repoMemoryDir(repo), { recursive: true })

@@ -73,6 +73,7 @@ import type {
   ListReviewPanelsRequest,
   ListTasksRequest,
   ListTerminalsRequest,
+  ListPendingShellConfirmationsRequest,
   ListWorkflowDefinitionsRequest,
   ListWorkflowRunsRequest,
   LoadWorkflowDefinitionRequest,
@@ -83,6 +84,7 @@ import type {
   OpenSystemDirectoryRequest,
   PermissionAuditEntry,
   PermissionDecisionResult,
+  PendingShellConfirmation,
   PermissionRule,
   PermissionRuleIdRequest,
   ProfileAlias,
@@ -443,6 +445,14 @@ export interface WorkflowPort {
    * workflow.shell_confirmation_required; true = it was awaiting a decision.
    */
   confirmShellStep(request: WorkflowShellConfirmationRequest): IpcResult<boolean>
+  /**
+   * Code-review P1-6: every shell confirmation still parked in Main. The
+   * renderer host pulls this on (re)subscribe so a window reload never
+   * strands a step in `running` on an event it missed.
+   */
+  listPendingShellConfirmations(
+    request?: ListPendingShellConfirmationsRequest,
+  ): IpcResult<readonly PendingShellConfirmation[]>
   dispatch(request: WorkflowDispatchRequest): Promise<IpcResult<WorkflowDispatchResult>>
   /** TASK-062 Iterate Primitive: Implement → Review → Fix → Review with safety caps. */
   iterate(request: WorkflowIterateRequest): Promise<IpcResult<WorkflowIterateResult>>

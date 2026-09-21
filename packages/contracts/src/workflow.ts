@@ -323,6 +323,25 @@ export type WorkflowShellConfirmationRequest = z.infer<
 >
 
 /**
+ * TASK-118 (code-review P1-6): a parked shell confirmation outlives renderer
+ * reloads — the confirmation host pulls this list when it (re)subscribes so a
+ * step never waits forever on an event the window never saw.
+ */
+export const pendingShellConfirmationSchema = z.strictObject({
+  runId: ipcIdSchema,
+  stepId: ipcIdSchema,
+  nodeId: ipcIdSchema,
+  command: z.string().min(1),
+  cwd: z.string().min(1),
+})
+export type PendingShellConfirmation = z.infer<typeof pendingShellConfirmationSchema>
+
+export const listPendingShellConfirmationsRequestSchema = z.strictObject({})
+export type ListPendingShellConfirmationsRequest = z.infer<
+  typeof listPendingShellConfirmationsRequestSchema
+>
+
+/**
  * TASK-062 Iterate Safety Cap (plan §124): two independent round limits.
  * `maxRoundsPerCriteriaVersion` anchors to the currently confirmed criteria
  * set version and resets when the user confirms a new version;

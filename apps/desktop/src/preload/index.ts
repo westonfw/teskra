@@ -207,6 +207,8 @@ const bridge: TeskraBridge = {
     completeRun: (request) => invoke(IPC_CHANNELS.workflowRunComplete, request),
     resolveStep: (request) => invoke(IPC_CHANNELS.workflowStepResolve, request),
     confirmShellStep: (request) => invoke(IPC_CHANNELS.workflowShellConfirmation, request),
+    listPendingShellConfirmations: (request = {}) =>
+      invoke(IPC_CHANNELS.workflowListPendingShellConfirmations, request),
     dispatch: (request) => invoke(IPC_CHANNELS.workflowDispatch, request),
     iterate: (request) => invoke(IPC_CHANNELS.workflowIterate, request),
     startFullWorkflow: (request) => invoke(IPC_CHANNELS.workflowStartFull, request),

@@ -452,6 +452,52 @@ describe('createShellStepExecutor — repo-defined command confirmation (TASK-11
     expect(completion.outcome).toBe('success')
   })
 
+  it('records the approval decision in the step result (code-review P1-6)', async () => {
+    const { commands } = mockCommandRunner({
+      ok: true,
+      data: { stdout: '', stderr: '', exitCode: 0 },
+    })
+    const executor = createShellStepExecutor({
+      commands,
+      confirmation: { request: async () => true, cancel() {} },
+    })
+
+    const completion = await executor.execute(
+      executionFor('npm run repo-script', { requireConfirmation: true }),
+    )
+
+    expect(completion.outcome).toBe('success')
+    const confirmation = completion.result?.['confirmation'] as
+      { stepId: string; command: string; cwd: string; decidedAt: string } | undefined
+    expect(confirmation).toMatchObject({
+      stepId: 'step-verify',
+      command: 'npm run repo-script',
+      cwd: '/repo',
+    })
+    expect(Number.isNaN(Date.parse(confirmation?.decidedAt ?? ''))).toBe(false)
+  })
+
+  it('keeps the approval record when the confirmed command then fails', async () => {
+    const { commands } = mockCommandRunner({
+      ok: true,
+      data: { stdout: '', stderr: '', exitCode: 1 },
+    })
+    const executor = createShellStepExecutor({
+      commands,
+      confirmation: { request: async () => true, cancel() {} },
+    })
+
+    const completion = await executor.execute(
+      executionFor('npm run repo-script', { requireConfirmation: true }),
+    )
+
+    expect(completion.outcome).toBe('failure')
+    expect(completion.result).toMatchObject({
+      exitCode: 1,
+      confirmation: { stepId: 'step-verify', command: 'npm run repo-script', cwd: '/repo' },
+    })
+  })
+
   it('does not execute when the user rejects', async () => {
     const { commands, requests } = mockCommandRunner({
       ok: true,
