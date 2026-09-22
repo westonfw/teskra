@@ -336,6 +336,20 @@ export const zhCN: Record<TranslationKey, string> = {
     'Alias「{alias}」（{kind}）绑定的 Profile 已不存在。请在 设置 → Accounts → Aliases 中重新绑定。',
   'errorMessage.profileAliasTargetDisabled':
     'Alias「{alias}」指向已停用的账号 Profile「{name}」。请启用它或重新绑定 alias。',
+  // TASK-136（Milestone 26 §7）：线程消息指令的解析/校验错误。
+  'errorMessage.messageDirectiveLineTooLong': '第 {line} 行：指令行最长 1024 个字符。',
+  'errorMessage.messageDirectiveUnknown': '第 {line} 行：未知指令「/{directive}」。',
+  'errorMessage.messageDirectiveInvalidValue': '第 {line} 行：该指令的取值非法。',
+  'errorMessage.messageDirectiveDuplicate': '第 {line} 行：指令「/{directive}」重复出现。',
+  'errorMessage.messageDirectiveMixedMention':
+    '第 {line} 行：@提及不能与 / 指令混用——请把「@<agent>」放在消息首行。',
+  'errorMessage.messageDirectiveIncompatible':
+    '第 {line} 行：「/{directive}」不能与 /workflow full 同时使用。',
+  'errorMessage.messageDirectiveMissingBody': '第 {line} 行：消息只有指令、没有正文。',
+  'errorMessage.messageDirectiveWorkflowNeedsTask':
+    '/workflow 指令需要一个任务：请在任务页发送，或添加一行正文以创建任务。',
+  'errorMessage.attendedManualRejected':
+    '线程输入框无法发起 attended + manual 的 Run——没有终端可以回答人工审批。请去掉 /approval manual，或从 Runs 标签页的终端启动卡片发起。',
 
   'tasks.eyebrow': '任务优先工作台',
   'tasks.title': '任务',
@@ -926,9 +940,19 @@ export const zhCN: Record<TranslationKey, string> = {
   'quickStart.executionMode.orchestrated': '隔离运行',
   'quickStart.approvalMode.safeAuto': 'safe-auto',
   'quickStart.fixedNote':
-    '线程入口固定 exec · 隔离 · safe-auto；attended + manual 请从 Runs 标签页的终端启动卡片发起。',
+    '此处修改仅对下一次发送生效；也可用 /mode、/approval 指令逐条覆盖执行与审批方式。attended + manual 请从 Runs 标签页的终端启动卡片发起。',
   'quickStart.unavailable': '当前工作区没有可用的 Agent，请先安装或检测。',
   'quickStart.openAgentsSettings': '打开 Settings → Agents',
+  // TASK-136（Milestone 26 §7/§12）：输入框的 / 与 @ 指令补全。
+  'quickStart.completion.directive.agent': '本次发送使用的 Agent',
+  'quickStart.completion.directive.account': '账号（别名或 Profile id）',
+  'quickStart.completion.directive.mode': '执行模式（attended | isolated）',
+  'quickStart.completion.directive.approval': '审批模式',
+  'quickStart.completion.directive.model': '模型覆盖',
+  'quickStart.completion.directive.workflow': '启动默认完整工作流',
+  'quickStart.completion.mode.attended': 'attended —— 在主工作区运行',
+  'quickStart.completion.mode.isolated': 'isolated —— 在隔离的 Git worktree 中运行',
+  'quickStart.completion.account': '账号别名或 Profile id',
 
   'tasks.tabs.overview': '概览',
   'tasks.tabs.runs': 'Runs',

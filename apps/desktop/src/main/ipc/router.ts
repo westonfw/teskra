@@ -149,6 +149,10 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.task.sendMessage(request)),
   )
   register(
+    ipcChannelDefinitions.taskThread,
+    withRuntime((runtime, request) => runtime.task.thread(request)),
+  )
+  register(
     ipcChannelDefinitions.criteriaListSets,
     withRuntime((runtime, request) => runtime.criteria.listSets(request)),
   )

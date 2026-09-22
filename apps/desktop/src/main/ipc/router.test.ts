@@ -208,6 +208,7 @@ function fakeRuntime(): TeskraRuntime {
       get: vi.fn(() => ok(TASK)),
       list: vi.fn(() => ok([TASK])),
       sendMessage: vi.fn(async () => ok({ taskId: TASK.id, kind: 'run' as const, id: 'run-1' })),
+      thread: vi.fn(() => ok({ items: [] })),
     },
     criteria: {
       listSets: vi.fn(() => ok([CRITERIA_SET])),
@@ -941,6 +942,34 @@ describe('Typed IPC Router (TASK-020)', () => {
     })
     expect(smuggled).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
     expect(runtime.task.sendMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes task thread through the runtime facade (TASK-138)', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    const request = {
+      taskId: 'task-1',
+      afterCursor: '2026-09-23T00:00:00.000Z|user:run-1',
+      limit: 10,
+    }
+    expect(await ipc.invoke(IPC_CHANNELS.taskThread, request)).toEqual({
+      ok: true,
+      data: { items: [] },
+    })
+    expect(runtime.task.thread).toHaveBeenCalledWith(request)
+
+    // strictObject: unknown keys are rejected at the IPC boundary.
+    const smuggled = await ipc.invoke(IPC_CHANNELS.taskThread, {
+      taskId: 'task-1',
+      status: 'completed',
+    })
+    expect(smuggled).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    // limit is capped at 200.
+    const oversized = await ipc.invoke(IPC_CHANNELS.taskThread, { taskId: 'task-1', limit: 201 })
+    expect(oversized).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    expect(runtime.task.thread).toHaveBeenCalledTimes(1)
   })
 
   it('validates Facade responses and converts thrown errors', async () => {

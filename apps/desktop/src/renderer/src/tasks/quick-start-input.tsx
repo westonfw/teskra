@@ -1,8 +1,14 @@
 import { DownOutlined, UpOutlined } from '@ant-design/icons'
-import { Alert, Button, Input, Tooltip, Typography } from 'antd'
-import { useEffect, useMemo, useState } from 'react'
+import { Alert, AutoComplete, Button, Input, Tooltip, Typography } from 'antd'
+import type { TextAreaRef } from 'antd/es/input/TextArea'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
-import type { PublicAppError, ResolvedRunDefaults, SendTaskMessageResult } from '@teskra/contracts'
+import type {
+  ProfileAlias,
+  PublicAppError,
+  ResolvedRunDefaults,
+  SendTaskMessageResult,
+} from '@teskra/contracts'
 
 import { AccountSelect } from '../accounts/account-select'
 import { useAccountProfileStore } from '../accounts/account-profile-store'
@@ -13,8 +19,11 @@ import { agentRuntimeKey, useAgentStore } from '../stores/agent-store'
 import { useNavigationStore } from '../stores/navigation-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
 import {
+  applyDirectiveCompletion,
+  buildDirectiveCompletionOptions,
   buildSendMessageRequest,
   formatRunDefaultsSummary,
+  getDirectiveCompletion,
   isNoAgentAvailable,
   runDefaultsReasonLines,
   type QuickStartEdits,
@@ -35,6 +44,11 @@ interface QuickStartInputProps {
  * per-send editor (Agent / account only — the fixed thread-mode values are a
  * note, never a choice, so attended + manual cannot be picked here).
  *
+ * TASK-136: the composer completes `/` directives and `@` mentions from the
+ * known candidate sets (directive table, AgentRegistry ids, account
+ * aliases/profile ids) — never from free text; Enter picks the highlighted
+ * completion while the dropdown is open and sends otherwise.
+ *
  * With no available Agent (resolve-defaults VALIDATION_FAILED) the input is
  * replaced by a disabled notice linking to Settings → Agents.
  */
@@ -53,6 +67,14 @@ export function QuickStartInput({ workspaceId, taskId, onAccepted }: QuickStartI
   const [sendError, setSendError] = useState<PublicAppError>()
   const [expanded, setExpanded] = useState(false)
   const [edits, setEdits] = useState<QuickStartEdits>({})
+  // TASK-136: `/` and `@` directive completion state. The caret lives in
+  // state because the option list depends on it; the pending-select ref
+  // tells AutoComplete's onChange apart from a real text edit.
+  const [caret, setCaret] = useState(0)
+  const [accountAliases, setAccountAliases] = useState<readonly string[]>([])
+  const [completionOpen, setCompletionOpen] = useState(false)
+  const textAreaRef = useRef<TextAreaRef | null>(null)
+  const pendingSelectRef = useRef<string | undefined>(undefined)
 
   useEffect(() => {
     let active = true
@@ -71,6 +93,33 @@ export function QuickStartInput({ workspaceId, taskId, onAccepted }: QuickStartI
       active = false
     }
   }, [workspaceId])
+
+  // Account alias candidates for /account completion (TASK-111 bindings).
+  useEffect(() => {
+    let active = true
+    void window.teskra.account.listAliases({ kind: 'account' }).then((result) => {
+      if (!active) return
+      if (result.ok) {
+        setAccountAliases(result.data.map((alias: ProfileAlias) => alias.alias))
+      }
+    })
+    return () => {
+      active = false
+    }
+  }, [workspaceId])
+
+  const completion = useMemo(() => getDirectiveCompletion(text, caret), [text, caret])
+  const completionOptions = useMemo(() => {
+    if (completion === undefined) return []
+    return buildDirectiveCompletionOptions(
+      completion,
+      {
+        agentIds: definitions.map((definition) => definition.id),
+        accounts: [...accountAliases, ...profiles.map((profile) => profile.id)],
+      },
+      t,
+    )
+  }, [completion, definitions, accountAliases, profiles, t])
 
   // Changing the Agent resets the per-send account choice to "auto".
   useEffect(() => {
@@ -126,6 +175,7 @@ export function QuickStartInput({ workspaceId, taskId, onAccepted }: QuickStartI
         return
       }
       setText('')
+      setCaret(0)
       onAccepted?.(result.data)
     } finally {
       setSending(false)
@@ -165,20 +215,60 @@ export function QuickStartInput({ workspaceId, taskId, onAccepted }: QuickStartI
         </div>
       )}
       <div className="quick-start-composer">
-        <Input.TextArea
+        <AutoComplete
           value={text}
-          autoSize={{ minRows: 2, maxRows: 6 }}
-          placeholder={t('quickStart.placeholder')}
+          options={completionOptions}
+          open={completionOpen && completionOptions.length > 0}
+          onOpenChange={setCompletionOpen}
+          filterOption={false}
           disabled={sending}
-          onChange={(event) => setText(event.target.value)}
-          onKeyDown={(event) => {
-            // Enter sends; Shift+Enter inserts a newline.
-            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault()
-              void handleSend()
-            }
+          style={{ flex: 1 }}
+          onSelect={(value: string) => {
+            pendingSelectRef.current = value
           }}
-        />
+          onChange={(value: string) => {
+            const pending = pendingSelectRef.current
+            if (pending !== undefined) {
+              // A completion was picked: splice it into the token under the
+              // caret instead of letting AutoComplete replace the whole text.
+              pendingSelectRef.current = undefined
+              if (completion !== undefined) {
+                const applied = applyDirectiveCompletion(text, completion, pending)
+                setText(applied.text)
+                setCaret(applied.caret)
+                requestAnimationFrame(() => {
+                  const element = textAreaRef.current?.resizableTextArea?.textArea
+                  element?.focus()
+                  element?.setSelectionRange(applied.caret, applied.caret)
+                })
+              }
+              return
+            }
+            setText(value)
+            setCaret(
+              textAreaRef.current?.resizableTextArea?.textArea.selectionStart ?? value.length,
+            )
+          }}
+        >
+          <Input.TextArea
+            ref={textAreaRef}
+            autoSize={{ minRows: 2, maxRows: 6 }}
+            placeholder={t('quickStart.placeholder')}
+            disabled={sending}
+            onClick={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
+            onKeyUp={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
+            onKeyDown={(event) => {
+              // While the completion dropdown is open, Enter picks the active
+              // option (AutoComplete handles the key) instead of sending.
+              if (completionOpen && completionOptions.length > 0) return
+              // Enter sends; Shift+Enter inserts a newline.
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault()
+                void handleSend()
+              }
+            }}
+          />
+        </AutoComplete>
         <Button
           type="primary"
           loading={sending}

@@ -4,8 +4,11 @@ import type { ResolvedRunDefaults } from '@teskra/contracts'
 
 import { translate } from '../i18n'
 import {
+  applyDirectiveCompletion,
+  buildDirectiveCompletionOptions,
   buildSendMessageRequest,
   formatRunDefaultsSummary,
+  getDirectiveCompletion,
   isNoAgentAvailable,
   runDefaultsReasonLines,
 } from './quick-start-model'
@@ -112,5 +115,154 @@ describe('runDefaultsReasonLines', () => {
     expect(runDefaultsReasonLines([{ key: 'runDefaults.reason.unknown' }], t)).toEqual([
       'runDefaults.reason.unknown',
     ])
+  })
+})
+
+describe('getDirectiveCompletion (TASK-136)', () => {
+  it('completes a directive name on a leading slash token', () => {
+    expect(getDirectiveCompletion('/ac', 3)).toEqual({
+      kind: 'directive',
+      start: 0,
+      end: 3,
+      query: '/ac',
+    })
+  })
+
+  it('completes directive arguments only for the known directives', () => {
+    expect(getDirectiveCompletion('/agent co', 9)).toEqual({
+      kind: 'agent',
+      start: 7,
+      end: 9,
+      query: 'co',
+    })
+    expect(getDirectiveCompletion('/account ', 9)).toEqual({
+      kind: 'account',
+      start: 9,
+      end: 9,
+      query: '',
+    })
+    expect(getDirectiveCompletion('/mode a', 7)).toMatchObject({ kind: 'mode', query: 'a' })
+    expect(getDirectiveCompletion('/approval sa', 12)).toMatchObject({
+      kind: 'approval',
+      query: 'sa',
+    })
+    expect(getDirectiveCompletion('/workflow f', 11)).toMatchObject({
+      kind: 'workflow',
+      query: 'f',
+    })
+  })
+
+  it('does not complete a /model argument or a second argument', () => {
+    expect(getDirectiveCompletion('/model gp', 9)).toBeUndefined()
+    expect(getDirectiveCompletion('/agent codex cla', 16)).toBeUndefined()
+    expect(getDirectiveCompletion('/workflow full --te', 19)).toBeUndefined()
+  })
+
+  it('completes an @mention on the first line only', () => {
+    expect(getDirectiveCompletion('@cla', 4)).toEqual({
+      kind: 'mention',
+      start: 0,
+      end: 4,
+      query: '@cla',
+    })
+    expect(getDirectiveCompletion('@claude review', 14)).toBeUndefined()
+    expect(getDirectiveCompletion('/mode attended\n@cla', 19)).toBeUndefined()
+  })
+
+  it('completes on later leading directive lines but never in the body', () => {
+    const text = '/agent codex\n/mo'
+    expect(getDirectiveCompletion(text, text.length)).toEqual({
+      kind: 'directive',
+      start: 13,
+      end: 16,
+      query: '/mo',
+    })
+    // A `/` line after body text is prose, not a directive.
+    const body = 'fix the bug\n/ag'
+    expect(getDirectiveCompletion(body, body.length)).toBeUndefined()
+  })
+})
+
+describe('buildDirectiveCompletionOptions (TASK-136)', () => {
+  const candidates = { agentIds: ['codex', 'claude'], accounts: ['work', 'acct-1'] }
+
+  it('prefix-filters directive names with localized labels', () => {
+    const options = buildDirectiveCompletionOptions(
+      { kind: 'directive', start: 0, end: 2, query: '/a' },
+      candidates,
+      t,
+    )
+    expect(options.map((option) => option.value)).toEqual(['/agent ', '/account ', '/approval '])
+    expect(options[0]?.label).toContain('Agent for this send')
+  })
+
+  it('suggests agent ids for /agent and @mention from the registry list only', () => {
+    expect(
+      buildDirectiveCompletionOptions(
+        { kind: 'agent', start: 7, end: 8, query: 'c' },
+        candidates,
+        t,
+      ).map((option) => option.value),
+    ).toEqual(['codex ', 'claude '])
+    expect(
+      buildDirectiveCompletionOptions(
+        { kind: 'mention', start: 0, end: 2, query: '@c' },
+        candidates,
+        t,
+      ).map((option) => option.value),
+    ).toEqual(['@codex ', '@claude '])
+  })
+
+  it('suggests account aliases and profile ids for /account', () => {
+    expect(
+      buildDirectiveCompletionOptions(
+        { kind: 'account', start: 9, end: 10, query: 'w' },
+        candidates,
+        t,
+      ).map((option) => option.value),
+    ).toEqual(['work '])
+  })
+
+  it('suggests the mode / approval / workflow enums', () => {
+    expect(
+      buildDirectiveCompletionOptions(
+        { kind: 'mode', start: 6, end: 6, query: '' },
+        candidates,
+        t,
+      ).map((option) => option.value),
+    ).toEqual(['attended ', 'isolated '])
+    expect(
+      buildDirectiveCompletionOptions(
+        { kind: 'approval', start: 10, end: 12, query: 'sa' },
+        candidates,
+        t,
+      ).map((option) => option.value),
+    ).toEqual(['safe-auto '])
+    expect(
+      buildDirectiveCompletionOptions(
+        { kind: 'workflow', start: 10, end: 10, query: '' },
+        candidates,
+        t,
+      ).map((option) => option.value),
+    ).toEqual(['full '])
+  })
+})
+
+describe('applyDirectiveCompletion (TASK-136)', () => {
+  it('splices the selected value into the token and reports the caret', () => {
+    const text = '/agent co\ndo the thing'
+    const completion = getDirectiveCompletion(text, 9)
+    expect(completion).toBeDefined()
+    const applied = applyDirectiveCompletion(text, completion!, 'codex ')
+    expect(applied).toEqual({ text: '/agent codex \ndo the thing', caret: 13 })
+  })
+
+  it('replaces the mention token on the first line', () => {
+    const applied = applyDirectiveCompletion(
+      '@cla',
+      { kind: 'mention', start: 0, end: 4, query: '@cla' },
+      '@claude ',
+    )
+    expect(applied).toEqual({ text: '@claude ', caret: 8 })
   })
 })

@@ -4947,14 +4947,14 @@ packages/shared: parseMessageDirectives(text) 纯函数
 
 ### 验收标准
 
-- [ ] 指令只允许在消息开头的连续行；其余文本为 prompt；解析结果为结构化对象（无 IO，单测覆盖全部指令）。
-- [ ] 未知指令 / 非法取值 → `VALIDATION_FAILED` 带行号，不启动任何 Run。
-- [ ] `/account` 接受 alias 或 id，alias 经 ProfileAliasManager 解析（ADR-0011）。
-- [ ] `/mode attended` 且 `/approval manual` → 拒绝并解释；其余组合映射到 `executionMode` / `approvalMode`。
-- [ ] `/workflow full` → `FullWorkflowStartRequest`（`--test` 覆盖 `testCommand`）。
-- [ ] `@<agentId> <text>` → `StartReviewRunRequest`（`taskId`、reviewer 角色、`prompt = text`）。
-- [ ] 输入框对 `/` 与 `@` 提供来自 AgentRegistry / 账号列表的自动补全；不做自由文本猜测。
-- [ ] `send-message` 返回 `kind: 'run' | 'review' | 'workflow'` 与对应 id。
+- [x] 指令只允许在消息开头的连续行；其余文本为 prompt；解析结果为结构化对象（无 IO，单测覆盖全部指令）。
+- [x] 未知指令 / 非法取值 → `VALIDATION_FAILED` 带行号，不启动任何 Run。
+- [x] `/account` 接受 alias 或 id，alias 经 ProfileAliasManager 解析（ADR-0011）。
+- [x] `/mode attended` 且 `/approval manual` → 拒绝并解释；其余组合映射到 `executionMode` / `approvalMode`。
+- [x] `/workflow full` → `FullWorkflowStartRequest`（`--test` 覆盖 `testCommand`）。
+- [x] `@<agentId> <text>` → `StartReviewRunRequest`（`taskId`、reviewer 角色、`prompt = text`）。
+- [x] 输入框对 `/` 与 `@` 提供来自 AgentRegistry / 账号列表的自动补全；不做自由文本猜测。
+- [x] `send-message` 返回 `kind: 'run' | 'review' | 'workflow'` 与对应 id。
 
 ---
 
@@ -4990,13 +4990,13 @@ IPC:       teskra:task:thread { taskId, afterCursor?, limit? } → { items, next
 
 ### 验收标准
 
-- [ ] 五类线程项：`user_message`（`run.prompt`）、`agent_reply`、`agent_progress`、`decision`、`system`
+- [x] 五类线程项：`user_message`（`run.prompt`）、`agent_reply`、`agent_progress`、`decision`、`system`
       （Review / Workflow / 状态变化）；各有测试。
-- [ ] `agent_reply` 正文 = 该 Run 的 `assistant_text` 观测按 seq 拼接（上限 32 KiB，截断标记）；
+- [x] `agent_reply` 正文 = 该 Run 的 `assistant_text` 观测按 seq 拼接（上限 32 KiB，截断标记）；
       无结构化流回退 Handoff `summary`；再回退 `terminal.log` 尾部 2000 字符并标记 `source: 'terminal'`。
-- [ ] 游标 `(createdAt, id)` 稳定分页；`limit` 上限 200。
-- [ ] 只读：Repository 只提供批量读取；测试用只读连接断言无写入。
-- [ ] Manager 不写 SQL；请求 `strictObject`。
+- [x] 游标 `(createdAt, id)` 稳定分页；`limit` 上限 200。
+- [x] 只读：Repository 只提供批量读取；测试用只读连接断言无写入。
+- [x] Manager 不写 SQL；请求 `strictObject`。
 
 ---
 

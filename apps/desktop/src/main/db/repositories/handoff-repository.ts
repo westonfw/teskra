@@ -10,6 +10,7 @@ import {
   execute,
   isoTimestampSchema,
   jsonRecordSchema,
+  mapRows,
   nowIso,
   requireFound,
   validateRow,
@@ -64,6 +65,12 @@ export interface HandoffRepository {
   save(input: SaveHandoffInput, now?: string): IpcResult<Handoff>
   getById(id: string): IpcResult<Handoff | null>
   getByRunId(runId: string): IpcResult<Handoff | null>
+  /**
+   * TASK-138: batch read for the thread projection — the handoff rows of
+   * every run of a task in one query, oldest first. An empty id list
+   * short-circuits to an empty result.
+   */
+  listByRuns(runIds: readonly string[]): IpcResult<Handoff[]>
   delete(id: string): IpcResult<boolean>
 }
 
@@ -147,6 +154,24 @@ export function createHandoffRepository(connection: Database.Database): HandoffR
       return execute(ENTITY, 'delete', () => {
         return connection.prepare('DELETE FROM handoffs WHERE id = ?').run(id).changes > 0
       })
+    },
+
+    listByRuns(runIds) {
+      if (runIds.length === 0) {
+        return { ok: true, data: [] }
+      }
+      const rows = execute(ENTITY, 'listByRuns', () => {
+        const placeholders = runIds.map(() => '?').join(', ')
+        return connection
+          .prepare(
+            `SELECT * FROM handoffs WHERE run_id IN (${placeholders}) ORDER BY created_at ASC`,
+          )
+          .all(...runIds) as HandoffRow[]
+      })
+      if (!rows.ok) {
+        return rows
+      }
+      return mapRows(rows.data, toDomain)
     },
   }
 

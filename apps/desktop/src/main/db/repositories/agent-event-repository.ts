@@ -60,6 +60,16 @@ export interface AgentEventRepository {
     eventType: string,
     options?: { afterSeq?: number; limit?: number },
   ): IpcResult<AgentEvent[]>
+  /**
+   * TASK-138: batch read for the thread projection — every event of the
+   * given types across all of a task's runs in one query, ordered by
+   * (run_id, seq) so per-run replay order is preserved. Empty input lists
+   * short-circuit to an empty result (no `IN ()` SQL).
+   */
+  listByRunsAndTypes(
+    runIds: readonly string[],
+    eventTypes: readonly string[],
+  ): IpcResult<AgentEvent[]>
   /** Next free seq for a run (MAX(seq) + 1, starting at 1). */
   nextSeq(runId: string): IpcResult<number>
 }
@@ -157,6 +167,27 @@ export function createAgentEventRepository(connection: Database.Database): Agent
         const row = maxSeqStatement.get(runId) as { max_seq: number | null }
         return (row.max_seq ?? 0) + 1
       })
+    },
+
+    listByRunsAndTypes(runIds, eventTypes) {
+      if (runIds.length === 0 || eventTypes.length === 0) {
+        return { ok: true, data: [] }
+      }
+      const rows = execute(ENTITY, 'listByRunsAndTypes', () => {
+        const runPlaceholders = runIds.map(() => '?').join(', ')
+        const typePlaceholders = eventTypes.map(() => '?').join(', ')
+        return connection
+          .prepare(
+            `SELECT * FROM agent_events
+             WHERE run_id IN (${runPlaceholders}) AND event_type IN (${typePlaceholders})
+             ORDER BY run_id ASC, seq ASC`,
+          )
+          .all(...runIds, ...eventTypes) as AgentEventRow[]
+      })
+      if (!rows.ok) {
+        return rows
+      }
+      return mapRows(rows.data, toDomain)
     },
   }
 }

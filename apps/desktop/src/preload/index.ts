@@ -45,6 +45,7 @@ const bridge: TeskraBridge = {
     get: (request) => invoke(IPC_CHANNELS.taskGet, request),
     list: (request) => invoke(IPC_CHANNELS.taskList, request),
     sendMessage: (request) => invoke(IPC_CHANNELS.taskSendMessage, request),
+    thread: (request) => invoke(IPC_CHANNELS.taskThread, request),
   },
   criteria: {
     listSets: (request) => invoke(IPC_CHANNELS.criteriaListSets, request),

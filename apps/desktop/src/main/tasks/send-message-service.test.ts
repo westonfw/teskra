@@ -2,14 +2,20 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   IPC_NAME_MAX,
+  type AgentAccountProfile,
   type AgentRun,
+  type FullWorkflowStartResult,
   type IpcResult,
   type ResolvedRunDefaults,
+  type ReviewRunStartResult,
   type StartAgentRunRequest,
+  type StartReviewRunRequest,
   type Task,
+  type WorkflowRun,
   type Worktree,
 } from '@teskra/contracts'
 
+import type { ResolvedNodeProfiles } from '../agents/profile-alias-manager'
 import {
   createSendTaskMessageService,
   splitTaskMessageText,
@@ -96,12 +102,64 @@ function fakeDeps(overrides: Partial<SendTaskMessageServiceDeps> = {}) {
       data: startedRun(request),
     })),
   }
+  const reviewer = {
+    startReview: vi.fn(
+      async (request: StartReviewRunRequest): Promise<IpcResult<ReviewRunStartResult>> => ({
+        ok: true,
+        data: {
+          run: {
+            id: 'review-run-1',
+            workspaceId: request.workspaceId,
+            ...(request.taskId === undefined ? {} : { taskId: request.taskId }),
+            agentType: request.agentType,
+            role: 'reviewer',
+            status: 'running',
+            executionMode: 'orchestrated',
+            runDir: '/data/runs/review-run-1',
+            createdAt: '2026-09-10T00:00:00.000Z',
+            updatedAt: '2026-09-10T00:00:00.000Z',
+          },
+          isolation: 'worktree-readonly',
+        },
+      }),
+    ),
+  }
+  const fullWorkflow = {
+    start: vi.fn(async (): Promise<IpcResult<FullWorkflowStartResult>> => ({
+      ok: true,
+      data: {
+        run: { id: 'wfrun-1' } as WorkflowRun,
+        worktree: WORKTREE,
+        rounds: 1,
+        stopReason: 'passed',
+      },
+    })),
+  }
+  const profileAliases = {
+    resolveAgentNodeProfiles: vi.fn((): IpcResult<ResolvedNodeProfiles> => ({
+      ok: true,
+      data: { accountProfileId: 'acct-aliased' },
+    })),
+  }
+  const accountProfiles = {
+    getById: vi.fn((id: string): IpcResult<AgentAccountProfile | null> => ({
+      ok: true,
+      data:
+        id === 'acct-direct'
+          ? ({ id: 'acct-direct', agentId: 'codex', name: 'Direct' } as AgentAccountProfile)
+          : null,
+    })),
+  }
   return {
     deps: {
       tasks,
       defaults,
       worktreeManager,
       agents,
+      reviewer,
+      fullWorkflow,
+      profileAliases,
+      accountProfiles,
       createAgentRunId: () => 'run-1',
       ...overrides,
     } satisfies SendTaskMessageServiceDeps,
@@ -109,6 +167,10 @@ function fakeDeps(overrides: Partial<SendTaskMessageServiceDeps> = {}) {
     defaults,
     worktreeManager,
     agents,
+    reviewer,
+    fullWorkflow,
+    profileAliases,
+    accountProfiles,
   }
 }
 
@@ -212,8 +274,8 @@ describe('SendTaskMessageService (TASK-135)', () => {
     expect(missing.agents.start).not.toHaveBeenCalled()
   })
 
-  it('refuses an empty first line without creating anything', async () => {
-    const { deps, tasks, worktreeManager, agents } = fakeDeps()
+  it('collapses leading blank lines into the trimmed body (the IPC schema trims text)', async () => {
+    const { deps, tasks, agents } = fakeDeps()
     const service = createSendTaskMessageService(deps)
 
     const result = await service.sendMessage({
@@ -221,10 +283,9 @@ describe('SendTaskMessageService (TASK-135)', () => {
       text: '\n\nonly details',
     })
 
-    expect(result).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
-    expect(tasks.create).not.toHaveBeenCalled()
-    expect(worktreeManager.create).not.toHaveBeenCalled()
-    expect(agents.start).not.toHaveBeenCalled()
+    expect(result).toEqual({ ok: true, data: { taskId: 'task-new', kind: 'run', id: 'run-1' } })
+    expect(tasks.create).toHaveBeenCalledWith({ workspaceId: WORKSPACE_ID, title: 'only details' })
+    expect(agents.start).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'only details' }))
   })
 
   it('propagates the no-Agent VALIDATION_FAILED without side effects', async () => {
@@ -325,5 +386,340 @@ describe('SendTaskMessageService (TASK-135)', () => {
         confirm: true,
       })
     })
+  })
+})
+
+describe('SendTaskMessageService directives (TASK-136)', () => {
+  it('rejects an unknown directive with a keyed VALIDATION_FAILED and starts nothing', async () => {
+    const { deps, tasks, worktreeManager, agents } = fakeDeps()
+    const service = createSendTaskMessageService(deps)
+
+    const result = await service.sendMessage({
+      workspaceId: WORKSPACE_ID,
+      text: '/agent codex\n/frobnicate x\nhello',
+    })
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: 'VALIDATION_FAILED',
+        messageKey: 'errorMessage.messageDirectiveUnknown',
+        params: { line: 2, directive: 'frobnicate' },
+      },
+    })
+    expect(tasks.create).not.toHaveBeenCalled()
+    expect(worktreeManager.create).not.toHaveBeenCalled()
+    expect(agents.start).not.toHaveBeenCalled()
+  })
+
+  it('rejects directives without a body', async () => {
+    const { deps, agents } = fakeDeps()
+    const service = createSendTaskMessageService(deps)
+
+    const result = await service.sendMessage({
+      taskId: TASK.id,
+      workspaceId: WORKSPACE_ID,
+      text: '/agent codex',
+    })
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'VALIDATION_FAILED', messageKey: 'errorMessage.messageDirectiveMissingBody' },
+    })
+    expect(agents.start).not.toHaveBeenCalled()
+  })
+
+  it('maps /agent /mode /approval /model onto the start request', async () => {
+    const { deps, worktreeManager, agents } = fakeDeps()
+    const service = createSendTaskMessageService(deps)
+
+    const result = await service.sendMessage({
+      taskId: TASK.id,
+      workspaceId: WORKSPACE_ID,
+      text: '/agent claude\n/mode isolated\n/approval full-auto\n/model gpt-5\ndo the thing',
+      // The defaults row edits lose to the more explicit message directives.
+      overrides: { agentType: 'codex' },
+    })
+
+    expect(result).toEqual({ ok: true, data: { taskId: TASK.id, kind: 'run', id: 'run-1' } })
+    expect(worktreeManager.create).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: 'claude' }),
+    )
+    expect(agents.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentType: 'claude',
+        executionMode: 'orchestrated',
+        approvalMode: 'full-auto',
+        model: 'gpt-5',
+        prompt: 'do the thing',
+      }),
+    )
+  })
+
+  it('creates the Task from the message body, not the directive lines', async () => {
+    const { deps, tasks, agents } = fakeDeps()
+    const service = createSendTaskMessageService(deps)
+
+    await service.sendMessage({
+      workspaceId: WORKSPACE_ID,
+      text: '/agent claude\nFix the login page\nUse OAuth',
+    })
+
+    expect(tasks.create).toHaveBeenCalledWith({
+      workspaceId: WORKSPACE_ID,
+      title: 'Fix the login page',
+      description: 'Use OAuth',
+    })
+    expect(agents.start).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: 'task-new', agentType: 'claude' }),
+    )
+  })
+
+  it('resolves a /account alias through ProfileAliasManager (ADR-0011)', async () => {
+    const { deps, accountProfiles, profileAliases, agents } = fakeDeps()
+    const service = createSendTaskMessageService(deps)
+
+    const result = await service.sendMessage({
+      taskId: TASK.id,
+      workspaceId: WORKSPACE_ID,
+      text: '/account work\ndo the thing',
+    })
+
+    expect(result.ok).toBe(true)
+    expect(accountProfiles.getById).toHaveBeenCalledWith('work')
+    expect(profileAliases.resolveAgentNodeProfiles).toHaveBeenCalledWith({
+      agentId: 'codex',
+      accountProfileAlias: 'work',
+      source: 'send-message /account directive',
+    })
+    expect(agents.start).toHaveBeenCalledWith(
+      expect.objectContaining({ accountProfileId: 'acct-aliased' }),
+    )
+  })
+
+  it('accepts a machine-local /account profile id without alias resolution', async () => {
+    const { deps, profileAliases, agents } = fakeDeps()
+    const service = createSendTaskMessageService(deps)
+
+    const result = await service.sendMessage({
+      taskId: TASK.id,
+      workspaceId: WORKSPACE_ID,
+      text: '/account acct-direct\ndo the thing',
+    })
+
+    expect(result.ok).toBe(true)
+    expect(profileAliases.resolveAgentNodeProfiles).not.toHaveBeenCalled()
+    expect(agents.start).toHaveBeenCalledWith(
+      expect.objectContaining({ accountProfileId: 'acct-direct' }),
+    )
+  })
+
+  it('propagates an unbound /account alias failure without side effects', async () => {
+    const { deps, tasks, profileAliases, agents } = fakeDeps()
+    profileAliases.resolveAgentNodeProfiles.mockReturnValue({
+      ok: false,
+      error: {
+        code: 'VALIDATION_FAILED',
+        message: 'Profile alias "work" is not bound.',
+        retryable: false,
+      },
+    })
+    const service = createSendTaskMessageService(deps)
+
+    const result = await service.sendMessage({
+      workspaceId: WORKSPACE_ID,
+      text: '/account work\ndo the thing',
+    })
+
+    expect(result).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    expect(tasks.create).not.toHaveBeenCalled()
+    expect(agents.start).not.toHaveBeenCalled()
+  })
+
+  it('rejects /mode attended + /approval manual with an explanation', async () => {
+    const { deps, tasks, worktreeManager, agents } = fakeDeps()
+    const service = createSendTaskMessageService(deps)
+
+    const result = await service.sendMessage({
+      workspaceId: WORKSPACE_ID,
+      text: '/mode attended\n/approval manual\ndo the thing',
+    })
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'VALIDATION_FAILED', messageKey: 'errorMessage.attendedManualRejected' },
+    })
+    expect(tasks.create).not.toHaveBeenCalled()
+    expect(worktreeManager.create).not.toHaveBeenCalled()
+    expect(agents.start).not.toHaveBeenCalled()
+  })
+
+  it('/mode attended starts without a worktree', async () => {
+    const { deps, worktreeManager, agents } = fakeDeps()
+    const service = createSendTaskMessageService(deps)
+
+    const result = await service.sendMessage({
+      taskId: TASK.id,
+      workspaceId: WORKSPACE_ID,
+      text: '/mode attended\ndo the thing',
+    })
+
+    expect(result.ok).toBe(true)
+    expect(worktreeManager.create).not.toHaveBeenCalled()
+    const started = agents.start.mock.calls[0]?.[0]
+    expect(started).toMatchObject({ executionMode: 'attended', approvalMode: 'safe-auto' })
+    expect(started).not.toHaveProperty('worktreeId')
+    expect(started).not.toHaveProperty('runId')
+  })
+
+  it('@mention starts a review run and returns kind review', async () => {
+    const { deps, reviewer, agents } = fakeDeps()
+    const service = createSendTaskMessageService(deps)
+
+    const result = await service.sendMessage({
+      taskId: TASK.id,
+      workspaceId: WORKSPACE_ID,
+      text: '@claude review the last run',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      data: { taskId: TASK.id, kind: 'review', id: 'review-run-1' },
+    })
+    expect(reviewer.startReview).toHaveBeenCalledWith({
+      workspaceId: WORKSPACE_ID,
+      agentType: 'claude',
+      taskId: TASK.id,
+      prompt: 'review the last run',
+    })
+    expect(agents.start).not.toHaveBeenCalled()
+  })
+
+  it('@mention without a taskId creates the Task from the review text', async () => {
+    const { deps, tasks, reviewer } = fakeDeps()
+    const service = createSendTaskMessageService(deps)
+
+    const result = await service.sendMessage({
+      workspaceId: WORKSPACE_ID,
+      text: '@claude Review the login changes\nFocus on session handling',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      data: { taskId: 'task-new', kind: 'review', id: 'review-run-1' },
+    })
+    expect(tasks.create).toHaveBeenCalledWith({
+      workspaceId: WORKSPACE_ID,
+      title: 'Review the login changes',
+      description: 'Focus on session handling',
+    })
+    expect(reviewer.startReview).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: 'task-new' }),
+    )
+  })
+
+  it('/workflow full starts the default full workflow and returns kind workflow', async () => {
+    const { deps, fullWorkflow, worktreeManager, agents } = fakeDeps()
+    const service = createSendTaskMessageService(deps)
+
+    const result = await service.sendMessage({
+      taskId: TASK.id,
+      workspaceId: WORKSPACE_ID,
+      text: '/agent claude\n/workflow full --test "npm run test:unit"',
+    })
+
+    expect(result).toEqual({ ok: true, data: { taskId: TASK.id, kind: 'workflow', id: 'wfrun-1' } })
+    expect(fullWorkflow.start).toHaveBeenCalledWith({
+      workspaceId: WORKSPACE_ID,
+      taskId: TASK.id,
+      implementer: 'claude',
+      testCommand: 'npm run test:unit',
+    })
+    // The workflow builds its own worktree; the thread run path stays idle.
+    expect(worktreeManager.create).not.toHaveBeenCalled()
+    expect(agents.start).not.toHaveBeenCalled()
+  })
+
+  it('/workflow full without a taskId creates the Task from the body', async () => {
+    const { deps, tasks, fullWorkflow } = fakeDeps()
+    const service = createSendTaskMessageService(deps)
+
+    const result = await service.sendMessage({
+      workspaceId: WORKSPACE_ID,
+      text: '/workflow full\nImplement the login page',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      data: { taskId: 'task-new', kind: 'workflow', id: 'wfrun-1' },
+    })
+    expect(tasks.create).toHaveBeenCalledWith({
+      workspaceId: WORKSPACE_ID,
+      title: 'Implement the login page',
+    })
+    expect(fullWorkflow.start).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'task-new' }))
+  })
+
+  it('/workflow full without a taskId and without a body is refused', async () => {
+    const { deps, tasks, fullWorkflow } = fakeDeps()
+    const service = createSendTaskMessageService(deps)
+
+    const result = await service.sendMessage({
+      workspaceId: WORKSPACE_ID,
+      text: '/workflow full',
+    })
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: 'VALIDATION_FAILED',
+        messageKey: 'errorMessage.messageDirectiveWorkflowNeedsTask',
+      },
+    })
+    expect(tasks.create).not.toHaveBeenCalled()
+    expect(fullWorkflow.start).not.toHaveBeenCalled()
+  })
+
+  it('a mixed @mention + / directives message is refused with the mention line', async () => {
+    const { deps, reviewer, agents } = fakeDeps()
+    const service = createSendTaskMessageService(deps)
+
+    const result = await service.sendMessage({
+      taskId: TASK.id,
+      workspaceId: WORKSPACE_ID,
+      text: '/mode attended\n@claude review this',
+    })
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: 'VALIDATION_FAILED',
+        messageKey: 'errorMessage.messageDirectiveMixedMention',
+        params: { line: 2 },
+      },
+    })
+    expect(reviewer.startReview).not.toHaveBeenCalled()
+    expect(agents.start).not.toHaveBeenCalled()
+  })
+
+  it('propagates a reviewer start failure', async () => {
+    const { deps, reviewer } = fakeDeps()
+    reviewer.startReview.mockResolvedValue({
+      ok: false,
+      error: {
+        code: 'VALIDATION_FAILED',
+        message: 'Agent "claude" is not registered.',
+        retryable: false,
+      },
+    })
+    const service = createSendTaskMessageService(deps)
+
+    const result = await service.sendMessage({
+      taskId: TASK.id,
+      workspaceId: WORKSPACE_ID,
+      text: '@claude review this',
+    })
+
+    expect(result).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
   })
 })

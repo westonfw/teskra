@@ -98,6 +98,7 @@ import { createMemoryManager } from '../memory/memory-manager'
 import { createContextBuilder } from '../memory/context-builder'
 import { createTaskManager } from '../tasks/task-manager'
 import { createSendTaskMessageService } from '../tasks/send-message-service'
+import { createThreadProjection } from '../tasks/thread-projection'
 import { createWorkflowDefinitionLoader } from '../workflows/definition-loader'
 import { createCriteriaGateStepExecutor } from '../workflows/criteria-gate-step-executor'
 import { createDispatchService } from '../workflows/dispatch-service'
@@ -1019,12 +1020,29 @@ export async function composeTeskraRuntime(
 
   // TASK-135 (Milestone 26 §9): the thread-first quick-start entry — Main
   // side of teskra:task:send-message (Task from first line + first Run with
-  // the TASK-134 defaults and a pre-built worktree).
+  // the TASK-134 defaults and a pre-built worktree). TASK-136 adds the
+  // message-directive branches: @mention → ReviewerService, /workflow full →
+  // FullWorkflowService, /account → ProfileAliasManager (ADR-0011).
   const sendTaskMessageService = createSendTaskMessageService({
     tasks: taskManager,
     defaults: defaultSelectionService,
     worktreeManager,
     agents: agentManager,
+    reviewer: reviewerService,
+    fullWorkflow,
+    profileAliases: profileAliasManager,
+    accountProfiles: repositories.accountProfiles,
+  })
+
+  // TASK-138 (Milestone 26 §8): the read-only Task thread projection behind
+  // teskra:task:thread — batch reads only, no writes.
+  const threadProjection = createThreadProjection({
+    runs: repositories.agentRuns,
+    workflowRuns: repositories.workflowRuns,
+    handoffs: repositories.handoffs,
+    agentEvents: repositories.agentEvents,
+    decisions: repositories.decisions,
+    paths,
   })
 
   let disposed = false
@@ -1038,6 +1056,7 @@ export async function composeTeskraRuntime(
       get: ({ id }) => taskManager.get(id),
       list: (request) => taskManager.list(request),
       sendMessage: (request) => sendTaskMessageService.sendMessage(request),
+      thread: (request) => threadProjection.getThread(request),
     },
     criteria: {
       listSets: (request) => criteriaManager.listSets(request),

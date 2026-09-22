@@ -149,6 +149,8 @@ import type {
   SummarizeUsageRequest,
   Task,
   TaskIdRequest,
+  TaskThreadRequest,
+  TaskThreadResponse,
   TerminalCloseRequest,
   TerminalIdRequest,
   TerminalResizeRequest,
@@ -349,6 +351,8 @@ export interface TaskPort {
   list(request: ListTasksRequest): IpcResult<readonly Task[]>
   /** TASK-135 (Milestone 26 §9): thread-first quick-start — send a message, start the Run. */
   sendMessage(request: SendTaskMessageRequest): Promise<IpcResult<SendTaskMessageResult>>
+  /** TASK-138 (Milestone 26 §8): the read-only Task thread projection (cursor-paged). */
+  thread(request: TaskThreadRequest): IpcResult<TaskThreadResponse>
 }
 
 export interface CriteriaPort {

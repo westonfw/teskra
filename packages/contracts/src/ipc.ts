@@ -325,8 +325,12 @@ import {
 import {
   sendTaskMessageRequestSchema,
   sendTaskMessageResultSchema,
+  taskThreadRequestSchema,
+  taskThreadResponseSchema,
   type SendTaskMessageRequest,
   type SendTaskMessageResult,
+  type TaskThreadRequest,
+  type TaskThreadResponse,
 } from './thread'
 import {
   resolveConfigRequestSchema,
@@ -467,6 +471,7 @@ export const IPC_CHANNELS = {
   taskGet: 'teskra:task:get',
   taskList: 'teskra:task:list',
   taskSendMessage: 'teskra:task:send-message',
+  taskThread: 'teskra:task:thread',
   criteriaListSets: 'teskra:criteria:list-sets',
   criteriaGetSet: 'teskra:criteria:get-set',
   criteriaCreateSet: 'teskra:criteria:create-set',
@@ -704,6 +709,13 @@ export const taskSendMessageChannel = channel(
   IPC_CHANNELS.taskSendMessage,
   sendTaskMessageRequestSchema,
   sendTaskMessageResultSchema,
+)
+// TASK-138 (Milestone 26 §8/§11): the read-only Task thread projection,
+// cursor-paged by (createdAt, id).
+export const taskThreadChannel = channel(
+  IPC_CHANNELS.taskThread,
+  taskThreadRequestSchema,
+  taskThreadResponseSchema,
 )
 export const criteriaListSetsChannel = channel(
   IPC_CHANNELS.criteriaListSets,
@@ -1458,6 +1470,7 @@ export const ipcChannelDefinitions = {
   taskGet: taskGetChannel,
   taskList: taskListChannel,
   taskSendMessage: taskSendMessageChannel,
+  taskThread: taskThreadChannel,
   criteriaListSets: criteriaListSetsChannel,
   criteriaGetSet: criteriaGetSetChannel,
   criteriaCreateSet: criteriaCreateSetChannel,
@@ -1637,6 +1650,8 @@ export interface TeskraBridge {
     list(request: ListTasksRequest): Promise<IpcResult<Task[]>>
     /** TASK-135 (Milestone 26 §9): thread-first quick-start — send a message, start the Run. */
     sendMessage(request: SendTaskMessageRequest): Promise<IpcResult<SendTaskMessageResult>>
+    /** TASK-138 (Milestone 26 §8): the read-only Task thread projection (cursor-paged). */
+    thread(request: TaskThreadRequest): Promise<IpcResult<TaskThreadResponse>>
   }
   readonly criteria: {
     listSets(request: ListCriteriaSetsRequest): Promise<IpcResult<AcceptanceCriteriaSet[]>>

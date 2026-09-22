@@ -366,6 +366,23 @@ export const enUS = {
     'Alias "{alias}" ({kind}) is bound to a profile that no longer exists. Re-bind it in Settings → Accounts → Aliases.',
   'errorMessage.profileAliasTargetDisabled':
     'Alias "{alias}" points at the disabled account profile "{name}". Enable it or re-bind the alias.',
+  // TASK-136 (Milestone 26 §7): thread message directive parse/validation failures.
+  'errorMessage.messageDirectiveLineTooLong':
+    'Line {line}: directive lines are capped at 1024 characters.',
+  'errorMessage.messageDirectiveUnknown': 'Line {line}: unknown directive "/{directive}".',
+  'errorMessage.messageDirectiveInvalidValue':
+    'Line {line}: the directive on this line has an invalid value.',
+  'errorMessage.messageDirectiveDuplicate': 'Line {line}: duplicate directive "/{directive}".',
+  'errorMessage.messageDirectiveMixedMention':
+    'Line {line}: an @mention cannot be combined with / directives — put "@<agent>" on the first line of the message instead.',
+  'errorMessage.messageDirectiveIncompatible':
+    'Line {line}: "/{directive}" cannot be combined with /workflow full.',
+  'errorMessage.messageDirectiveMissingBody':
+    'Line {line}: the message has directives but no body text.',
+  'errorMessage.messageDirectiveWorkflowNeedsTask':
+    'The /workflow directive needs a task: send it from a Task page, or add a body line to create one.',
+  'errorMessage.attendedManualRejected':
+    'An attended run cannot require manual approval from the thread input — there is no terminal to answer it. Drop /approval manual, or launch from the terminal card on the Runs tab.',
 
   'tasks.eyebrow': 'TASK-FIRST WORKBENCH',
   'tasks.title': 'Tasks',
@@ -985,10 +1002,20 @@ export const enUS = {
   'quickStart.executionMode.orchestrated': 'isolated',
   'quickStart.approvalMode.safeAuto': 'safe-auto',
   'quickStart.fixedNote':
-    'Thread runs always use exec · isolated · safe-auto; launch attended + manual runs from the terminal card on the Runs tab.',
+    'Agent and account here apply to the next send only; /mode and /approval message directives override execution and approval per send. attended + manual stays on the terminal card of the Runs tab.',
   'quickStart.unavailable':
     'No Agent is available for this workspace. Install or detect one first.',
   'quickStart.openAgentsSettings': 'Open Settings → Agents',
+  // TASK-136 (Milestone 26 §7/§12): / and @ directive completion in the composer.
+  'quickStart.completion.directive.agent': 'Agent for this send',
+  'quickStart.completion.directive.account': 'Account (alias or profile id)',
+  'quickStart.completion.directive.mode': 'Execution mode (attended | isolated)',
+  'quickStart.completion.directive.approval': 'Approval mode',
+  'quickStart.completion.directive.model': 'Model override',
+  'quickStart.completion.directive.workflow': 'Start the default full workflow',
+  'quickStart.completion.mode.attended': 'attended — run in the main workspace',
+  'quickStart.completion.mode.isolated': 'isolated — run in a Git worktree',
+  'quickStart.completion.account': 'Account alias or profile id',
 
   'tasks.tabs.overview': 'Overview',
   'tasks.tabs.runs': 'Runs',

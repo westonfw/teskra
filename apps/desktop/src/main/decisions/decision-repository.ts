@@ -111,6 +111,13 @@ export interface DecisionRepository {
   /** Open rows attached to the given source (runId OR workflowRunId). */
   listOpenBySource(source: DecisionSourceRef): IpcResult<PendingDecision[]>
   /**
+   * TASK-138: batch read for the thread projection — rows of ANY status
+   * whose run_id or workflow_run_id is in the given id set (the projection
+   * passes the union of a task's agent run ids and workflow run ids),
+   * oldest first. An empty id list short-circuits to an empty result.
+   */
+  listByRuns(ids: readonly string[]): IpcResult<PendingDecision[]>
+  /**
    * CAS close: `open → status` with the resolution / resolved_at written in
    * the same UPDATE. Returns null when the row was no longer open (already
    * resolved/expired/cancelled or unknown id) — the caller distinguishes.
@@ -330,6 +337,21 @@ export function createDecisionRepository(connection: Database.Database): Decisio
         'listOpenBySource',
         `SELECT * FROM pending_decisions WHERE status = 'open' AND (${conditions.join(' OR ')}) ORDER BY created_at ASC`,
         ...values,
+      )
+    },
+
+    listByRuns(ids) {
+      if (ids.length === 0) {
+        return { ok: true, data: [] }
+      }
+      const placeholders = ids.map(() => '?').join(', ')
+      return queryRows(
+        'listByRuns',
+        `SELECT * FROM pending_decisions
+         WHERE run_id IN (${placeholders}) OR workflow_run_id IN (${placeholders})
+         ORDER BY created_at ASC`,
+        ...ids,
+        ...ids,
       )
     },
 
