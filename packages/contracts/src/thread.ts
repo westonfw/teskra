@@ -129,11 +129,11 @@ export const threadDecisionItemSchema = z.strictObject({
 })
 export type ThreadDecisionItem = z.infer<typeof threadDecisionItemSchema>
 
-export const THREAD_SYSTEM_KINDS = ['review', 'workflow', 'status'] as const
+export const THREAD_SYSTEM_KINDS = ['review', 'workflow', 'status', 'terminal'] as const
 export const threadSystemKindSchema = z.enum(THREAD_SYSTEM_KINDS)
 export type ThreadSystemKind = z.infer<typeof threadSystemKindSchema>
 
-/** §5: Review / Workflow cards and notable Run status changes. */
+/** §5: Review / Workflow cards, notable Run status changes, and interactive runs (shown as a single "running in the terminal" entry). */
 export const threadSystemItemSchema = z.strictObject({
   kind: z.literal('system'),
   ...threadItemBase,

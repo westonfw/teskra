@@ -11,11 +11,12 @@ Teskra 是一个 **Windows-first、Task-first、Agent-first** 的桌面端多 Ag
 用于在同一个 GUI 内统一调度 Codex CLI、Claude Code 等 Coding Agent，并提供 Workspace、
 PTY Terminal、Git Worktree 隔离、Review、Crash Recovery 与 Workflow 编排能力。
 
-**当前仓库状态：TASK-001～118 的功能主体均已实现并有测试覆盖；Milestone 25 / 26（TASK-119～140）已立项未实施。** npm workspaces
+**当前仓库状态：TASK-001～140 的功能主体均已实现并有测试覆盖（Milestone 25 / 26 已实施，
+TASK-132 的 1 项 `[Windows 验证]` 按规则保留未勾，见 Milestone 25 验证记录）。** npm workspaces
 monorepo（`apps/desktop` + `packages/contracts` + `packages/shared`），Electron +
 React + TypeScript + electron-vite 可构建可打包；main 进程约 60 个模块（Agent /
 Process / Terminal / Workspace / Git / Workflow / Permission / Memory / Recovery /
-DB 等）齐备，Vitest 单测 1100+ 用例，Playwright E2E 已接入 CI（暂非门禁）。
+DB 等）齐备，Vitest 单测 2600+ 用例，Playwright E2E 已接入 CI（暂非门禁）。
 
 **不要把本仓库当成空骨架**：新增功能前先读对应模块的现有实现与测试，不要重建已有能力。
 

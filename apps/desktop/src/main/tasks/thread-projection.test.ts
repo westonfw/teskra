@@ -157,6 +157,7 @@ function createRun(
         taskId: 'task-1',
         agentType: 'codex',
         executionMode: 'orchestrated',
+        mode: 'exec',
         runDir: `runs/${id}`,
         status: 'completed',
         ...overrides,
@@ -447,6 +448,30 @@ describe('ThreadProjection (TASK-138)', () => {
     expect(itemsOfKind(thread.items, 'user_message').map((item) => item.runId)).toEqual([
       'run-failed',
     ])
+  })
+
+  it('collapses an interactive run into a single linked terminal system item (TASK-140)', () => {
+    const fixture = setup()
+    createRun(fixture, 'run-tui', { prompt: 'drive the TUI', mode: 'interactive' }, T0)
+    // A pre-ADR-0007 row without a persisted mode is interactive as well.
+    createRun(fixture, 'run-legacy', { prompt: 'legacy', mode: null, status: 'failed' }, T1)
+
+    const thread = getThread(fixture)
+    const system = itemsOfKind(thread.items, 'system')
+    expect(system.map((item) => item.id).sort()).toEqual([
+      'system:terminal:run-legacy',
+      'system:terminal:run-tui',
+    ])
+    expect(system.find((item) => item.runId === 'run-tui')).toMatchObject({
+      systemKind: 'terminal',
+      status: 'completed',
+    })
+    expect(system.find((item) => item.runId === 'run-legacy')).toMatchObject({
+      systemKind: 'terminal',
+      status: 'failed',
+    })
+    // Neither the prompt nor the terminal status change produce extra items.
+    expect(itemsOfKind(thread.items, 'user_message')).toEqual([])
   })
 
   it('paginates stably on (createdAt, id) when items share a timestamp', () => {

@@ -404,7 +404,10 @@ function RunListItem({
   onResume,
 }: RunListItemProps) {
   const { t } = useTranslation()
+  const navigate = useNavigationStore((state) => state.navigate)
   const active = ACTIVE_STATUSES.has(run.status)
+  // TASK-140: a Task-bound Run jumps to the Task page Thread tab.
+  const taskId = run.taskId
   return (
     <List.Item
       className="run-list-item"
@@ -412,6 +415,16 @@ function RunListItem({
         <Button key="detail" type="link" onClick={onOpen}>
           {active ? t('runs.item.openTerminal') : t('runs.item.details')}
         </Button>,
+        taskId !== undefined ? (
+          <Button
+            key="thread"
+            type="link"
+            className="run-view-in-thread"
+            onClick={() => navigate('tasks', { openTaskId: taskId })}
+          >
+            {t('runs.item.viewInThread')}
+          </Button>
+        ) : null,
         active ? (
           <Button key="cancel" danger type="link" onClick={onCancel}>
             {t('runs.interrupt')}

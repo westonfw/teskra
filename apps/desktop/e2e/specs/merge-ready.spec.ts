@@ -83,6 +83,8 @@ test.describe('Merge Ready navigation', () => {
       await createDialog.getByPlaceholder('Task title').fill('工作流合并巡检')
       await createDialog.getByRole('button', { name: 'OK' }).click()
       await page.locator('.task-list-item', { hasText: '工作流合并巡检' }).click()
+      // TASK-140: the criteria panel lives on the Overview tab (Thread is default).
+      await page.getByRole('tab', { name: 'Overview' }).click()
       await page.getByRole('button', { name: 'Create criteria' }).click()
       await expect(page.getByText('draft').first()).toBeVisible({ timeout: 10_000 })
       await page.getByRole('button', { name: 'Add criterion' }).click()
@@ -97,6 +99,10 @@ test.describe('Merge Ready navigation', () => {
       await expect(page.getByText('confirmed').first()).toBeVisible({ timeout: 10_000 })
 
       await page.getByRole('button', { name: 'Start full workflow' }).click()
+      // TASK-137 two-state launcher: the button opens the summary dialog;
+      // its OK button actually starts the run.
+      const launchDialog = page.getByRole('dialog', { name: 'Start full workflow' })
+      await launchDialog.getByRole('button', { name: 'Start', exact: true }).click()
       await expect
         .poll(
           async () => {

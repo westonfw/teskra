@@ -1019,8 +1019,36 @@ export const enUS = {
   'quickStart.completion.mode.isolated': 'isolated — run in a Git worktree',
   'quickStart.completion.account': 'Account alias or profile id',
 
+  'tasks.tabs.thread': 'Thread',
   'tasks.tabs.overview': 'Overview',
   'tasks.tabs.runs': 'Runs',
+  'tasks.tabs.terminal': 'Terminal',
+
+  // TASK-140 (Milestone 26 §12): the Task page Thread tab.
+  'thread.empty': 'No messages yet — send the first one below.',
+  'thread.reply.source.observation': 'live stream',
+  'thread.reply.source.handoff': 'handoff',
+  'thread.reply.source.terminal': 'terminal log',
+  'thread.reply.truncated': 'truncated',
+  'thread.progress.kind.progress': 'progress',
+  'thread.progress.kind.blocker': 'blocker',
+  'thread.progress.kind.question': 'question',
+  'thread.progress.kind.note': 'note',
+  'thread.decision.resolved': 'Resolved: {option}',
+  'thread.systemKind.review': 'Review',
+  'thread.systemKind.workflow': 'Workflow',
+  'thread.systemKind.status': 'Status',
+  'thread.systemKind.terminal': 'Terminal',
+  'thread.terminal.running': 'Running in the terminal',
+  'thread.terminal.open': 'Open in Terminal',
+  'thread.review.openRun': 'View run',
+  'thread.workflow.expand': 'Show steps',
+  'thread.workflow.collapse': 'Hide steps',
+  'tasks.terminal.empty': 'This task has no runs yet.',
+  'tasks.terminal.pickRun': 'Run',
+  'tasks.terminal.interactive': 'interactive',
+
+  'runs.item.viewInThread': 'View in thread',
 } as const
 
 export type TranslationKey = keyof typeof enUS

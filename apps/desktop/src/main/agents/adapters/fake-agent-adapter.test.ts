@@ -101,6 +101,9 @@ describe('FakeAgentAdapter (TASK-025)', () => {
         processId: 'agent-run:run-1',
         pid: 4242,
         startedAt: '2026-09-10T00:00:00.000Z',
+        // TASK-140: a session-less provider reference so the thread
+        // continuation gate can engage end-to-end with the Fake Agent.
+        providerSession: { provider: 'fake' },
       },
     })
     expect(deps.processes.start).toHaveBeenCalledWith(

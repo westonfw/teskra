@@ -24,6 +24,8 @@ test.describe('Create Task', () => {
       await expect(item).toBeVisible()
       await expect(item.locator('.ant-tag').first()).toHaveText('draft')
       await item.click()
+      // TASK-140: Thread is the default tab now; the detail card lives on Overview.
+      await page.getByRole('tab', { name: 'Overview' }).click()
       const detail = page.locator('.task-detail-card', { hasText: 'Task detail' }).first()
       await expect(detail).toBeVisible()
       await expect(detail.locator('input').first()).toHaveValue('E2E Test Task')

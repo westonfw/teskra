@@ -1,5 +1,5 @@
 import { BellOutlined, ReloadOutlined } from '@ant-design/icons'
-import { Button, Card, Empty, List, Popconfirm, Space, Spin, Tag, Typography } from 'antd'
+import { Button, Card, Empty, List, Space, Spin, Tag, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 
 import type { AgentRun, DecisionOption, PendingDecision } from '@teskra/contracts'
@@ -13,11 +13,10 @@ import {
   countOpenDecisions,
   decisionContextLinks,
   decisionDetailLines,
-  decisionOptionLabel,
-  decisionOptionNeedsConfirm,
   groupDecisionsBySeverity,
   isContinueWithAccountOption,
 } from './decision-view-model'
+import { DecisionOptionButton } from './decision-option-button'
 import { useInboxStore } from './inbox-store'
 
 /**
@@ -59,48 +58,6 @@ function ContextLinks({ decision }: { readonly decision: PendingDecision }) {
         </Button>
       ))}
     </Space>
-  )
-}
-
-function OptionButton({
-  option,
-  resolving,
-  onPick,
-}: {
-  readonly option: DecisionOption
-  readonly resolving: boolean
-  readonly onPick: (option: DecisionOption) => void
-}) {
-  const { t } = useTranslation()
-  const button = (
-    <Button
-      size="small"
-      type={option.danger === true ? 'primary' : 'default'}
-      danger={option.danger === true}
-      disabled={resolving}
-    >
-      {decisionOptionLabel(option, t)}
-    </Button>
-  )
-  if (!decisionOptionNeedsConfirm(option)) {
-    return (
-      <Button size="small" disabled={resolving} onClick={() => onPick(option)}>
-        {decisionOptionLabel(option, t)}
-      </Button>
-    )
-  }
-  // danger options confirm twice (§9.3): the Popconfirm owns the action.
-  return (
-    <Popconfirm
-      title={t('inbox.confirm.dangerTitle')}
-      description={t('inbox.confirm.dangerBody', { action: decisionOptionLabel(option, t) })}
-      okText={t('inbox.confirm.dangerOk')}
-      cancelText={t('inbox.confirm.cancel')}
-      okButtonProps={{ danger: true }}
-      onConfirm={() => onPick(option)}
-    >
-      {button}
-    </Popconfirm>
   )
 }
 
@@ -221,7 +178,7 @@ export function InboxPage() {
                       <ContextLinks decision={decision} />
                       <Space size={8} wrap className="inbox-item-actions">
                         {decision.options.map((option) => (
-                          <OptionButton
+                          <DecisionOptionButton
                             key={option.id}
                             option={option}
                             resolving={resolvingId === decision.id}

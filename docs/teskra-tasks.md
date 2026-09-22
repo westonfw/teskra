@@ -4851,7 +4851,22 @@ kind:   worktree-artifacts
 
 ## Milestone 25 验证记录
 
-（实施后填写；`[Windows 验证]` 项未实测不得勾选。）
+实施窗口：2026-09-21。全部 15 个 TASK（119～133）已实施并勾选（除下述 1 项）。
+
+- 门禁：`npm run typecheck` / `lint` / `format:check` / `check:task-docs` 全绿；
+  `npm run test:unit` 224 文件 / 2660 通过 / 7 skipped；`npm run build` 与
+  `npm run test:security` 通过。
+- 三个 migration（017 / 018 / 019）与 plan §139.1 逐列一致，每条 CHECK /
+  partial unique index / FK 均有「让它失败」的测试；migration runner 支持编号
+  空洞回填（018 晚于 019 落库可补应用，有测试）。
+- 协议文档一致性测试（`prompt-protocol-consistency.test.ts`）已纳入 `test:unit`。
+- E2E（Windows 11 实机、软件渲染）已实测通过：`decision-inbox`（progress-blocker
+  → Inbox → stop → cancelled）、`run-activity`（Fake Agent structured-stream →
+  Activity 出现 tool call）。
+- `[Windows 验证]` 未验证项（保留未勾选）：
+  - TASK-132「大小写不敏感的 env 不重复列出同一键」：大小写折叠去重的逻辑有单测
+    （注入 env），但未在真实 Windows 主机的 `process.env` 上端到端断言 Doctor
+    输出，按规则不勾选。
 
 ---
 
@@ -5032,20 +5047,32 @@ IPC:       teskra:task:thread { taskId, afterCursor?, limit? } → { items, next
 
 ### 验收标准
 
-- [ ] Task 页默认视图为 Thread；`Runs` / `Terminal` 为并列 Tab；interactive Run 在线程里显示
+- [x] Task 页默认视图为 Thread；`Runs` / `Terminal` 为并列 Tab；interactive Run 在线程里显示
       「在终端中运行」系统项并链接。
-- [ ] 订阅 `agent.*` / `decision.*` / `workflow.run_updated` 后按 Run id 局部刷新，不整页重拉。
-- [ ] Decision 项可在线程内直接解决（复用 Inbox 的选项组件）；Workflow 项可展开步骤。
-- [ ] Runs 页 Run 卡片增加「在线程中查看」。
-- [ ] 所有文案 i18n。
-- [ ] E2E（软件渲染，Fake Agent）：建 Task → 首轮回复出现 → 第二条消息以 resume 启动 →
+- [x] 订阅 `agent.*` / `decision.*` / `workflow.run_updated` 后按 Run id 局部刷新，不整页重拉。
+- [x] Decision 项可在线程内直接解决（复用 Inbox 的选项组件）；Workflow 项可展开步骤。
+- [x] Runs 页 Run 卡片增加「在线程中查看」。
+- [x] 所有文案 i18n。
+- [x] E2E（软件渲染，Fake Agent）：建 Task → 首轮回复出现 → 第二条消息以 resume 启动 →
       `/workflow full` 出现 Workflow 卡片 → `@fake review` 出现 Review 系统项。
 
 ---
 
 ## Milestone 26 验证记录
 
-（实施后填写；`[Windows 验证]` 项未实测不得勾选。）
+实施窗口：2026-09-21。全部 7 个 TASK（134～140）已实施并勾选。
+
+- 门禁与单测同 Milestone 25 验证记录（同一工作树全量绿）。
+- `check:task-docs` 对 Milestone 26 通过。
+- E2E（Windows 11 实机、软件渲染）已实测通过：`quick-start`（Tasks 页两行文本
+  → 建 Task → 首轮 Run）、`task-thread`（建 Task → 首轮回复 → 第二条消息续聊
+  （同 worktree）→ `/workflow full` Workflow 卡片 → `@fake review` Review 系统项）、
+  以及 `task` / `full-workflow` / `merge-ready` / `task-run-resume` /
+  `run-drawer-layout` / `ui-screenshots` 回归。
+- 「线程模式不存在 attended + manual 启动路径」由契约层结构保证并有测试断言
+  （overrides schema 无 mode/approval 字段 + 指令组合拒绝用例）。
+- 所有默认值可在 UI 看到「为什么」（默认值行 + reasons tooltip）。
+- 本 Milestone 无 `[Windows 验证]` 专项；无未验证遗留项。
 
 ---
 

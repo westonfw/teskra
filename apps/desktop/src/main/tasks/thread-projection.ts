@@ -40,11 +40,15 @@ import type { TeskraPaths } from '../paths'
  * - `agent_progress` ← agent.progress events (ADR-0012)
  * - `decision`       ← pending_decisions of the task's runs / workflow runs
  *                      (open and resolved alike, ADR-0014)
- * - `system`         ← reviewer-role runs (Review), workflow_runs (Workflow)
+ * - `system`         ← reviewer-role runs (Review), workflow_runs (Workflow),
+ *                      interactive runs (one "running in the terminal" entry)
  *                      and failed/cancelled/interrupted status changes
  *
  * Workflow-owned runs fold into their Workflow card (§5), so they do not
  * emit per-run thread items; their decisions still surface individually.
+ * Interactive runs (mode 'interactive', including pre-ADR-0007 rows without
+ * a persisted mode) collapse to a single terminal system item — their raw
+ * TUI lives in the Terminal tab, not the thread (§5).
  */
 
 const OBSERVATION_EVENT_TYPE = 'agent.observation'
@@ -265,6 +269,20 @@ export function createThreadProjection(deps: ThreadProjectionDeps): ThreadProjec
             runId: run.id,
             status: run.status,
             text: 'Review run',
+          })
+          continue
+        }
+        // §5: an interactive run renders its own TUI in the Terminal tab —
+        // the thread shows one linked system item instead of a reply.
+        if (run.mode !== 'exec') {
+          items.push({
+            kind: 'system',
+            id: `system:terminal:${run.id}`,
+            createdAt: run.createdAt,
+            systemKind: 'terminal',
+            runId: run.id,
+            status: run.status,
+            text: 'Running in the terminal',
           })
           continue
         }

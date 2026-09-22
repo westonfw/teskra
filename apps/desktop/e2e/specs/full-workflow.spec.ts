@@ -72,15 +72,21 @@ test.describe('Full workflow', () => {
 
       const workspace = await openAndSwitchWorkspace(page, repoDir)
       await page.evaluate(
-        async ({ runtime, nodePath }) => {
+        async ({ runtime, nodePath, workspaceId }) => {
           const overridden = await window.teskra.agent.setExecutableOverride({
             agentId: 'fake',
             runtime,
             path: nodePath,
           })
           if (!overridden.ok) throw new Error(overridden.error.message)
+          // TASK-118: the repo-local workflow override only loads for trusted workspaces.
+          const trusted = await window.teskra.workspace.updateTrust({
+            id: workspaceId,
+            trustLevel: 'trusted',
+          })
+          if (!trusted.ok) throw new Error(trusted.error.message)
         },
-        { runtime: workspace.runtime, nodePath: process.execPath },
+        { runtime: workspace.runtime, nodePath: process.execPath, workspaceId: workspace.id },
       )
       await page.getByRole('menuitem', { name: 'Tasks' }).click()
       await page.getByRole('button', { name: 'Create Task' }).click()
@@ -88,6 +94,8 @@ test.describe('Full workflow', () => {
       await createDialog.getByPlaceholder('Task title').fill('Workflow E2E')
       await createDialog.getByRole('button', { name: 'OK' }).click()
       await page.locator('.task-list-item', { hasText: 'Workflow E2E' }).click()
+      // TASK-140: the criteria panel lives on the Overview tab (Thread is default).
+      await page.getByRole('tab', { name: 'Overview' }).click()
 
       // The default full workflow requires a confirmed criteria set.
       await page.getByRole('button', { name: 'Create criteria' }).click()
@@ -104,6 +112,16 @@ test.describe('Full workflow', () => {
       await expect(page.getByText('confirmed').first()).toBeVisible({ timeout: 10_000 })
 
       await page.getByRole('button', { name: 'Start full workflow' }).click()
+      // TASK-137 two-state launcher: the button opens the summary dialog.
+      // A repo-supplied test command would park every shell step on a shell
+      // confirmation decision (TASK-118), so the edit state supplies the
+      // command per launch — the override still provides the Fake Agents.
+      const launchDialog = page.getByRole('dialog', { name: 'Start full workflow' })
+      await launchDialog.getByText('Change').click()
+      await launchDialog
+        .getByPlaceholder('Default: npm test or repo definition')
+        .fill('git --version')
+      await launchDialog.getByRole('button', { name: 'Start', exact: true }).click()
 
       // The run converges through implement → test → review → gate rounds.
       await expect

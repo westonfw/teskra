@@ -56,7 +56,8 @@ test.describe('UI screenshots', () => {
       const taskItem = page.locator('.task-list-item', { hasText: 'Ship the UI polish' })
       await expect(taskItem).toBeVisible()
       await taskItem.click()
-      await expect(page.locator('.task-detail-card').first()).toBeVisible()
+      // TASK-140: Thread is the default Task view.
+      await expect(page.locator('.task-thread-panel').first()).toBeVisible()
       // Selecting a row scrolls it into view; reset so the capture starts at
       // the page heading like a fresh navigation would.
       await page.evaluate(() => document.querySelector('.route-layer')?.scrollTo(0, 0))
@@ -122,7 +123,7 @@ test.describe('UI screenshots', () => {
 
       await page.getByRole('menuitem', { name: 'Tasks' }).click()
       await page.locator('.task-list-item', { hasText: 'Ship the UI polish' }).click()
-      await expect(page.locator('.task-detail-card').first()).toBeVisible()
+      await expect(page.locator('.task-thread-panel').first()).toBeVisible()
       await shot('light-tasks')
 
       await page.getByRole('menuitem', { name: 'Runs' }).click()

@@ -36,6 +36,7 @@ import { AppErrorAlert } from '../components/app-error-alert'
 import { useTranslation, type TranslationKey } from '../i18n'
 import { RunCommandsPanel } from '../permissions/run-commands-panel'
 import { agentRuntimeKey, useAgentStore } from '../stores/agent-store'
+import { useNavigationStore } from '../stores/navigation-store'
 import { useTaskStore } from '../stores/task-store'
 import { useWorkspaceStore } from '../stores/workspace-store'
 import { RunUsageText } from '../usage/run-usage'
@@ -46,6 +47,8 @@ import { MemoryPanel } from './memory-panel'
 import { ArtifactPanel } from './artifact-panel'
 import { FindingsPanel } from './findings-panel'
 import { ReviewPanelsPanel } from './review-panels-panel'
+import { TaskTerminalPanel } from './task-terminal-panel'
+import { TaskThreadPanel } from './task-thread-panel'
 import { WorkflowRunPanel } from './workflow-run-panel'
 import { QuickStartInput } from './quick-start-input'
 
@@ -115,6 +118,11 @@ export function TaskPage() {
   const [accountId, setAccountId] = useState<string>()
   const [prompt, setPrompt] = useState('')
   const [openRunId, setOpenRunId] = useState<string>()
+  // TASK-140: the Task page tabs — Thread is the default view; Runs and the
+  // raw Terminal are parallel tabs. terminalFocusRunId carries the thread's
+  // "running in the terminal" link target into the Terminal tab.
+  const [activeTab, setActiveTab] = useState('thread')
+  const [terminalFocusRunId, setTerminalFocusRunId] = useState<string>()
   const { t } = useTranslation()
   const selected = tasks.find(({ id }) => id === selectedId)
   const taskRuns = runs.filter(({ taskId }) => taskId === selected?.id)
@@ -159,6 +167,18 @@ export function TaskPage() {
     if (agentId === undefined && definitions[0] !== undefined) setAgentId(definitions[0].id)
   }, [agentId, definitions])
 
+  // TASK-140: the Runs page's "view in thread" action lands here — select
+  // the Run's Task and show its Thread tab.
+  const pendingTaskId = useNavigationStore((state) => state.pendingTaskId)
+  const consumePendingTaskId = useNavigationStore((state) => state.consumePendingTaskId)
+  useEffect(() => {
+    if (pendingTaskId === undefined) return
+    if (!tasks.some((task) => task.id === pendingTaskId)) return
+    selectTask(pendingTaskId)
+    setActiveTab('thread')
+    consumePendingTaskId()
+  }, [consumePendingTaskId, pendingTaskId, selectTask, tasks])
+
   const runtimeHealth = useMemo(
     () =>
       workspace === undefined
@@ -190,6 +210,16 @@ export function TaskPage() {
     // whose output predates this renderer's subscription is otherwise blank.
     await loadRunOutput(run.id)
     setOpenRunId(run.id)
+  }
+
+  const handleOpenRunById = async (runId: string): Promise<void> => {
+    const run = runs.find(({ id }) => id === runId)
+    if (run !== undefined) await handleOpenRun(run)
+  }
+
+  const handleOpenTerminal = (runId: string): void => {
+    setTerminalFocusRunId(runId)
+    setActiveTab('terminal')
   }
 
   const handleResumeRun = async (run: AgentRun): Promise<void> => {
@@ -271,12 +301,26 @@ export function TaskPage() {
           </Card>
         ) : (
           <div className="task-detail-stack">
-            {/* TASK-135 (Milestone 26 §12): the launch card and the Runs list
-                move to the Runs tab; the thread input at the bottom starts
-                the next Run from the resolved defaults. */}
+            {/* TASK-140 (Milestone 26 §12): the Thread is the default view;
+                Runs and the raw Terminal are parallel tabs. The launch card
+                and the Runs list stay on the Runs tab; the thread input at
+                the bottom starts the next Run from the resolved defaults. */}
             <Tabs
               className="task-detail-tabs"
+              activeKey={activeTab}
+              onChange={setActiveTab}
               items={[
+                {
+                  key: 'thread',
+                  label: t('tasks.tabs.thread'),
+                  children: (
+                    <TaskThreadPanel
+                      taskId={selected.id}
+                      onOpenRun={(runId) => void handleOpenRunById(runId)}
+                      onOpenTerminal={handleOpenTerminal}
+                    />
+                  ),
+                },
                 {
                   key: 'overview',
                   label: t('tasks.tabs.overview'),
@@ -503,6 +547,11 @@ export function TaskPage() {
                       </Card>
                     </>
                   ),
+                },
+                {
+                  key: 'terminal',
+                  label: t('tasks.tabs.terminal'),
+                  children: <TaskTerminalPanel runs={taskRuns} focusRunId={terminalFocusRunId} />,
                 },
               ]}
             />
