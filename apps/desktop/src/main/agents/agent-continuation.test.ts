@@ -8,13 +8,16 @@ import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 
 import type {
   AgentAccountProfile,
+  AgentDefinition,
   AgentDetectionResult,
+  AgentResumeRequest,
   AgentRun,
   ConcurrencyConfig,
   IpcResult,
   WorkbenchEvents,
   WorkspaceRuntimeRef,
 } from '@teskra/contracts'
+import { CONTINUATION_PROMPT_MAX } from '@teskra/contracts'
 
 import { createConfigService } from '../config/config-service'
 import { migrateDatabase } from '../db/migrations'
@@ -191,6 +194,8 @@ interface Fixture {
 function setup(
   options: {
     concurrency?: ConcurrencyConfig
+    /** Test seam: replace the registered definition (e.g. resume capability). */
+    definition?: AgentDefinition
     /** Test seam: wrap the fake adapter (e.g. to gate adapter.start). */
     wrapAdapter?: (
       adapter: CodingAgentAdapter,
@@ -246,7 +251,7 @@ function setup(
     ),
   )
 
-  const registry = requireOk(createAgentRegistry([FAKE_AGENT]))
+  const registry = requireOk(createAgentRegistry([options.definition ?? FAKE_AGENT]))
   const events = createEventBus<WorkbenchEvents>()
   const config = createConfigService({ paths, workspaces })
   const resolveRuntime = (): IpcResult<WorkspaceRuntime> => ({ ok: true, data: FAKE_RUNTIME })
@@ -1490,5 +1495,212 @@ describe('resume resets the previous attempt’s failure classification', () => 
     expect(queued.status).toBe('queued')
     expect(queued.failureClassification).toBeUndefined()
     expect(runOf(fixture, runId).failureClassification).toBeUndefined()
+  })
+})
+
+/**
+ * TASK-139 (Milestone 26 §9): the user-message continuation — thread follow-up
+ * messages reuse the task's last terminal exec Run (same worktree, native
+ * session resume), while flow B (live source) rejects them outright without
+ * touching the classifier (P1-2 principle).
+ */
+describe('ContinuationBuilder userMessage (TASK-139)', () => {
+  function continuationWith(summary: string) {
+    return buildAgentContinuation({
+      sourceRun: {
+        id: 'run-1',
+        workspaceId: 'ws-1',
+        taskId: 'task-1',
+        worktreeId: 'wt-1',
+        agentType: 'codex',
+        executionMode: 'orchestrated',
+        status: 'completed',
+        runDir: '/tmp/run-1',
+        createdAt: '2026-09-12T00:00:00.000Z',
+        updatedAt: '2026-09-12T00:00:00.000Z',
+      },
+      reason: 'user-message',
+      handoff: {
+        id: 'ho-1',
+        runId: 'run-1',
+        type: 'implementation',
+        payload: { summary, filesChanged: ['src/a.ts'] },
+        parseStatus: 'ok',
+        createdAt: '2026-09-12T00:00:00.000Z',
+      },
+    })
+  }
+
+  it('renders the userMessage section right after the Handoff summary (before the rest of the context)', () => {
+    const prompt = buildContinuationPrompt(continuationWith('Half done.'), {
+      originalPrompt: 'Implement it.',
+      outputTail: 'tail',
+      userMessage: 'Please also add tests.',
+    })
+
+    expect(prompt).toContain('SAME task continued with a new message from the user')
+    const handoffAt = prompt.indexOf('Handoff summary:')
+    const messageAt = prompt.indexOf("The user's new message:")
+    const filesAt = prompt.indexOf('Files changed so far:')
+    expect(handoffAt).toBeGreaterThanOrEqual(0)
+    expect(messageAt).toBeGreaterThan(handoffAt)
+    expect(filesAt).toBeGreaterThan(messageAt)
+    expect(prompt).toContain("The user's new message:\nPlease also add tests.")
+    expect(prompt).toContain('Inspect the current files before changing them')
+  })
+
+  it('omits the section for an absent / blank userMessage', () => {
+    const without = buildContinuationPrompt(continuationWith('Half done.'), {})
+    expect(without).not.toContain("The user's new message:")
+    const blank = buildContinuationPrompt(continuationWith('Half done.'), { userMessage: '   ' })
+    expect(blank).not.toContain("The user's new message:")
+  })
+
+  it('caps the prompt at CONTINUATION_PROMPT_MAX, shrinking the user message first', () => {
+    const prompt = buildContinuationPrompt(continuationWith('Half done.'), {
+      originalPrompt: 'Implement it.',
+      outputTail: 'tail',
+      userMessage: 'x'.repeat(CONTINUATION_PROMPT_MAX),
+    })
+
+    expect(prompt.length).toBeLessThanOrEqual(CONTINUATION_PROMPT_MAX)
+    // The carried context survives; the user message absorbs the clamp.
+    expect(prompt).toContain('Handoff summary:\nHalf done.')
+    expect(prompt).toContain("The user's new message:")
+    expect(prompt).toContain('Files changed so far:')
+    expect(prompt).toContain('Inspect the current files before changing them')
+  })
+})
+
+describe('user-message continuation (TASK-139)', () => {
+  it('flow B: a RUNNING source is rejected for user-message — nothing classified, stopped, or created', async () => {
+    const fixture = setup()
+    const personal = await createProfile(fixture, 'Personal', PERSONAL_HOME)
+    const { runId: sourceId } = await startSourceRun(fixture, personal.id)
+    // Quota-looking live output: the P1-2 trap. A user-message continuation
+    // must not even LOOK at the classifier for a running round.
+    emitScenario(fixture, sourceId, loadScenario('rate-limit'), { exit: false })
+    fixture.manager.getOutput(sourceId)
+    expect(runOf(fixture, sourceId).status).toBe('running')
+
+    const result = await fixture.manager.continueWithProfile({
+      sourceRunId: sourceId,
+      targetAgentId: FAKE_AGENT.id,
+      targetAccountProfileId: personal.id,
+      reason: 'user-message',
+      userMessage: 'are you done yet?',
+    })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error.code).toBe('CONFLICT')
+    const source = runOf(fixture, sourceId)
+    expect(source.status).toBe('running')
+    expect(source.failureClassification).toBeUndefined()
+    expect(fixture.processes.stops).toHaveLength(0)
+    expect(requireOk(fixture.accountEvents.listByType('agent.continuation_created'))).toEqual([])
+    expect(requireOk(fixture.accountEvents.listByType('agent.rate_limited'))).toEqual([])
+  })
+
+  it('flow A: user-message wins over the persisted classification; the message rides the prompt after the Handoff summary', async () => {
+    const fixture = setup()
+    const personal = await createProfile(fixture, 'Personal', PERSONAL_HOME)
+    const { runId: sourceId } = await startSourceRun(fixture, personal.id)
+    emitScenario(fixture, sourceId, loadScenario('rate-limit'))
+    // The source failed rate-limited — the declared user-message reason must
+    // still win: the user's message exists regardless of how the source ended.
+    expect(runOf(fixture, sourceId).failureClassification?.kind).toBe('rate-limited')
+
+    const target = requireOk(
+      await fixture.manager.continueWithProfile({
+        sourceRunId: sourceId,
+        targetAgentId: FAKE_AGENT.id,
+        targetAccountProfileId: personal.id,
+        reason: 'user-message',
+        userMessage: 'Please also add tests for the parser.',
+      }),
+    )
+
+    // No failAndStop touched the source; the target shares its worktree.
+    expect(fixture.processes.stops).toHaveLength(0)
+    expect(runOf(fixture, sourceId).status).toBe('failed')
+    expect(target.status).toBe('running')
+    expect(target.worktreeId).toBe('wt-1')
+    const continuations = requireOk(fixture.accountEvents.listByType('agent.continuation_created'))
+    expect(continuations[0]?.payload).toMatchObject({ reason: 'user-message' })
+    const prompt = target.prompt ?? ''
+    expect(prompt).toContain('SAME task continued with a new message from the user')
+    const handoffAt = prompt.indexOf('Handoff summary:')
+    const messageAt = prompt.indexOf("The user's new message:")
+    expect(handoffAt).toBeGreaterThanOrEqual(0)
+    expect(messageAt).toBeGreaterThan(handoffAt)
+    expect(prompt).toContain('Please also add tests for the parser.')
+    // The fake agent has no native resume — the §39 fallback launches with the
+    // context prompt through the normal start path.
+    expect(fixture.processes.starts).toHaveLength(2)
+  })
+
+  it("the target run resumes the source's native provider session when the agent supports it", async () => {
+    const resumeCalls: AgentResumeRequest[] = []
+    const fixture = setup({
+      definition: {
+        ...FAKE_AGENT,
+        capabilities: { ...FAKE_AGENT.capabilities, resume: true },
+      },
+      wrapAdapter: (adapter): CodingAgentAdapter => ({
+        ...adapter,
+        definition: {
+          ...adapter.definition,
+          capabilities: { ...adapter.definition.capabilities, resume: true },
+        },
+        resume: (request: AgentResumeRequest) => {
+          resumeCalls.push(request)
+          return Promise.resolve({
+            ok: true as const,
+            data: {
+              runId: request.runId,
+              processId: agentProcessId(request.runId),
+              pid: 4242,
+              startedAt: '2026-09-12T00:00:02.000Z',
+              providerSession: request.providerSession,
+            },
+          })
+        },
+      }),
+    })
+    const personal = await createProfile(fixture, 'Personal', PERSONAL_HOME)
+    const { runId: sourceId } = await startSourceRun(fixture, personal.id)
+    emitScenario(fixture, sourceId, loadScenario('success'))
+    requireOk(
+      fixture.runs.update(
+        sourceId,
+        { providerSession: { provider: 'codex', sessionId: 'sess-42' } },
+        '2026-09-12T00:00:03.000Z',
+      ),
+    )
+
+    const target = requireOk(
+      await fixture.manager.continueWithProfile({
+        sourceRunId: sourceId,
+        targetAgentId: FAKE_AGENT.id,
+        targetAccountProfileId: personal.id,
+        reason: 'user-message',
+        userMessage: 'next message',
+      }),
+    )
+
+    expect(resumeCalls).toHaveLength(1)
+    expect(resumeCalls[0]?.providerSession).toEqual({ provider: 'codex', sessionId: 'sess-42' })
+    // §10.5: same account — the source row's own identity is the context.
+    expect(resumeCalls[0]?.resumeProfileContext).toMatchObject({
+      accountProfileId: personal.id,
+      snapshotConfigHome: PERSONAL_HOME,
+      currentConfigHome: PERSONAL_HOME,
+    })
+    expect(target.providerSession).toEqual({ provider: 'codex', sessionId: 'sess-42' })
+    const startedEvents = requireOk(fixture.agentEvents.listByRun(target.id)).filter(
+      (event) => event.eventType === 'agent.started',
+    )
+    expect(startedEvents[0]?.payload).toMatchObject({ nativeSession: true })
   })
 })

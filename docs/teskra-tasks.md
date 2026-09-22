@@ -5013,14 +5013,14 @@ IPC:       teskra:task:thread { taskId, afterCursor?, limit? } → { items, next
 
 ### 验收标准
 
-- [ ] 续用条件四项全部满足才 resume：最近 exec Run 已终态、`providerSession` 存在、
+- [x] 续用条件四项全部满足才 resume：最近 exec Run 已终态、`providerSession` 存在、
       worktree `ready` / `dirty` 且无其它非终态 Run 占用、Agent / 账号 / 模式未变；每项各有反例测试。
-- [ ] 最近 Run 仍在运行 → `CONFLICT`，不创建行，UI 保留输入。
-- [ ] 不满足续用条件 → 普通 `start` 新一轮（同 Task、预建 worktree）。
-- [ ] `user-message` 在流程 B（源仍在运行）被拒绝且不跑分类器（延续 P1-2 原则）。
-- [ ] `userMessage` 段位于 Handoff 上下文之后，受 `CONTINUATION_PROMPT_MAX` 约束。
-- [ ] `question` Decision 的回答写入 `resolution.note` 并作为下一条消息进入本流程（端到端单测）。
-- [ ] 线程模式强制 `mode: 'exec'`；`attended + manual` 被拒（测试断言无此启动路径）。
+- [x] 最近 Run 仍在运行 → `CONFLICT`，不创建行，UI 保留输入。
+- [x] 不满足续用条件 → 普通 `start` 新一轮（同 Task、预建 worktree）。
+- [x] `user-message` 在流程 B（源仍在运行）被拒绝且不跑分类器（延续 P1-2 原则）。
+- [x] `userMessage` 段位于 Handoff 上下文之后，受 `CONTINUATION_PROMPT_MAX` 约束。
+- [x] `question` Decision 的回答写入 `resolution.note` 并作为下一条消息进入本流程（端到端单测）。
+- [x] 线程模式强制 `mode: 'exec'`；`attended + manual` 被拒（测试断言无此启动路径）。
 
 ---
 

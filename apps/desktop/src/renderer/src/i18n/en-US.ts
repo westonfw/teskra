@@ -383,6 +383,8 @@ export const enUS = {
     'The /workflow directive needs a task: send it from a Task page, or add a body line to create one.',
   'errorMessage.attendedManualRejected':
     'An attended run cannot require manual approval from the thread input — there is no terminal to answer it. Drop /approval manual, or launch from the terminal card on the Runs tab.',
+  'errorMessage.threadRoundStillRunning':
+    'The previous round is still running. Wait for it to finish before sending another message.',
 
   'tasks.eyebrow': 'TASK-FIRST WORKBENCH',
   'tasks.title': 'Tasks',

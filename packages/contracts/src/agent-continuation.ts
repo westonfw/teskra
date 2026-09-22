@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import { IPC_TEXT_MAX, ipcIdSchema } from './limits'
+import { IPC_TEXT_MAX, ipcIdSchema, ipcTextSchema } from './limits'
 
 /**
  * Milestone 24 §19/§20/§28 — Cross-profile Continuation
@@ -17,6 +17,13 @@ export const AGENT_CONTINUATION_REASONS = [
   'manual-switch',
   'agent-failure',
   'delegation',
+  /**
+   * TASK-139 (Milestone 26 §9): the thread's next user message continues the
+   * task's last terminal exec Run — same account, same worktree, native
+   * session resume. Flow B (live source) rejects this reason outright instead
+   * of classifying/stopping the running round.
+   */
+  'user-message',
 ] as const
 export const agentContinuationReasonSchema = z.enum(AGENT_CONTINUATION_REASONS)
 export type AgentContinuationReason = z.infer<typeof agentContinuationReasonSchema>
@@ -59,10 +66,19 @@ export const continueAgentRunRequestSchema = z.strictObject({
    * re-label the source profile as limited because its terminal output
    * happened to mention a rate limit. Flow A (source already terminal)
    * ignores this field entirely: the persisted terminal classification is the
-   * source of truth. When omitted in flow B, Main derives the reason from the
-   * classification registered by failAndStop.
+   * source of truth — EXCEPT 'user-message' (TASK-139), which is caller truth
+   * by construction and is rejected outright in flow B (the running round is
+   * never classified or stopped for a thread message). When omitted in flow
+   * B, Main derives the reason from the classification registered by
+   * failAndStop.
    */
   reason: agentContinuationReasonSchema.optional(),
+  /**
+   * TASK-139 (Milestone 26 §9): with reason 'user-message', the user's new
+   * thread message — rendered as the `userMessage` section of the
+   * continuation prompt (after the Handoff context).
+   */
+  userMessage: ipcTextSchema.optional(),
 })
 export type ContinueAgentRunRequest = z.infer<typeof continueAgentRunRequestSchema>
 

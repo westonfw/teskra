@@ -1,4 +1,4 @@
-import type { AgentProgressEvent, DecisionOption } from '@teskra/contracts'
+import type { AgentProgressEvent, DecisionOption, IpcResult } from '@teskra/contracts'
 
 import type { AgentRunRepository } from '../db/repositories/agent-run-repository'
 import type { DecisionService } from '../decisions/decision-service'
@@ -17,14 +17,30 @@ import type { AgentManager } from './agent-manager'
  *
  * The resolution actions live here (ADR-0014 §3): `stop` cancels the run
  * through AgentManager.cancel; `acknowledge` (also the §9.1 timeout default)
- * is the no-op — the closed row is the acknowledgement.
+ * is the no-op — the closed row is the acknowledgement. TASK-139 (Milestone
+ * 26 §9.3) adds the question answer loop: a QUESTION (severity 'info') the
+ * user resolved with a note re-enters the send-message flow through the
+ * `answer` callback — the note IS the thread's next message (the send-message
+ * service then decides continuation vs. a fresh round vs. CONFLICT), and the
+ * persisted `resolution.note` keeps the answer on the decision row.
  */
+
+export interface AgentQuestionAnswer {
+  readonly workspaceId: string
+  readonly taskId: string
+  readonly text: string
+}
 
 export interface AgentBlockerDecisionBridgeDeps {
   readonly decisions: Pick<DecisionService, 'open' | 'onResolved'>
   /** Supplies the decision's workspaceId; the reporting run may already be gone. */
   readonly runs: Pick<AgentRunRepository, 'getById'>
   readonly agents: Pick<AgentManager, 'cancel'>
+  /**
+   * TASK-139: question answers re-enter the thread — composed with the
+   * SendTaskMessageService. Optional so the bridge stays usable standalone.
+   */
+  readonly answer?: ((answer: AgentQuestionAnswer) => Promise<IpcResult<unknown>>) | undefined
 }
 
 export interface AgentBlockerDecisionBridge {
@@ -46,17 +62,62 @@ export function createAgentBlockerDecisionBridge(
   const logger = getLogger('agent')
 
   const unsubscribe = deps.decisions.onResolved('agent_blocker', (decision) => {
-    if (decision.resolution?.optionId !== 'stop') return
+    if (decision.resolution?.optionId === 'stop') {
+      const runId = decision.runId
+      if (runId === undefined) return
+      void deps.agents.cancel(runId).then((cancelled) => {
+        if (!cancelled.ok) {
+          logger.warn(
+            { runId, error: cancelled.error },
+            'Failed to cancel a run from an agent-blocker decision.',
+          )
+        }
+      })
+      return
+    }
+    // TASK-139 (Milestone 26 §9.3): a question (severity 'info') the USER
+    // answered with a note — the note is the answer and becomes the thread's
+    // next message. A timeout expiry (decidedBy 'timeout', no note) and a
+    // warning-severity blocker never enter the message flow.
+    if (decision.severity !== 'info') return
+    if (decision.resolution?.decidedBy !== 'user') return
+    const note = decision.resolution.note?.trim()
+    if (note === undefined || note.length === 0) return
+    if (deps.answer === undefined) return
     const runId = decision.runId
     if (runId === undefined) return
-    void deps.agents.cancel(runId).then((cancelled) => {
-      if (!cancelled.ok) {
-        logger.warn(
-          { runId, error: cancelled.error },
-          'Failed to cancel a run from an agent-blocker decision.',
-        )
-      }
-    })
+    const run = deps.runs.getById(runId)
+    if (!run.ok) {
+      logger.error(
+        { runId, error: run.error },
+        'Failed to read the questioning run; the answer was not forwarded.',
+      )
+      return
+    }
+    const taskId = run.data?.taskId
+    if (taskId === undefined) {
+      // The run is gone (retention) or never belonged to a task — there is
+      // no thread to answer in, and silently creating a NEW task from the
+      // answer text would be wrong.
+      logger.warn(
+        { runId, decisionId: decision.id },
+        'A question answer has no task thread to re-enter; the answer was dropped.',
+      )
+      return
+    }
+    void deps
+      .answer({ workspaceId: decision.workspaceId, taskId, text: note })
+      .then((sent) => {
+        if (!sent.ok) {
+          logger.warn(
+            { runId, taskId, error: sent.error },
+            'A question answer did not start a new round.',
+          )
+        }
+      })
+      .catch((cause: unknown) => {
+        logger.error({ runId, taskId, cause }, 'Forwarding a question answer threw.')
+      })
   })
 
   return {

@@ -4,6 +4,7 @@ import {
   IPC_NAME_MAX,
   type AgentAccountProfile,
   type AgentRun,
+  type ContinueAgentRunRequest,
   type FullWorkflowStartResult,
   type IpcResult,
   type ResolvedRunDefaults,
@@ -101,6 +102,22 @@ function fakeDeps(overrides: Partial<SendTaskMessageServiceDeps> = {}) {
       ok: true,
       data: startedRun(request),
     })),
+    continueWithProfile: vi.fn(
+      async (request: ContinueAgentRunRequest): Promise<IpcResult<AgentRun>> => ({
+        ok: true,
+        data: {
+          id: 'run-continued',
+          workspaceId: WORKSPACE_ID,
+          taskId: TASK.id,
+          agentType: request.targetAgentId,
+          status: 'running',
+          executionMode: 'orchestrated',
+          runDir: '/data/runs/run-continued',
+          createdAt: '2026-09-10T00:00:00.000Z',
+          updatedAt: '2026-09-10T00:00:00.000Z',
+        },
+      }),
+    ),
   }
   const reviewer = {
     startReview: vi.fn(
@@ -150,6 +167,13 @@ function fakeDeps(overrides: Partial<SendTaskMessageServiceDeps> = {}) {
           : null,
     })),
   }
+  const runs = {
+    listByTask: vi.fn((): IpcResult<AgentRun[]> => ({ ok: true, data: [] })),
+    listActive: vi.fn((): IpcResult<AgentRun[]> => ({ ok: true, data: [] })),
+  }
+  const worktrees = {
+    getById: vi.fn((): IpcResult<Worktree | null> => ({ ok: true, data: WORKTREE })),
+  }
   return {
     deps: {
       tasks,
@@ -160,6 +184,8 @@ function fakeDeps(overrides: Partial<SendTaskMessageServiceDeps> = {}) {
       fullWorkflow,
       profileAliases,
       accountProfiles,
+      runs,
+      worktrees,
       createAgentRunId: () => 'run-1',
       ...overrides,
     } satisfies SendTaskMessageServiceDeps,
@@ -171,6 +197,8 @@ function fakeDeps(overrides: Partial<SendTaskMessageServiceDeps> = {}) {
     fullWorkflow,
     profileAliases,
     accountProfiles,
+    runs,
+    worktrees,
   }
 }
 
@@ -721,5 +749,308 @@ describe('SendTaskMessageService directives (TASK-136)', () => {
     })
 
     expect(result).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+  })
+})
+
+/**
+ * TASK-139 (Milestone 26 §9): the thread continuation branch. The task's most
+ * recent exec Run decides — still running → CONFLICT with nothing created;
+ * the four reuse conditions all met → a user-message Continuation; any miss →
+ * a fresh round.
+ */
+describe('SendTaskMessageService continuation (TASK-139)', () => {
+  /** A terminal exec Run matching DEFAULTS (agent codex / acct-1 / exec-1). */
+  function sourceRun(overrides: Partial<AgentRun> = {}): AgentRun {
+    return {
+      id: 'run-prev',
+      workspaceId: WORKSPACE_ID,
+      taskId: TASK.id,
+      agentType: 'codex',
+      accountProfileId: 'acct-1',
+      executionProfileId: 'exec-1',
+      mode: 'exec',
+      executionMode: 'orchestrated',
+      approvalMode: 'safe-auto',
+      status: 'completed',
+      worktreeId: 'wt-prev',
+      providerSession: { provider: 'codex', sessionId: 'sess-1' },
+      runDir: '/data/runs/run-prev',
+      createdAt: '2026-09-11T00:00:00.000Z',
+      updatedAt: '2026-09-11T00:00:00.000Z',
+      ...overrides,
+    }
+  }
+
+  function withSource(source: AgentRun | undefined, worktree: Worktree | null = WORKTREE) {
+    const fixture = fakeDeps()
+    fixture.runs.listByTask.mockReturnValue({
+      ok: true,
+      data: source === undefined ? [] : [source],
+    })
+    fixture.worktrees.getById.mockReturnValue({ ok: true, data: worktree })
+    return fixture
+  }
+
+  it('all four conditions met → user-message Continuation, no fresh start and no new worktree', async () => {
+    const fixture = withSource(sourceRun())
+    const service = createSendTaskMessageService(fixture.deps)
+
+    const result = await service.sendMessage({
+      taskId: TASK.id,
+      workspaceId: WORKSPACE_ID,
+      text: 'Now cover the edge case too',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      data: { taskId: TASK.id, kind: 'run', id: 'run-continued' },
+    })
+    expect(fixture.agents.continueWithProfile).toHaveBeenCalledWith({
+      sourceRunId: 'run-prev',
+      targetAgentId: 'codex',
+      targetAccountProfileId: 'acct-1',
+      targetExecutionProfileId: 'exec-1',
+      reason: 'user-message',
+      userMessage: 'Now cover the edge case too',
+    })
+    expect(fixture.agents.start).not.toHaveBeenCalled()
+    expect(fixture.worktreeManager.create).not.toHaveBeenCalled()
+  })
+
+  it('a dirty worktree is still reusable', async () => {
+    const fixture = withSource(sourceRun(), { ...WORKTREE, state: 'dirty' })
+    const service = createSendTaskMessageService(fixture.deps)
+
+    const result = await service.sendMessage({
+      taskId: TASK.id,
+      workspaceId: WORKSPACE_ID,
+      text: 'follow up',
+    })
+
+    expect(result.ok).toBe(true)
+    expect(fixture.agents.continueWithProfile).toHaveBeenCalled()
+    expect(fixture.agents.start).not.toHaveBeenCalled()
+  })
+
+  it.each(['running', 'preparing', 'queued'] as const)(
+    'latest exec run %s → CONFLICT, nothing is created',
+    async (status) => {
+      const fixture = withSource(sourceRun({ status }))
+      const service = createSendTaskMessageService(fixture.deps)
+
+      const result = await service.sendMessage({
+        taskId: TASK.id,
+        workspaceId: WORKSPACE_ID,
+        text: 'are you done yet?',
+      })
+
+      expect(result).toMatchObject({
+        ok: false,
+        error: { code: 'CONFLICT', messageKey: 'errorMessage.threadRoundStillRunning' },
+      })
+      expect(fixture.agents.start).not.toHaveBeenCalled()
+      expect(fixture.agents.continueWithProfile).not.toHaveBeenCalled()
+      expect(fixture.worktreeManager.create).not.toHaveBeenCalled()
+    },
+  )
+
+  it('condition 1 miss is impossible to bypass: only terminal runs continue', async () => {
+    // covered by the CONFLICT cases above; here a terminal source continues.
+    const fixture = withSource(sourceRun({ status: 'failed' }))
+    const service = createSendTaskMessageService(fixture.deps)
+
+    const result = await service.sendMessage({
+      taskId: TASK.id,
+      workspaceId: WORKSPACE_ID,
+      text: 'try again',
+    })
+
+    expect(result.ok).toBe(true)
+    expect(fixture.agents.continueWithProfile).toHaveBeenCalled()
+  })
+
+  it('condition 2 counterexample: no providerSession → a fresh round starts', async () => {
+    const fixture = withSource(sourceRun({ providerSession: undefined }))
+    const service = createSendTaskMessageService(fixture.deps)
+
+    const result = await service.sendMessage({
+      taskId: TASK.id,
+      workspaceId: WORKSPACE_ID,
+      text: 'follow up',
+    })
+
+    expect(result).toEqual({ ok: true, data: { taskId: TASK.id, kind: 'run', id: 'run-1' } })
+    expect(fixture.agents.continueWithProfile).not.toHaveBeenCalled()
+    expect(fixture.worktreeManager.create).toHaveBeenCalled()
+    expect(fixture.agents.start).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: TASK.id, prompt: 'follow up' }),
+    )
+  })
+
+  it.each(['discarded', 'merged', 'missing', 'creating'] as const)(
+    'condition 3 counterexample: worktree state %s → a fresh round starts',
+    async (state) => {
+      const fixture = withSource(sourceRun(), { ...WORKTREE, state })
+      const service = createSendTaskMessageService(fixture.deps)
+
+      const result = await service.sendMessage({
+        taskId: TASK.id,
+        workspaceId: WORKSPACE_ID,
+        text: 'follow up',
+      })
+
+      expect(result).toEqual({ ok: true, data: { taskId: TASK.id, kind: 'run', id: 'run-1' } })
+      expect(fixture.agents.continueWithProfile).not.toHaveBeenCalled()
+      expect(fixture.worktreeManager.create).toHaveBeenCalled()
+      expect(fixture.agents.start).toHaveBeenCalled()
+    },
+  )
+
+  it('condition 3 counterexample: the worktree row is gone → a fresh round starts', async () => {
+    const fixture = withSource(sourceRun(), null)
+    const service = createSendTaskMessageService(fixture.deps)
+
+    const result = await service.sendMessage({
+      taskId: TASK.id,
+      workspaceId: WORKSPACE_ID,
+      text: 'follow up',
+    })
+
+    expect(result).toEqual({ ok: true, data: { taskId: TASK.id, kind: 'run', id: 'run-1' } })
+    expect(fixture.agents.continueWithProfile).not.toHaveBeenCalled()
+    expect(fixture.agents.start).toHaveBeenCalled()
+  })
+
+  it('condition 3 counterexample: another non-terminal run occupies the worktree → a fresh round starts', async () => {
+    const fixture = withSource(sourceRun())
+    fixture.runs.listActive.mockReturnValue({
+      ok: true,
+      data: [sourceRun({ id: 'run-other', status: 'running' })],
+    })
+    const service = createSendTaskMessageService(fixture.deps)
+
+    const result = await service.sendMessage({
+      taskId: TASK.id,
+      workspaceId: WORKSPACE_ID,
+      text: 'follow up',
+    })
+
+    expect(result).toEqual({ ok: true, data: { taskId: TASK.id, kind: 'run', id: 'run-1' } })
+    expect(fixture.agents.continueWithProfile).not.toHaveBeenCalled()
+    expect(fixture.agents.start).toHaveBeenCalled()
+  })
+
+  it('condition 4 counterexample: /agent changes the Agent → a fresh round starts', async () => {
+    const fixture = withSource(sourceRun())
+    const service = createSendTaskMessageService(fixture.deps)
+
+    const result = await service.sendMessage({
+      taskId: TASK.id,
+      workspaceId: WORKSPACE_ID,
+      text: '/agent claude\nfollow up',
+    })
+
+    expect(result).toEqual({ ok: true, data: { taskId: TASK.id, kind: 'run', id: 'run-1' } })
+    expect(fixture.agents.continueWithProfile).not.toHaveBeenCalled()
+    expect(fixture.agents.start).toHaveBeenCalledWith(
+      expect.objectContaining({ agentType: 'claude' }),
+    )
+  })
+
+  it('condition 4 counterexample: an account override changes the account → a fresh round starts', async () => {
+    const fixture = withSource(sourceRun())
+    const service = createSendTaskMessageService(fixture.deps)
+
+    const result = await service.sendMessage({
+      taskId: TASK.id,
+      workspaceId: WORKSPACE_ID,
+      text: 'follow up',
+      overrides: { accountProfileId: 'acct-2' },
+    })
+
+    expect(result).toEqual({ ok: true, data: { taskId: TASK.id, kind: 'run', id: 'run-1' } })
+    expect(fixture.agents.continueWithProfile).not.toHaveBeenCalled()
+    expect(fixture.agents.start).toHaveBeenCalledWith(
+      expect.objectContaining({ accountProfileId: 'acct-2' }),
+    )
+  })
+
+  it('condition 4 counterexample: /mode attended changes the mode → a fresh attended round starts', async () => {
+    const fixture = withSource(sourceRun())
+    const service = createSendTaskMessageService(fixture.deps)
+
+    const result = await service.sendMessage({
+      taskId: TASK.id,
+      workspaceId: WORKSPACE_ID,
+      text: '/mode attended\nfollow up',
+    })
+
+    expect(result).toEqual({ ok: true, data: { taskId: TASK.id, kind: 'run', id: 'run-1' } })
+    expect(fixture.agents.continueWithProfile).not.toHaveBeenCalled()
+    expect(fixture.worktreeManager.create).not.toHaveBeenCalled()
+    expect(fixture.agents.start).toHaveBeenCalledWith(
+      expect.objectContaining({ executionMode: 'attended' }),
+    )
+  })
+
+  it('condition 4 counterexample: the resolved defaults drifted since the source started → a fresh round starts', async () => {
+    const fixture = withSource(sourceRun())
+    fixture.defaults.resolveDefaults.mockResolvedValue({
+      ok: true,
+      data: { ...DEFAULTS, accountProfileId: 'acct-9' },
+    })
+    const service = createSendTaskMessageService(fixture.deps)
+
+    const result = await service.sendMessage({
+      taskId: TASK.id,
+      workspaceId: WORKSPACE_ID,
+      text: 'follow up',
+    })
+
+    expect(result).toEqual({ ok: true, data: { taskId: TASK.id, kind: 'run', id: 'run-1' } })
+    expect(fixture.agents.continueWithProfile).not.toHaveBeenCalled()
+    expect(fixture.agents.start).toHaveBeenCalled()
+  })
+
+  it('a newer interactive run does not block continuing the latest exec run', async () => {
+    const fixture = withSource(sourceRun())
+    fixture.runs.listByTask.mockReturnValue({
+      ok: true,
+      // listByTask is created_at DESC: the interactive run is newer.
+      data: [
+        sourceRun({ id: 'run-interactive', mode: 'interactive', status: 'running' }),
+        sourceRun({ id: 'run-prev' }),
+      ],
+    })
+    const service = createSendTaskMessageService(fixture.deps)
+
+    const result = await service.sendMessage({
+      taskId: TASK.id,
+      workspaceId: WORKSPACE_ID,
+      text: 'follow up',
+    })
+
+    expect(result.ok).toBe(true)
+    expect(fixture.agents.continueWithProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceRunId: 'run-prev' }),
+    )
+  })
+
+  it('a continuation failure propagates without falling back to a fresh start', async () => {
+    const fixture = withSource(sourceRun())
+    fixture.agents.continueWithProfile.mockResolvedValue({
+      ok: false,
+      error: { code: 'UNKNOWN', message: 'resume failed', retryable: true },
+    })
+    const service = createSendTaskMessageService(fixture.deps)
+
+    const result = await service.sendMessage({
+      taskId: TASK.id,
+      workspaceId: WORKSPACE_ID,
+      text: 'follow up',
+    })
+
+    expect(result).toMatchObject({ ok: false, error: { code: 'UNKNOWN' } })
+    expect(fixture.agents.start).not.toHaveBeenCalled()
   })
 })

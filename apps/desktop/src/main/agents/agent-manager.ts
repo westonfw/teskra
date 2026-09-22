@@ -81,8 +81,20 @@ import type { ExecutionProfileManager } from './execution-profiles/execution-pro
 import type { ObservationRecorder } from './observation/observation-recorder'
 import type { WorkspaceRuntime } from '../workspace/runtime'
 
+/**
+ * TASK-139 (Milestone 26 §9): Main-internal start extension — a native
+ * provider session the NEW run resumes (the user-message continuation). It
+ * never crosses IPC: `startAgentRunRequestSchema` is a strictObject, so the
+ * router rejects these keys from a renderer; only in-process callers
+ * (continueWithProfile) can set them.
+ */
+export interface InternalStartAgentRunRequest extends StartAgentRunRequest {
+  readonly resumeSession?: ProviderSessionRef
+  readonly resumeProfileContext?: AgentResumeProfileContext
+}
+
 export interface AgentManager {
-  start(request: StartAgentRunRequest): Promise<IpcResult<AgentRun>>
+  start(request: InternalStartAgentRunRequest): Promise<IpcResult<AgentRun>>
   resume(request: ResumeAgentRunRequest): Promise<IpcResult<AgentRun>>
   send(request: SendAgentRunInputRequest): Promise<IpcResult<void>>
   resize(request: ResizeAgentRunRequest): IpcResult<void>
@@ -912,7 +924,9 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
     }
     appendEvent(request.runId, pending.resumed ? 'agent.resumed' : 'agent.started', {
       processId: started.data.processId,
-      ...(pending.resumed ? { nativeSession: pending.resumeSession !== undefined } : {}),
+      ...(pending.resumed || pending.resumeSession !== undefined
+        ? { nativeSession: pending.resumeSession !== undefined }
+        : {}),
     })
     // Best-effort: without the token the run keeps the probe-only survivor
     // path at reconciliation; a failed capture must not fail the launch.
@@ -2030,9 +2044,29 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       // TASK-122 (§6.1): resolve the structured-output protocol once, with the
       // exec-mode and observability.structuredStream gates applied.
       const structuredOutput = resolveStructuredOutput(definition, mode, workspace.data.id)
+      // TASK-139: a Main-internal caller (user-message continuation) may ask
+      // the NEW run to resume the source run's native provider session. When
+      // the agent cannot resume natively the continuation still launches —
+      // the Handoff-backed prompt carries the context (§39 fallback).
+      const nativeResume =
+        request.resumeSession !== undefined &&
+        definition.capabilities.resume &&
+        adapter.resume !== undefined
+      if (request.resumeSession !== undefined && !nativeResume) {
+        logger.warn(
+          { agentType: definition.id },
+          'A session resume was requested for an agent without native resume support; launching with the context prompt instead.',
+        )
+      }
       const pending: PendingRun = {
         adapter,
         resumed: false,
+        ...(nativeResume && request.resumeSession !== undefined
+          ? { resumeSession: request.resumeSession }
+          : {}),
+        ...(nativeResume && request.resumeProfileContext !== undefined
+          ? { resumeProfileContext: request.resumeProfileContext }
+          : {}),
         request: {
           runId,
           workspace: launchWorkspace.data,
@@ -2540,6 +2574,20 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       let source = current.data
       const sourceWasLive = !isTerminal(source)
 
+      if (sourceWasLive && request.reason === 'user-message') {
+        // TASK-139 (Milestone 26 §9, P1-2 principle): a thread message never
+        // stops or classifies a running round — reject outright so the user
+        // can resend when the current round settles. Nothing is written.
+        return fail({
+          code: 'CONFLICT',
+          message:
+            'The previous round is still running. Wait for it to finish before sending another message.',
+          messageKey: 'errorMessage.threadRoundStillRunning',
+          retryable: true,
+          detail: `user-message continuation refused for live source run=${source.id}`,
+        })
+      }
+
       if (sourceWasLive) {
         // §19.3 flow B: the source is still running — fail it with a
         // classification first (failAndStop is the ONLY writer of
@@ -2593,11 +2641,15 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       // while the run was still live, which then finished rate-limited) must
       // not overwrite it. Flow B (live source, no terminal classification
       // yet): the caller's declared reason wins, with the just-registered
-      // classification as the fallback.
+      // classification as the fallback. TASK-139: 'user-message' is caller
+      // truth by construction (the user's message exists regardless of how
+      // the source settled) and always wins in flow A.
       const reason: AgentContinuationReason =
-        sourceWasLive && request.reason !== undefined
-          ? request.reason
-          : deriveContinuationReason(source)
+        request.reason === 'user-message'
+          ? 'user-message'
+          : sourceWasLive && request.reason !== undefined
+            ? request.reason
+            : deriveContinuationReason(source)
 
       // §20: the continuation context package (best-effort enrichments — a
       // missing handoff / artifact / criteria read never blocks the switch).
@@ -2629,7 +2681,34 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
       const prompt = buildContinuationPrompt(continuation, {
         ...(source.prompt === undefined ? {} : { originalPrompt: source.prompt }),
         outputTail,
+        ...(request.userMessage === undefined ? {} : { userMessage: request.userMessage }),
       })
+
+      // TASK-139 (Milestone 26 §9): a user-message continuation resumes the
+      // source run's NATIVE provider session — same agent, same account (the
+      // send-message gate guarantees both), so the §10.5 identity context is
+      // the source row's own. The profile row's current configHome feeds the
+      // drift check: an edited/deleted profile makes the adapter refuse
+      // loudly instead of resuming against the wrong CLI home.
+      let resumeSession: ProviderSessionRef | undefined
+      let resumeProfileContext: AgentResumeProfileContext | undefined
+      if (reason === 'user-message') {
+        const parsedSession = providerSessionRefSchema.safeParse(source.providerSession)
+        if (parsedSession.success) {
+          resumeSession = parsedSession.data
+          if (source.accountProfileId !== undefined && deps.accountProfiles !== undefined) {
+            const profileRow = await deps.accountProfiles.get(source.accountProfileId)
+            if (!profileRow.ok) return profileRow
+            const snapshotConfigHome = source.profileSnapshot?.configHome
+            const currentConfigHome = profileRow.data?.configHome ?? snapshotConfigHome
+            resumeProfileContext = {
+              accountProfileId: source.accountProfileId,
+              ...(snapshotConfigHome === undefined ? {} : { snapshotConfigHome }),
+              ...(currentConfigHome === undefined ? {} : { currentConfigHome }),
+            }
+          }
+        }
+      }
 
       // §19.3 steps 3–4 / §21: same task, same worktree (the reservation
       // invariant is enforced inside start), NEW run under the target
@@ -2658,6 +2737,8 @@ export function createAgentManager(deps: AgentManagerDeps): AgentManager {
         ...(request.targetExecutionProfileId === undefined
           ? {}
           : { executionProfileId: request.targetExecutionProfileId }),
+        ...(resumeSession === undefined ? {} : { resumeSession }),
+        ...(resumeProfileContext === undefined ? {} : { resumeProfileContext }),
         prompt,
       })
       if (!started.ok) return started

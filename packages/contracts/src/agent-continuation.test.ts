@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { agentContinuationSchema, continueAgentRunRequestSchema } from './agent-continuation'
 import { IPC_CHANNELS, ipcChannelDefinitions } from './ipc'
+import { IPC_TEXT_MAX } from './limits'
 
 /**
  * TASK-107 (Milestone 24 §20/§28) — the cross-profile continuation contracts.
@@ -87,6 +88,25 @@ describe('continueAgentRunRequestSchema (§28)', () => {
         sourceRunId: 'run-1',
         targetAgentId: 'codex',
         reason: 'user-bored',
+      }).success,
+    ).toBe(false)
+  })
+
+  it('TASK-139: accepts reason user-message with a bounded userMessage', () => {
+    expect(
+      continueAgentRunRequestSchema.safeParse({
+        sourceRunId: 'run-1',
+        targetAgentId: 'codex',
+        reason: 'user-message',
+        userMessage: 'Please also cover the edge case.',
+      }).success,
+    ).toBe(true)
+    expect(
+      continueAgentRunRequestSchema.safeParse({
+        sourceRunId: 'run-1',
+        targetAgentId: 'codex',
+        reason: 'user-message',
+        userMessage: 'x'.repeat(IPC_TEXT_MAX + 1),
       }).success,
     ).toBe(false)
   })

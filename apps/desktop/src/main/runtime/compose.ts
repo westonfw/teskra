@@ -708,24 +708,6 @@ export async function composeTeskraRuntime(
       getLogger('runtime').error({ error: expired.error }, 'Decision expiry pass failed.')
     }
   })
-  // TASK-130 (§9.2): progress blocker/question events open agent_blocker
-  // decisions; a stop resolution cancels the run through the AgentManager.
-  const agentBlockerDecisions = createAgentBlockerDecisionBridge({
-    decisions: decisionService,
-    runs: repositories.agentRuns,
-    agents: agentManager,
-  })
-  // TASK-126 (Milestone 25 §8.2 / ADR-0012): follows each running run's
-  // append-only progress file (1s polling), persists valid lines as
-  // agent.progress events and refreshes the watchdog's silence baseline.
-  const progressFollower = createProgressFollower({
-    paths,
-    runLogs,
-    agentEvents: repositories.agentEvents,
-    events,
-    watchdog: runWatchdog,
-    onBlocker: (runId, event) => agentBlockerDecisions.report(runId, event),
-  })
   // TASK-130 (§9.2): open_raw reveals the preserved raw handoff's directory
   // through the injected shell adapter (Electron stays out of the Runtime).
   const handoffDegradedActions = createHandoffDegradedActions({
@@ -1022,7 +1004,9 @@ export async function composeTeskraRuntime(
   // side of teskra:task:send-message (Task from first line + first Run with
   // the TASK-134 defaults and a pre-built worktree). TASK-136 adds the
   // message-directive branches: @mention → ReviewerService, /workflow full →
-  // FullWorkflowService, /account → ProfileAliasManager (ADR-0011).
+  // FullWorkflowService, /account → ProfileAliasManager (ADR-0011). TASK-139
+  // adds the continuation gate: the task's Runs (read-only) and worktree
+  // states decide CONFLICT / user-message Continuation / fresh round.
   const sendTaskMessageService = createSendTaskMessageService({
     tasks: taskManager,
     defaults: defaultSelectionService,
@@ -1032,6 +1016,36 @@ export async function composeTeskraRuntime(
     fullWorkflow,
     profileAliases: profileAliasManager,
     accountProfiles: repositories.accountProfiles,
+    runs: repositories.agentRuns,
+    worktrees: repositories.worktrees,
+  })
+
+  // TASK-130 (§9.2): progress blocker/question events open agent_blocker
+  // decisions; a stop resolution cancels the run through the AgentManager.
+  // TASK-139 (§9.3): a question resolved with a note re-enters the
+  // send-message flow as the thread's next message — hence the bridge is
+  // composed AFTER the send-message service it calls back into.
+  const agentBlockerDecisions = createAgentBlockerDecisionBridge({
+    decisions: decisionService,
+    runs: repositories.agentRuns,
+    agents: agentManager,
+    answer: (input) =>
+      sendTaskMessageService.sendMessage({
+        workspaceId: input.workspaceId,
+        taskId: input.taskId,
+        text: input.text,
+      }),
+  })
+  // TASK-126 (Milestone 25 §8.2 / ADR-0012): follows each running run's
+  // append-only progress file (1s polling), persists valid lines as
+  // agent.progress events and refreshes the watchdog's silence baseline.
+  const progressFollower = createProgressFollower({
+    paths,
+    runLogs,
+    agentEvents: repositories.agentEvents,
+    events,
+    watchdog: runWatchdog,
+    onBlocker: (runId, event) => agentBlockerDecisions.report(runId, event),
   })
 
   // TASK-138 (Milestone 26 §8): the read-only Task thread projection behind

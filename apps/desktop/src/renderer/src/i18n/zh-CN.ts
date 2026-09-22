@@ -350,6 +350,7 @@ export const zhCN: Record<TranslationKey, string> = {
     '/workflow 指令需要一个任务：请在任务页发送，或添加一行正文以创建任务。',
   'errorMessage.attendedManualRejected':
     '线程输入框无法发起 attended + manual 的 Run——没有终端可以回答人工审批。请去掉 /approval manual，或从 Runs 标签页的终端启动卡片发起。',
+  'errorMessage.threadRoundStillRunning': '上一轮还在运行中。请等它结束后再发送下一条消息。',
 
   'tasks.eyebrow': '任务优先工作台',
   'tasks.title': '任务',
