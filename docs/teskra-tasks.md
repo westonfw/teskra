@@ -4649,11 +4649,11 @@ IPC `teskra:usage:summary` / `teskra:usage:get-by-run`；事件 `usage.updated`�
 
 ### 验收标准
 
-- [ ] Run 详情新增 `Activity` Tab：观测事件时间线，tool call 可折叠展示 input / result。
-- [ ] 新增 `Progress` Tab：进度事件列表与百分比。
-- [ ] exec 且有结构化流的 Run 默认落在 Activity；`Terminal` Tab 仍显示原始输出。
-- [ ] 通过 `list-observations` / `list-progress` 分页加载，订阅 `agent.observation` / `agent.progress` 增量追加。
-- [ ] 全部文案 i18n；E2E（软件渲染）用 Fake Agent `structured-stream` 场景断言 Activity 出现 tool call。
+- [x] Run 详情新增 `Activity` Tab：观测事件时间线，tool call 可折叠展示 input / result。
+- [x] 新增 `Progress` Tab：进度事件列表与百分比。
+- [x] exec 且有结构化流的 Run 默认落在 Activity；`Terminal` Tab 仍显示原始输出。
+- [x] 通过 `list-observations` / `list-progress` 分页加载，订阅 `agent.observation` / `agent.progress` 增量追加。
+- [x] 全部文案 i18n；E2E（软件渲染）用 Fake Agent `structured-stream` 场景断言 Activity 出现 tool call。
 
 ---
 
@@ -4921,14 +4921,14 @@ Tasks 列表页顶部输入框；Task 页底部常驻输入框；默认值灰字
 
 ### 验收标准
 
-- [ ] Tasks 页输入多行文本发送：首行（trim，≤ `IPC_NAME_MAX`）为标题，其余为描述，创建 Task 并启动首轮 Run。
-- [ ] Task 页输入框发送：以 `ResolvedRunDefaults` 组装 `StartAgentRunRequest`（`taskId` 绑定），
+- [x] Tasks 页输入多行文本发送：首行（trim，≤ `IPC_NAME_MAX`）为标题，其余为描述，创建 Task 并启动首轮 Run。
+- [x] Task 页输入框发送：以 `ResolvedRunDefaults` 组装 `StartAgentRunRequest`（`taskId` 绑定），
       worktree 由 FullWorkflowService 同款逻辑预建。
-- [ ] 默认值行显示「agent · 账号 · 模式 · 审批」及 `reasons` tooltip；展开后可改，改动只影响本次发送。
-- [ ] 无可用 Agent 时输入框禁用并链接到 Settings → Agents。
-- [ ] `attended + manual` 组合在此入口不可选；「在终端中启动」按钮保留原启动卡片路径。
-- [ ] 原启动卡片与 Runs 列表移到 Task 页 `Runs` Tab，功能不变（既有测试通过）。
-- [ ] 请求 `strictObject`；所有文案 i18n；E2E：Tasks 页输入两行文本 → Task 创建 → 首轮 Run 启动。
+- [x] 默认值行显示「agent · 账号 · 模式 · 审批」及 `reasons` tooltip；展开后可改，改动只影响本次发送。
+- [x] 无可用 Agent 时输入框禁用并链接到 Settings → Agents。
+- [x] `attended + manual` 组合在此入口不可选；「在终端中启动」按钮保留原启动卡片路径。
+- [x] 原启动卡片与 Runs 列表移到 Task 页 `Runs` Tab，功能不变（既有测试通过）。
+- [x] 请求 `strictObject`；所有文案 i18n；E2E：Tasks 页输入两行文本 → Task 创建 → 首轮 Run 启动。
 
 ---
 
@@ -4966,11 +4966,11 @@ packages/shared: parseMessageDirectives(text) 纯函数
 
 ### 验收标准
 
-- [ ] 弹窗默认态显示一句话摘要（implementer / reviewers / testCommand）与「启动」；「修改」展开原三项。
-- [ ] 摘要来源：DefaultSelectionService + 仓库 `full.yaml`（仅 Trusted Workspace 读取，TASK-118）。
-- [ ] 无任何输入时以默认值启动成功（测试）；三项在 UI 层全部可选，与契约一致。
-- [ ] 仓库 YAML 覆盖的 test command 仍走 `requireConfirmation` 打标（TASK-118 行为不变，有测试）。
-- [ ] 文案 i18n。
+- [x] 弹窗默认态显示一句话摘要（implementer / reviewers / testCommand）与「启动」；「修改」展开原三项。
+- [x] 摘要来源：DefaultSelectionService + 仓库 `full.yaml`（仅 Trusted Workspace 读取，TASK-118）。
+- [x] 无任何输入时以默认值启动成功（测试）；三项在 UI 层全部可选，与契约一致。
+- [x] 仓库 YAML 覆盖的 test command 仍走 `requireConfirmation` 打标（TASK-118 行为不变，有测试）。
+- [x] 文案 i18n。
 
 ---
 

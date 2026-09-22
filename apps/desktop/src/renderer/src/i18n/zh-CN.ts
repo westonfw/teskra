@@ -111,6 +111,34 @@ export const zhCN: Record<TranslationKey, string> = {
   'runs.queuedReason.worktree_busy': '排队中 — Worktree 正被占用',
   'runs.queuedReason.fifo': '排队中 — 等待更早排队的运行',
 
+  // TASK-125（§14）：Run 详情 Activity / Progress 标签页。
+  'runs.tab.terminal': '终端',
+  'runs.tab.activity': '活动',
+  'runs.tab.progress': '进度',
+  'runs.feed.loadMore': '加载更多',
+  'runs.observation.empty':
+    '暂无观测记录——只有声明了结构化输出协议的 Agent 在 exec 模式下运行时才会解析结构化流。',
+  'runs.observation.kind.session': '会话',
+  'runs.observation.kind.assistant_text': '助手消息',
+  'runs.observation.kind.tool_call': '工具调用',
+  'runs.observation.kind.tool_result': '工具结果',
+  'runs.observation.kind.usage': '用量',
+  'runs.observation.kind.error': '错误',
+  'runs.observation.kind.result': '结果',
+  'runs.observation.toolInput': '输入',
+  'runs.observation.toolOutput': '结果',
+  'runs.observation.usage': '输入 {input} · 输出 {output}',
+  'runs.observation.usageCost': '· {cost}',
+  'runs.observation.duration': '{duration} 秒',
+  'runs.observation.turns': '{turns} 轮',
+  'runs.observation.resultOk': '运行成功结束',
+  'runs.observation.resultFailed': '运行出错结束',
+  'runs.progress.empty': '暂无进度事件——Agent 通过进度文件上报进度。',
+  'runs.progress.kind.progress': '进度',
+  'runs.progress.kind.blocker': '阻塞',
+  'runs.progress.kind.question': '问题',
+  'runs.progress.kind.note': '备注',
+
   'permissions.decision.title': '审批决策',
   'permissions.decision.description':
     '{agent} 会在它自己的终端提示中请求审批。在这里做出的决策会更新下次运行前投影到 CLI 的规则 — 它们不影响正在执行的命令。',
@@ -342,6 +370,8 @@ export const zhCN: Record<TranslationKey, string> = {
   'tasks.drawer.runResult': '运行结果',
   'tasks.drawer.agentRun': '{name} 运行',
   'tasks.drawer.tabOutput': '输出',
+  'tasks.drawer.tabActivity': '活动',
+  'tasks.drawer.tabProgress': '进度',
   'tasks.drawer.tabCommands': '命令',
   'tasks.status.draft': '草稿',
   'tasks.status.ready': '就绪',
@@ -469,6 +499,11 @@ export const zhCN: Record<TranslationKey, string> = {
   'workflow.launch.testCommand': '测试命令（可选）',
   'workflow.launch.testCommandPlaceholder': '默认：npm test 或仓库定义',
   'workflow.launch.confirm': '启动',
+  'workflow.launch.summary': '用 {implementer} 实现，{reviewers} 审查，测试命令 {testCommand}',
+  'workflow.launch.summary.noReviewers': '无评审者',
+  'workflow.launch.summary.repoCommand': '测试命令来自仓库 full 定义，执行前会要求确认。',
+  'workflow.launch.summary.edit': '修改',
+  'workflow.launch.summary.back': '返回默认值',
 
   'worktree.title': 'Worktree',
   'worktree.gone': '关联的 worktree 记录已不存在。',
@@ -883,4 +918,18 @@ export const zhCN: Record<TranslationKey, string> = {
   'runDefaults.reason.executionMode.fixed': '线程模式的 Run 固定为编排执行（隔离）',
   'runDefaults.reason.approvalMode.fixed': '审批模式固定为 safe-auto',
   'runDefaults.reason.isolation.fixed': '在隔离的 Git worktree 中运行',
+
+  // TASK-135（Milestone 26 §12）：线程优先的快速启动输入框。
+  'quickStart.placeholder': '描述你要做的事…',
+  'quickStart.send': '发送',
+  'quickStart.account.auto': '自动账号',
+  'quickStart.executionMode.orchestrated': '隔离运行',
+  'quickStart.approvalMode.safeAuto': 'safe-auto',
+  'quickStart.fixedNote':
+    '线程入口固定 exec · 隔离 · safe-auto；attended + manual 请从 Runs 标签页的终端启动卡片发起。',
+  'quickStart.unavailable': '当前工作区没有可用的 Agent，请先安装或检测。',
+  'quickStart.openAgentsSettings': '打开 Settings → Agents',
+
+  'tasks.tabs.overview': '概览',
+  'tasks.tabs.runs': 'Runs',
 }

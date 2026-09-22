@@ -323,6 +323,12 @@ import {
   type UpdateTaskRequest,
 } from './task'
 import {
+  sendTaskMessageRequestSchema,
+  sendTaskMessageResultSchema,
+  type SendTaskMessageRequest,
+  type SendTaskMessageResult,
+} from './thread'
+import {
   resolveConfigRequestSchema,
   resolvedConfigSchema,
   updateConfigRequestSchema,
@@ -397,6 +403,8 @@ import {
   type WslEnvironment,
 } from './wsl'
 import {
+  fullWorkflowLaunchDefaultsRequestSchema,
+  fullWorkflowLaunchDefaultsSchema,
   fullWorkflowRunSummarySchema,
   fullWorkflowStartResultSchema,
   listPendingShellConfirmationsRequestSchema,
@@ -418,6 +426,8 @@ import {
   workflowShellConfirmationRequestSchema,
   workflowStepResolveRequestSchema,
   workflowStepSchema,
+  type FullWorkflowLaunchDefaults,
+  type FullWorkflowLaunchDefaultsRequest,
   type FullWorkflowRunSummary,
   type FullWorkflowStartResult,
   type ListPendingShellConfirmationsRequest,
@@ -456,6 +466,7 @@ export const IPC_CHANNELS = {
   taskDelete: 'teskra:task:delete',
   taskGet: 'teskra:task:get',
   taskList: 'teskra:task:list',
+  taskSendMessage: 'teskra:task:send-message',
   criteriaListSets: 'teskra:criteria:list-sets',
   criteriaGetSet: 'teskra:criteria:get-set',
   criteriaCreateSet: 'teskra:criteria:create-set',
@@ -592,6 +603,7 @@ export const IPC_CHANNELS = {
   workflowIterate: 'teskra:workflow:iterate',
   workflowStartFull: 'teskra:workflow:start-full',
   workflowRunSummary: 'teskra:workflow:run:summary',
+  workflowFullLaunchDefaults: 'teskra:workflow:full-launch-defaults',
   decisionList: 'teskra:decision:list',
   decisionResolve: 'teskra:decision:resolve',
   usageSummary: 'teskra:usage:summary',
@@ -683,6 +695,15 @@ export const taskListChannel = channel(
   IPC_CHANNELS.taskList,
   listTasksRequestSchema,
   z.array(taskSchema),
+)
+// TASK-135 (Milestone 26 §9/§11): the thread-first message entry point —
+// creates the Task from the first line when taskId is absent, then starts
+// the first Run from the resolved defaults (kind 'run'; 'review' /
+// 'workflow' arrive with the TASK-136 directives).
+export const taskSendMessageChannel = channel(
+  IPC_CHANNELS.taskSendMessage,
+  sendTaskMessageRequestSchema,
+  sendTaskMessageResultSchema,
 )
 export const criteriaListSetsChannel = channel(
   IPC_CHANNELS.criteriaListSets,
@@ -1391,6 +1412,11 @@ export const workflowRunSummaryChannel = channel(
   workflowRunIdRequestSchema,
   fullWorkflowRunSummarySchema,
 )
+export const workflowFullLaunchDefaultsChannel = channel(
+  IPC_CHANNELS.workflowFullLaunchDefaults,
+  fullWorkflowLaunchDefaultsRequestSchema,
+  fullWorkflowLaunchDefaultsSchema,
+)
 // TASK-128 (ADR-0014): the Decision Inbox — one persisted queue for every
 // moment that needs a human decision.
 export const decisionListChannel = channel(
@@ -1431,6 +1457,7 @@ export const ipcChannelDefinitions = {
   taskDelete: taskDeleteChannel,
   taskGet: taskGetChannel,
   taskList: taskListChannel,
+  taskSendMessage: taskSendMessageChannel,
   criteriaListSets: criteriaListSetsChannel,
   criteriaGetSet: criteriaGetSetChannel,
   criteriaCreateSet: criteriaCreateSetChannel,
@@ -1567,6 +1594,7 @@ export const ipcChannelDefinitions = {
   workflowIterate: workflowIterateChannel,
   workflowStartFull: workflowStartFullChannel,
   workflowRunSummary: workflowRunSummaryChannel,
+  workflowFullLaunchDefaults: workflowFullLaunchDefaultsChannel,
   decisionList: decisionListChannel,
   decisionResolve: decisionResolveChannel,
   usageSummary: usageSummaryChannel,
@@ -1607,6 +1635,8 @@ export interface TeskraBridge {
     delete(request: TaskIdRequest): Promise<IpcResult<boolean>>
     get(request: TaskIdRequest): Promise<IpcResult<Task | null>>
     list(request: ListTasksRequest): Promise<IpcResult<Task[]>>
+    /** TASK-135 (Milestone 26 §9): thread-first quick-start — send a message, start the Run. */
+    sendMessage(request: SendTaskMessageRequest): Promise<IpcResult<SendTaskMessageResult>>
   }
   readonly criteria: {
     listSets(request: ListCriteriaSetsRequest): Promise<IpcResult<AcceptanceCriteriaSet[]>>
@@ -1855,6 +1885,13 @@ export interface TeskraBridge {
       request: StartFullWorkflowRequest,
     ): Promise<IpcResult<FullWorkflowStartResult>>
     runSummary(request: WorkflowRunIdRequest): Promise<IpcResult<FullWorkflowRunSummary>>
+    /**
+     * TASK-137 (Milestone 26 §10): the launch dialog's default-state summary —
+     * resolved implementer / reviewers / testCommand for a no-input start.
+     */
+    fullLaunchDefaults(
+      request: FullWorkflowLaunchDefaultsRequest,
+    ): Promise<IpcResult<FullWorkflowLaunchDefaults>>
   }
   /**
    * TASK-128 (ADR-0014): the persisted Decision Inbox. `resolve` is the

@@ -28,6 +28,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { AgentPicker } from '../agents/agent-picker'
 import { AgentRunTerminal } from '../agents/agent-run-terminal'
 import { RateLimitAlert } from '../agents/rate-limit-alert'
+import { RunActivityPanel, useRunDetailTab } from '../agents/run-activity-panel'
+import { RunProgressPanel } from '../agents/run-progress-panel'
 import { AccountSelect } from '../accounts/account-select'
 import { useAccountProfileStore } from '../accounts/account-profile-store'
 import { AppErrorAlert } from '../components/app-error-alert'
@@ -45,6 +47,7 @@ import { ArtifactPanel } from './artifact-panel'
 import { FindingsPanel } from './findings-panel'
 import { ReviewPanelsPanel } from './review-panels-panel'
 import { WorkflowRunPanel } from './workflow-run-panel'
+import { QuickStartInput } from './quick-start-input'
 
 const ACTIVE_RUN_STATUSES = new Set<AgentRunStatus>([
   'created',
@@ -116,6 +119,8 @@ export function TaskPage() {
   const selected = tasks.find(({ id }) => id === selectedId)
   const taskRuns = runs.filter(({ taskId }) => taskId === selected?.id)
   const openRun = runs.find(({ id }) => id === openRunId)
+  // TASK-125: exec runs with a structured stream land on the Activity tab.
+  const runDetailTab = useRunDetailTab(openRun)
 
   useEffect(() => {
     if (workspace === undefined) return
@@ -214,6 +219,14 @@ export function TaskPage() {
 
       <MemoryPanel workspaceId={workspace.id} taskId={selected?.id} />
 
+      {/* TASK-135 (Milestone 26 §12): the thread-first quick-start input —
+          send a message to create the Task from its first line and start the
+          first Run; the new Task is selected on accept. */}
+      <QuickStartInput
+        workspaceId={workspace.id}
+        onAccepted={(result) => selectTask(result.taskId)}
+      />
+
       <div className="task-workbench">
         <Card className="task-list-card" title={t('tasks.listTitle', { name: workspace.name })}>
           <Spin spinning={loading}>
@@ -258,199 +271,243 @@ export function TaskPage() {
           </Card>
         ) : (
           <div className="task-detail-stack">
-            <Card
-              className="task-detail-card"
-              title={t('tasks.detail.title')}
-              extra={
-                <Space>
-                  <Popconfirm
-                    title={t('tasks.detail.archiveConfirm')}
-                    onConfirm={() => void archiveTask(selected.id, true)}
-                  >
-                    <Button icon={<InboxOutlined />} disabled={saving}>
-                      {t('tasks.detail.archive')}
-                    </Button>
-                  </Popconfirm>
-                  <Popconfirm
-                    title={t('tasks.detail.deleteConfirm')}
-                    onConfirm={() => void deleteTask(selected.id)}
-                  >
-                    <Button danger icon={<DeleteOutlined />} disabled={saving} />
-                  </Popconfirm>
-                </Space>
-              }
-            >
-              <div className="task-edit-form">
-                <label>
-                  <Typography.Text type="secondary">{t('tasks.detail.fieldTitle')}</Typography.Text>
-                  <Input value={title} onChange={(event) => setTitle(event.target.value)} />
-                </label>
-                <label>
-                  <Typography.Text type="secondary">
-                    {t('tasks.detail.fieldStatus')}
-                  </Typography.Text>
-                  <Select<TaskStatus>
-                    value={selected.status}
-                    options={TASK_STATUSES.map((status) => ({
-                      value: status,
-                      label: t(`tasks.status.${status}`),
-                    }))}
-                    onChange={(status) => void updateTask({ id: selected.id, status })}
-                  />
-                </label>
-                <label className="task-description-field">
-                  <Typography.Text type="secondary">
-                    {t('tasks.detail.fieldDescription')}
-                  </Typography.Text>
-                  <Input.TextArea
-                    value={description}
-                    autoSize={{ minRows: 3, maxRows: 8 }}
-                    onChange={(event) => setDescription(event.target.value)}
-                  />
-                </label>
-                <Button
-                  type="primary"
-                  loading={saving}
-                  disabled={title.trim().length === 0}
-                  onClick={() =>
-                    void updateTask({
-                      id: selected.id,
-                      title,
-                      description: description.trim() || null,
-                    })
-                  }
-                >
-                  {t('tasks.detail.save')}
-                </Button>
-              </div>
-            </Card>
-
-            <CriteriaPanel taskId={selected.id} />
-
-            <WorkflowRunPanel workspaceId={workspace.id} taskId={selected.id} />
-
-            <ReviewPanelsPanel taskId={selected.id} />
-
-            <Card className="task-detail-card" title={t('tasks.runLauncher.title')}>
-              <Alert
-                className="page-alert attended-warning"
-                type="warning"
-                showIcon
-                message={t('agent.attendedWarning')}
-              />
-              <div className="task-run-launcher">
-                <AgentPicker
-                  definitions={definitions}
-                  health={runtimeHealth}
-                  value={agentId}
-                  onChange={setAgentId}
-                />
-                <Input.TextArea
-                  value={prompt}
-                  autoSize={{ minRows: 2, maxRows: 5 }}
-                  onChange={(event) => setPrompt(event.target.value)}
-                  placeholder={t('tasks.runLauncher.promptPlaceholder')}
-                />
-                <AccountSelect agentId={agentId} value={accountId} onChange={setAccountId} />
-                <Button
-                  type="primary"
-                  loading={starting}
-                  disabled={agentId === undefined}
-                  onClick={() => {
-                    if (agentId === undefined) return
-                    void startRun({
-                      workspaceId: workspace.id,
-                      taskId: selected.id,
-                      agentType: agentId,
-                      prompt: prompt.trim() || undefined,
-                      ...(accountId === undefined ? {} : { accountProfileId: accountId }),
-                      executionMode: 'attended',
-                      approvalMode: 'manual',
-                    })
-                  }}
-                >
-                  {t('tasks.runLauncher.start')}
-                </Button>
-              </div>
-            </Card>
-
-            <Card
-              className="task-detail-card"
-              title={t('tasks.runs.title', { count: taskRuns.length })}
-            >
-              {taskRuns.length === 0 ? (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('tasks.runs.empty')} />
-              ) : (
-                <List
-                  dataSource={taskRuns}
-                  renderItem={(run) => (
-                    <List.Item
-                      actions={[
-                        <Button key="open" type="link" onClick={() => void handleOpenRun(run)}>
-                          {ACTIVE_RUN_STATUSES.has(run.status)
-                            ? t('tasks.runs.openActive')
-                            : t('tasks.runs.viewResult')}
-                        </Button>,
-                        // Same affordance as the Runs page: an interrupted run
-                        // can be resumed from here, not just inspected.
-                        ...(run.status === 'interrupted'
-                          ? [
-                              <Button
-                                key="resume"
-                                type="link"
-                                onClick={() => void handleResumeRun(run)}
-                              >
-                                {t('runs.resume')}
-                              </Button>,
-                            ]
-                          : []),
-                      ]}
-                    >
-                      <List.Item.Meta
-                        title={
+            {/* TASK-135 (Milestone 26 §12): the launch card and the Runs list
+                move to the Runs tab; the thread input at the bottom starts
+                the next Run from the resolved defaults. */}
+            <Tabs
+              className="task-detail-tabs"
+              items={[
+                {
+                  key: 'overview',
+                  label: t('tasks.tabs.overview'),
+                  children: (
+                    <>
+                      <Card
+                        className="task-detail-card"
+                        title={t('tasks.detail.title')}
+                        extra={
                           <Space>
-                            <span>{run.agentType}</span>
-                            <Tag>{runStatusLabel(run, t)}</Tag>
+                            <Popconfirm
+                              title={t('tasks.detail.archiveConfirm')}
+                              onConfirm={() => void archiveTask(selected.id, true)}
+                            >
+                              <Button icon={<InboxOutlined />} disabled={saving}>
+                                {t('tasks.detail.archive')}
+                              </Button>
+                            </Popconfirm>
+                            <Popconfirm
+                              title={t('tasks.detail.deleteConfirm')}
+                              onConfirm={() => void deleteTask(selected.id)}
+                            >
+                              <Button danger icon={<DeleteOutlined />} disabled={saving} />
+                            </Popconfirm>
                           </Space>
                         }
-                        description={`${run.model ?? t('tasks.runs.defaultModel')} · ${new Date(run.createdAt).toLocaleString()}`}
-                      />
-                    </List.Item>
-                  )}
-                />
-              )}
-            </Card>
+                      >
+                        <div className="task-edit-form">
+                          <label>
+                            <Typography.Text type="secondary">
+                              {t('tasks.detail.fieldTitle')}
+                            </Typography.Text>
+                            <Input
+                              value={title}
+                              onChange={(event) => setTitle(event.target.value)}
+                            />
+                          </label>
+                          <label>
+                            <Typography.Text type="secondary">
+                              {t('tasks.detail.fieldStatus')}
+                            </Typography.Text>
+                            <Select<TaskStatus>
+                              value={selected.status}
+                              options={TASK_STATUSES.map((status) => ({
+                                value: status,
+                                label: t(`tasks.status.${status}`),
+                              }))}
+                              onChange={(status) => void updateTask({ id: selected.id, status })}
+                            />
+                          </label>
+                          <label className="task-description-field">
+                            <Typography.Text type="secondary">
+                              {t('tasks.detail.fieldDescription')}
+                            </Typography.Text>
+                            <Input.TextArea
+                              value={description}
+                              autoSize={{ minRows: 3, maxRows: 8 }}
+                              onChange={(event) => setDescription(event.target.value)}
+                            />
+                          </label>
+                          <Button
+                            type="primary"
+                            loading={saving}
+                            disabled={title.trim().length === 0}
+                            onClick={() =>
+                              void updateTask({
+                                id: selected.id,
+                                title,
+                                description: description.trim() || null,
+                              })
+                            }
+                          >
+                            {t('tasks.detail.save')}
+                          </Button>
+                        </div>
+                      </Card>
 
-            <div className="task-secondary-grid">
-              <Card className="task-detail-card" title={t('tasks.changes.title')}>
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={t('tasks.changes.empty')}
-                />
-              </Card>
-              <ArtifactPanel taskId={selected.id} runIds={taskRuns.map((run) => run.id)} />
-            </div>
+                      <CriteriaPanel taskId={selected.id} />
 
-            <Card className="task-detail-card" title={t('tasks.activity.title')}>
-              <Timeline
-                items={[
-                  ...taskRuns.map((run) => ({
-                    color: ACTIVE_RUN_STATUSES.has(run.status)
-                      ? 'blue'
-                      : run.status === 'completed'
-                        ? 'green'
-                        : 'gray',
-                    children: `${run.agentType} · ${runStatusLabel(run, t)} · ${new Date(run.updatedAt).toLocaleString()}`,
-                  })),
-                  {
-                    color: 'gray',
-                    children: t('tasks.activity.taskCreated', {
-                      time: new Date(selected.createdAt).toLocaleString(),
-                    }),
-                  },
-                ]}
-              />
-            </Card>
+                      <WorkflowRunPanel workspaceId={workspace.id} taskId={selected.id} />
+
+                      <ReviewPanelsPanel taskId={selected.id} />
+
+                      <div className="task-secondary-grid">
+                        <Card className="task-detail-card" title={t('tasks.changes.title')}>
+                          <Empty
+                            image={Empty.PRESENTED_IMAGE_SIMPLE}
+                            description={t('tasks.changes.empty')}
+                          />
+                        </Card>
+                        <ArtifactPanel
+                          taskId={selected.id}
+                          runIds={taskRuns.map((run) => run.id)}
+                        />
+                      </div>
+
+                      <Card className="task-detail-card" title={t('tasks.activity.title')}>
+                        <Timeline
+                          items={[
+                            ...taskRuns.map((run) => ({
+                              color: ACTIVE_RUN_STATUSES.has(run.status)
+                                ? 'blue'
+                                : run.status === 'completed'
+                                  ? 'green'
+                                  : 'gray',
+                              children: `${run.agentType} · ${runStatusLabel(run, t)} · ${new Date(run.updatedAt).toLocaleString()}`,
+                            })),
+                            {
+                              color: 'gray',
+                              children: t('tasks.activity.taskCreated', {
+                                time: new Date(selected.createdAt).toLocaleString(),
+                              }),
+                            },
+                          ]}
+                        />
+                      </Card>
+                    </>
+                  ),
+                },
+                {
+                  key: 'runs',
+                  label: t('tasks.tabs.runs'),
+                  children: (
+                    <>
+                      <Card className="task-detail-card" title={t('tasks.runLauncher.title')}>
+                        <Alert
+                          className="page-alert attended-warning"
+                          type="warning"
+                          showIcon
+                          message={t('agent.attendedWarning')}
+                        />
+                        <div className="task-run-launcher">
+                          <AgentPicker
+                            definitions={definitions}
+                            health={runtimeHealth}
+                            value={agentId}
+                            onChange={setAgentId}
+                          />
+                          <Input.TextArea
+                            value={prompt}
+                            autoSize={{ minRows: 2, maxRows: 5 }}
+                            onChange={(event) => setPrompt(event.target.value)}
+                            placeholder={t('tasks.runLauncher.promptPlaceholder')}
+                          />
+                          <AccountSelect
+                            agentId={agentId}
+                            value={accountId}
+                            onChange={setAccountId}
+                          />
+                          <Button
+                            type="primary"
+                            loading={starting}
+                            disabled={agentId === undefined}
+                            onClick={() => {
+                              if (agentId === undefined) return
+                              void startRun({
+                                workspaceId: workspace.id,
+                                taskId: selected.id,
+                                agentType: agentId,
+                                prompt: prompt.trim() || undefined,
+                                ...(accountId === undefined ? {} : { accountProfileId: accountId }),
+                                executionMode: 'attended',
+                                approvalMode: 'manual',
+                              })
+                            }}
+                          >
+                            {t('tasks.runLauncher.start')}
+                          </Button>
+                        </div>
+                      </Card>
+
+                      <Card
+                        className="task-detail-card"
+                        title={t('tasks.runs.title', { count: taskRuns.length })}
+                      >
+                        {taskRuns.length === 0 ? (
+                          <Empty
+                            image={Empty.PRESENTED_IMAGE_SIMPLE}
+                            description={t('tasks.runs.empty')}
+                          />
+                        ) : (
+                          <List
+                            dataSource={taskRuns}
+                            renderItem={(run) => (
+                              <List.Item
+                                actions={[
+                                  <Button
+                                    key="open"
+                                    type="link"
+                                    onClick={() => void handleOpenRun(run)}
+                                  >
+                                    {ACTIVE_RUN_STATUSES.has(run.status)
+                                      ? t('tasks.runs.openActive')
+                                      : t('tasks.runs.viewResult')}
+                                  </Button>,
+                                  // Same affordance as the Runs page: an interrupted run
+                                  // can be resumed from here, not just inspected.
+                                  ...(run.status === 'interrupted'
+                                    ? [
+                                        <Button
+                                          key="resume"
+                                          type="link"
+                                          onClick={() => void handleResumeRun(run)}
+                                        >
+                                          {t('runs.resume')}
+                                        </Button>,
+                                      ]
+                                    : []),
+                                ]}
+                              >
+                                <List.Item.Meta
+                                  title={
+                                    <Space>
+                                      <span>{run.agentType}</span>
+                                      <Tag>{runStatusLabel(run, t)}</Tag>
+                                    </Space>
+                                  }
+                                  description={`${run.model ?? t('tasks.runs.defaultModel')} · ${new Date(run.createdAt).toLocaleString()}`}
+                                />
+                              </List.Item>
+                            )}
+                          />
+                        )}
+                      </Card>
+                    </>
+                  ),
+                },
+              ]}
+            />
+
+            <QuickStartInput workspaceId={workspace.id} taskId={selected.id} />
           </div>
         )}
       </div>
@@ -499,6 +556,8 @@ export function TaskPage() {
             <RateLimitAlert run={openRun} onOpenRun={(next) => void handleOpenRun(next)} />
             <Tabs
               className="run-detail-tabs"
+              activeKey={runDetailTab.activeTab}
+              onChange={runDetailTab.onTabChange}
               items={[
                 {
                   key: 'output',
@@ -512,6 +571,24 @@ export function TaskPage() {
                         run={openRun}
                         initialData={output[openRun.id]}
                       />
+                    </div>
+                  ),
+                },
+                {
+                  key: 'activity',
+                  label: t('tasks.drawer.tabActivity'),
+                  children: (
+                    <div className="run-detail-tab">
+                      <RunActivityPanel runId={openRun.id} />
+                    </div>
+                  ),
+                },
+                {
+                  key: 'progress',
+                  label: t('tasks.drawer.tabProgress'),
+                  children: (
+                    <div className="run-detail-tab">
+                      <RunProgressPanel runId={openRun.id} />
                     </div>
                   ),
                 },

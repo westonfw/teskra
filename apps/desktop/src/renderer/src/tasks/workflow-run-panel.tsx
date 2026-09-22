@@ -19,6 +19,8 @@ import { useEffect, useState } from 'react'
 import type {
   CriteriaReviewOutcome,
   CriterionResult,
+  FullWorkflowLaunchDefaults,
+  PublicAppError,
   WorkflowRunStatus,
   WorkflowStepStatus,
 } from '@teskra/contracts'
@@ -28,6 +30,13 @@ import { useTranslation } from '../i18n'
 import { useAgentStore } from '../stores/agent-store'
 import { latestScoresByCriterion } from '../stores/review-store'
 import { useWorkflowRunStore } from '../stores/workflow-run-store'
+import {
+  buildFullWorkflowStartRequest,
+  launchSummaryModel,
+  openWorkflowLaunchDialog,
+  showLaunchEditor,
+  showLaunchSummary,
+} from './workflow-launch'
 
 /**
  * WorkflowRunPanel (TASK-063) — the default Full Workflow on the Task page:
@@ -102,32 +111,56 @@ export function WorkflowRunPanel({ workspaceId, taskId }: WorkflowRunPanelProps)
   const loadDefinitions = useAgentStore((state) => state.loadDefinitions)
   const { t } = useTranslation()
 
-  // Optional launch overrides; everything left empty resolves server-side
-  // (AgentRegistry default roles → repo-local full.* definition, ADR-0005).
+  // TASK-137 two-state launch dialog: the default state is a one-line summary
+  // of the resolved defaults (launchSummary below); 'edit' expands the three
+  // optional overrides. Overrides left empty resolve server-side (AgentRegistry
+  // default roles → repo-local full.* definition, ADR-0005).
   const [launchOpen, setLaunchOpen] = useState(false)
-  const [implementer, setImplementer] = useState<string | undefined>(undefined)
-  const [reviewers, setReviewers] = useState<string[]>([])
-  const [testCommand, setTestCommand] = useState('')
+  const [launch, setLaunch] = useState(openWorkflowLaunchDialog)
+  const [launchDefaults, setLaunchDefaults] = useState<FullWorkflowLaunchDefaults | null>(null)
+  const [launchDefaultsLoading, setLaunchDefaultsLoading] = useState(false)
+  const [launchDefaultsError, setLaunchDefaultsError] = useState<PublicAppError | null>(null)
 
   useEffect(() => startSynchronization(taskId), [startSynchronization, taskId])
   useEffect(() => {
     if (launchOpen && definitions.length === 0) void loadDefinitions()
   }, [launchOpen, definitions.length, loadDefinitions])
 
+  // Resolve the summary defaults each time the dialog opens (trusted-repo
+  // testCommand included, TASK-118); a failure drops into the edit state so
+  // the dialog stays usable, with the error shown inside it.
+  useEffect(() => {
+    if (!launchOpen) return
+    let stale = false
+    setLaunchDefaultsLoading(true)
+    setLaunchDefaultsError(null)
+    void window.teskra.workflow.fullLaunchDefaults({ workspaceId }).then((result) => {
+      if (stale) return
+      setLaunchDefaultsLoading(false)
+      if (result.ok) {
+        setLaunchDefaults(result.data)
+      } else {
+        setLaunchDefaults(null)
+        setLaunchDefaultsError(result.error)
+        setLaunch((state) => showLaunchEditor(state))
+      }
+    })
+    return () => {
+      stale = true
+    }
+  }, [launchOpen, workspaceId])
+
   const agentOptions = definitions.map((definition) => ({
     value: definition.id,
     label: `${definition.name} (${definition.id})`,
   }))
 
+  const launchSummary = launchDefaults === null ? undefined : launchSummaryModel(launchDefaults)
+
   const confirmLaunch = async (): Promise<void> => {
-    const command = testCommand.trim()
-    const result = await startFullWorkflow({
-      workspaceId,
-      taskId,
-      ...(implementer === undefined ? {} : { implementer }),
-      ...(reviewers.length === 0 ? {} : { reviewers }),
-      ...(command === '' ? {} : { testCommand: command }),
-    })
+    const result = await startFullWorkflow(
+      buildFullWorkflowStartRequest({ workspaceId, taskId, ...launch }),
+    )
     if (result !== undefined) setLaunchOpen(false)
   }
 
@@ -143,7 +176,11 @@ export function WorkflowRunPanel({ workspaceId, taskId }: WorkflowRunPanelProps)
           type="primary"
           icon={<RocketOutlined />}
           loading={starting}
-          onClick={() => setLaunchOpen(true)}
+          onClick={() => {
+            // Reopen on the default (summary) state; overrides are kept.
+            setLaunch((state) => showLaunchSummary(state))
+            setLaunchOpen(true)
+          }}
         >
           {t('workflow.start')}
         </Button>
@@ -321,32 +358,76 @@ export function WorkflowRunPanel({ workspaceId, taskId }: WorkflowRunPanelProps)
           {/* Launch failures keep the modal open — surface the reason inside
               it, otherwise the page-level alert sits hidden behind the modal. */}
           {error !== undefined && <AppErrorAlert error={error} onClose={clearError} />}
-          <Typography.Text type="secondary">{t('workflow.launch.hint')}</Typography.Text>
-          <Typography.Text strong>{t('workflow.launch.implementer')}</Typography.Text>
-          <Select
-            style={{ width: '100%' }}
-            allowClear
-            options={agentOptions}
-            value={implementer}
-            placeholder={t('workflow.launch.implementerPlaceholder')}
-            onChange={(value: string | undefined) => setImplementer(value)}
-          />
-          <Typography.Text strong>{t('workflow.launch.reviewers')}</Typography.Text>
-          <Select
-            style={{ width: '100%' }}
-            mode="multiple"
-            allowClear
-            options={agentOptions}
-            value={reviewers}
-            placeholder={t('workflow.launch.reviewersPlaceholder')}
-            onChange={(value: string[]) => setReviewers(value)}
-          />
-          <Typography.Text strong>{t('workflow.launch.testCommand')}</Typography.Text>
-          <Input
-            value={testCommand}
-            placeholder={t('workflow.launch.testCommandPlaceholder')}
-            onChange={(event) => setTestCommand(event.target.value)}
-          />
+          {launchDefaultsError !== null && (
+            <AppErrorAlert
+              error={launchDefaultsError}
+              onClose={() => setLaunchDefaultsError(null)}
+            />
+          )}
+          {launch.mode === 'summary' ? (
+            launchSummary === undefined ? (
+              <Spin spinning={launchDefaultsLoading} />
+            ) : (
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Typography.Text>
+                  {t('workflow.launch.summary', {
+                    implementer: launchSummary.implementer,
+                    reviewers:
+                      launchSummary.reviewersText ?? t('workflow.launch.summary.noReviewers'),
+                    testCommand: launchSummary.testCommand,
+                  })}
+                </Typography.Text>
+                {launchSummary.testCommandFromRepo && (
+                  <Typography.Text type="secondary">
+                    {t('workflow.launch.summary.repoCommand')}
+                  </Typography.Text>
+                )}
+                <a onClick={() => setLaunch(showLaunchEditor(launch))}>
+                  {t('workflow.launch.summary.edit')}
+                </a>
+              </Space>
+            )
+          ) : (
+            <>
+              <Typography.Text type="secondary">{t('workflow.launch.hint')}</Typography.Text>
+              <Typography.Text strong>{t('workflow.launch.implementer')}</Typography.Text>
+              <Select
+                style={{ width: '100%' }}
+                allowClear
+                options={agentOptions}
+                value={launch.implementer}
+                placeholder={t('workflow.launch.implementerPlaceholder')}
+                onChange={(value: string | undefined) =>
+                  setLaunch((state) => ({ ...state, implementer: value }))
+                }
+              />
+              <Typography.Text strong>{t('workflow.launch.reviewers')}</Typography.Text>
+              <Select
+                style={{ width: '100%' }}
+                mode="multiple"
+                allowClear
+                options={agentOptions}
+                value={[...launch.reviewers]}
+                placeholder={t('workflow.launch.reviewersPlaceholder')}
+                onChange={(value: string[]) =>
+                  setLaunch((state) => ({ ...state, reviewers: value }))
+                }
+              />
+              <Typography.Text strong>{t('workflow.launch.testCommand')}</Typography.Text>
+              <Input
+                value={launch.testCommand}
+                placeholder={t('workflow.launch.testCommandPlaceholder')}
+                onChange={(event) =>
+                  setLaunch((state) => ({ ...state, testCommand: event.target.value }))
+                }
+              />
+              {launchDefaults !== null && (
+                <a onClick={() => setLaunch(showLaunchSummary(launch))}>
+                  {t('workflow.launch.summary.back')}
+                </a>
+              )}
+            </>
+          )}
         </Space>
       </Modal>
     </Card>

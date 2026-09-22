@@ -440,6 +440,35 @@ export const startFullWorkflowRequestSchema = z.strictObject({
 })
 export type StartFullWorkflowRequest = z.infer<typeof startFullWorkflowRequestSchema>
 
+export const fullWorkflowLaunchDefaultsRequestSchema = z.strictObject({
+  workspaceId: ipcIdSchema,
+})
+export type FullWorkflowLaunchDefaultsRequest = z.infer<
+  typeof fullWorkflowLaunchDefaultsRequestSchema
+>
+
+/**
+ * TASK-137 (Milestone 26 §10): the launch dialog's default-state summary —
+ * what a no-input start of the default full workflow would run with.
+ * `implementer` / `reviewers` come from the DefaultSelectionService
+ * (TASK-134); `testCommand` comes from the repo-local `full` definition when
+ * the workspace is trusted (TASK-118), otherwise the built-in default —
+ * `testCommandFromRepo` says which, so the dialog can note that a repo-defined
+ * command asks for confirmation before it runs. Display-only: the launch
+ * itself still resolves every omitted field server-side.
+ */
+export const fullWorkflowLaunchDefaultsSchema = z.strictObject({
+  /** AgentRegistry id of the resolved implementer/fixer agent. */
+  implementer: z.string().min(1),
+  /** AgentRegistry ids of the resolved review-panel reviewers (may be empty). */
+  reviewers: z.array(z.string().min(1)),
+  /** Shell step command the Build/Test step would run. */
+  testCommand: z.string().min(1),
+  /** true = the command came from the repo-local `full` definition (trusted workspace). */
+  testCommandFromRepo: z.boolean(),
+})
+export type FullWorkflowLaunchDefaults = z.infer<typeof fullWorkflowLaunchDefaultsSchema>
+
 /**
  * A settled full-workflow launch: the WorkflowRun (final status — 'completed'
  * on pass, 'needs_user_review' on a triggered cap), the worktree it ran in,

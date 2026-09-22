@@ -61,6 +61,8 @@ test.describe('Task Runs card resume', () => {
       // The task's Runs card exposes Resume for the interrupted run.
       await page.getByRole('menuitem', { name: 'Tasks' }).click()
       await page.locator('.task-list-item', { hasText: 'Task-resume E2E' }).click()
+      // TASK-135: the Runs card lives on the Runs tab now.
+      await page.getByRole('tab', { name: 'Runs', exact: true }).click()
       const runsCard = page.locator('.task-detail-card', { hasText: /Runs ·/u }).last()
       await expect(runsCard.locator('.ant-tag', { hasText: 'interrupted' })).toBeVisible({
         timeout: 20_000,

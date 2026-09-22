@@ -116,6 +116,35 @@ export const enUS = {
   'runs.queuedReason.worktree_busy': 'queued — worktree in use',
   'runs.queuedReason.fifo': 'queued — behind earlier runs',
 
+  // TASK-125 (§14): Run detail Activity / Progress tabs.
+  'runs.tab.terminal': 'Terminal',
+  'runs.tab.activity': 'Activity',
+  'runs.tab.progress': 'Progress',
+  'runs.feed.loadMore': 'Load more',
+  'runs.observation.empty':
+    'No observations recorded — structured streams are parsed only for exec runs of Agents that declare a structured output protocol.',
+  'runs.observation.kind.session': 'Session',
+  'runs.observation.kind.assistant_text': 'Assistant',
+  'runs.observation.kind.tool_call': 'Tool call',
+  'runs.observation.kind.tool_result': 'Tool result',
+  'runs.observation.kind.usage': 'Usage',
+  'runs.observation.kind.error': 'Error',
+  'runs.observation.kind.result': 'Result',
+  'runs.observation.toolInput': 'Input',
+  'runs.observation.toolOutput': 'Result',
+  'runs.observation.usage': '{input} in · {output} out',
+  'runs.observation.usageCost': '· {cost}',
+  'runs.observation.duration': '{duration}s',
+  'runs.observation.turns': '{turns} turns',
+  'runs.observation.resultOk': 'Run finished successfully',
+  'runs.observation.resultFailed': 'Run finished with an error',
+  'runs.progress.empty':
+    'No progress events yet — the Agent reports progress through its progress file.',
+  'runs.progress.kind.progress': 'Progress',
+  'runs.progress.kind.blocker': 'Blocker',
+  'runs.progress.kind.question': 'Question',
+  'runs.progress.kind.note': 'Note',
+
   'permissions.decision.title': 'Approval decisions',
   'permissions.decision.description':
     '{agent} asks for approval in its own terminal prompt. Decisions made here update the rules projected into the CLI before the next Run — they do not affect a command that is already executing.',
@@ -371,6 +400,8 @@ export const enUS = {
   'tasks.drawer.runResult': 'Run result',
   'tasks.drawer.agentRun': '{name} Run',
   'tasks.drawer.tabOutput': 'Output',
+  'tasks.drawer.tabActivity': 'Activity',
+  'tasks.drawer.tabProgress': 'Progress',
   'tasks.drawer.tabCommands': 'Commands',
   'tasks.status.draft': 'draft',
   'tasks.status.ready': 'ready',
@@ -500,6 +531,13 @@ export const enUS = {
   'workflow.launch.testCommand': 'Test command (optional)',
   'workflow.launch.testCommandPlaceholder': 'Default: npm test or repo definition',
   'workflow.launch.confirm': 'Start',
+  'workflow.launch.summary':
+    'Implement with {implementer}, review by {reviewers}, test command: {testCommand}',
+  'workflow.launch.summary.noReviewers': 'no reviewers',
+  'workflow.launch.summary.repoCommand':
+    'The test command comes from the repo full definition and will ask for confirmation before it runs.',
+  'workflow.launch.summary.edit': 'Change',
+  'workflow.launch.summary.back': 'Back to defaults',
 
   'worktree.title': 'Worktree',
   'worktree.gone': 'The linked worktree record is gone.',
@@ -939,6 +977,21 @@ export const enUS = {
   'runDefaults.reason.executionMode.fixed': 'Thread runs are orchestrated (isolated)',
   'runDefaults.reason.approvalMode.fixed': 'Approval defaults to safe-auto',
   'runDefaults.reason.isolation.fixed': 'Runs in an isolated Git worktree',
+
+  // TASK-135 (Milestone 26 §12): the thread-first quick-start input.
+  'quickStart.placeholder': 'Describe what you want done…',
+  'quickStart.send': 'Send',
+  'quickStart.account.auto': 'auto account',
+  'quickStart.executionMode.orchestrated': 'isolated',
+  'quickStart.approvalMode.safeAuto': 'safe-auto',
+  'quickStart.fixedNote':
+    'Thread runs always use exec · isolated · safe-auto; launch attended + manual runs from the terminal card on the Runs tab.',
+  'quickStart.unavailable':
+    'No Agent is available for this workspace. Install or detect one first.',
+  'quickStart.openAgentsSettings': 'Open Settings → Agents',
+
+  'tasks.tabs.overview': 'Overview',
+  'tasks.tabs.runs': 'Runs',
 } as const
 
 export type TranslationKey = keyof typeof enUS

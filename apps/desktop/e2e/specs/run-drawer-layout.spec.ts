@@ -23,6 +23,8 @@ test.describe('Run drawer layout', () => {
       await createDialog.getByPlaceholder('Task title').fill('Drawer layout')
       await createDialog.getByRole('button', { name: 'OK' }).click()
       await page.locator('.task-list-item', { hasText: 'Drawer layout' }).click()
+      // TASK-135: the launcher and the Runs list live on the Runs tab now.
+      await page.getByRole('tab', { name: 'Runs', exact: true }).click()
       const launcher = page.locator('.task-run-launcher')
       await launcher.locator('.agent-picker').click()
       await page.locator('.ant-select-item-option', { hasText: /^Fake Agent$/u }).click()
@@ -74,6 +76,8 @@ test.describe('Run drawer layout', () => {
       await createDialog.getByPlaceholder('Task title').fill('Fullscreen PTY')
       await createDialog.getByRole('button', { name: 'OK' }).click()
       await page.locator('.task-list-item', { hasText: 'Fullscreen PTY' }).click()
+      // TASK-135: the launcher and the Runs list live on the Runs tab now.
+      await page.getByRole('tab', { name: 'Runs', exact: true }).click()
       const launcher = page.locator('.task-run-launcher')
       await launcher.locator('.agent-picker').click()
       await page.locator('.ant-select-item-option', { hasText: /^Fake Agent$/u }).click()

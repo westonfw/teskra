@@ -44,6 +44,7 @@ const bridge: TeskraBridge = {
     delete: (request) => invoke(IPC_CHANNELS.taskDelete, request),
     get: (request) => invoke(IPC_CHANNELS.taskGet, request),
     list: (request) => invoke(IPC_CHANNELS.taskList, request),
+    sendMessage: (request) => invoke(IPC_CHANNELS.taskSendMessage, request),
   },
   criteria: {
     listSets: (request) => invoke(IPC_CHANNELS.criteriaListSets, request),
@@ -220,6 +221,7 @@ const bridge: TeskraBridge = {
     iterate: (request) => invoke(IPC_CHANNELS.workflowIterate, request),
     startFullWorkflow: (request) => invoke(IPC_CHANNELS.workflowStartFull, request),
     runSummary: (request) => invoke(IPC_CHANNELS.workflowRunSummary, request),
+    fullLaunchDefaults: (request) => invoke(IPC_CHANNELS.workflowFullLaunchDefaults, request),
   },
   decision: {
     list: (request = {}) => invoke(IPC_CHANNELS.decisionList, request),

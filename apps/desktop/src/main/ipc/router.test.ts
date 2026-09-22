@@ -207,6 +207,7 @@ function fakeRuntime(): TeskraRuntime {
       delete: vi.fn(() => ok(true)),
       get: vi.fn(() => ok(TASK)),
       list: vi.fn(() => ok([TASK])),
+      sendMessage: vi.fn(async () => ok({ taskId: TASK.id, kind: 'run' as const, id: 'run-1' })),
     },
     criteria: {
       listSets: vi.fn(() => ok([CRITERIA_SET])),
@@ -635,6 +636,14 @@ function fakeRuntime(): TeskraRuntime {
           criteriaOutcome: null,
         }),
       ),
+      fullLaunchDefaults: vi.fn(async () =>
+        ok({
+          implementer: 'codex',
+          reviewers: ['claude-code'],
+          testCommand: 'npm test',
+          testCommandFromRepo: false,
+        }),
+      ),
     },
     dispose: vi.fn(async () => ok(undefined)),
   }
@@ -906,6 +915,32 @@ describe('Typed IPC Router (TASK-020)', () => {
       data: [TASK],
     })
     expect(runtime.task.create).toHaveBeenCalledWith({ workspaceId: 'ws1', title: 'Demo Task' })
+  })
+
+  it('routes task send-message through the runtime facade (TASK-135)', async () => {
+    const ipc = new FakeIpcMain()
+    const runtime = fakeRuntime()
+    registerIpcRouter(ipc, () => runtime)
+
+    const request = {
+      workspaceId: 'ws1',
+      text: 'Fix the login page\nUse OAuth',
+      overrides: { agentType: 'codex' },
+    }
+    expect(await ipc.invoke(IPC_CHANNELS.taskSendMessage, request)).toEqual({
+      ok: true,
+      data: { taskId: TASK.id, kind: 'run', id: 'run-1' },
+    })
+    expect(runtime.task.sendMessage).toHaveBeenCalledWith(request)
+
+    // strictObject: a mode/approval override cannot cross the IPC boundary.
+    const smuggled = await ipc.invoke(IPC_CHANNELS.taskSendMessage, {
+      workspaceId: 'ws1',
+      text: 'hello',
+      overrides: { agentType: 'codex', approvalMode: 'manual' },
+    })
+    expect(smuggled).toMatchObject({ ok: false, error: { code: 'VALIDATION_FAILED' } })
+    expect(runtime.task.sendMessage).toHaveBeenCalledTimes(1)
   })
 
   it('validates Facade responses and converts thrown errors', async () => {

@@ -145,6 +145,10 @@ export function registerIpcRouter(
     withRuntime((runtime, request) => runtime.task.list(request)),
   )
   register(
+    ipcChannelDefinitions.taskSendMessage,
+    withRuntime((runtime, request) => runtime.task.sendMessage(request)),
+  )
+  register(
     ipcChannelDefinitions.criteriaListSets,
     withRuntime((runtime, request) => runtime.criteria.listSets(request)),
   )
@@ -661,6 +665,10 @@ export function registerIpcRouter(
   register(
     ipcChannelDefinitions.workflowRunSummary,
     withRuntime((runtime, request) => runtime.workflow.runSummary(request)),
+  )
+  register(
+    ipcChannelDefinitions.workflowFullLaunchDefaults,
+    withRuntime((runtime, request) => runtime.workflow.fullLaunchDefaults(request)),
   )
   // TASK-128 (ADR-0014): the Decision Inbox.
   register(

@@ -97,10 +97,12 @@ import { createCriteriaManager } from '../tasks/criteria-manager'
 import { createMemoryManager } from '../memory/memory-manager'
 import { createContextBuilder } from '../memory/context-builder'
 import { createTaskManager } from '../tasks/task-manager'
+import { createSendTaskMessageService } from '../tasks/send-message-service'
 import { createWorkflowDefinitionLoader } from '../workflows/definition-loader'
 import { createCriteriaGateStepExecutor } from '../workflows/criteria-gate-step-executor'
 import { createDispatchService } from '../workflows/dispatch-service'
 import { createFullWorkflowService } from '../workflows/full-workflow-service'
+import { createWorkflowLaunchDefaultsService } from '../workflows/workflow-launch-defaults'
 import { createIterationController } from '../workflows/iteration-controller'
 import { createReviewPanelStepExecutor } from '../workflows/review-panel-step-executor'
 import { createShellConfirmationService } from '../workflows/shell-confirmation'
@@ -971,6 +973,13 @@ export async function composeTeskraRuntime(
       })
     },
   })
+  // TASK-137 (Milestone 26 §10): the launch dialog's default-state summary —
+  // DefaultSelectionService identities + the repo full.* testCommand (trusted only).
+  const workflowLaunchDefaults = createWorkflowLaunchDefaultsService({
+    workspaces: repositories.workspaces,
+    definitions: workflowDefinitions,
+    defaults: defaultSelectionService,
+  })
   const reconciled = await createReconciliationService({
     runs: repositories.agentRuns,
     agentEvents: repositories.agentEvents,
@@ -1008,6 +1017,16 @@ export async function composeTeskraRuntime(
     )
   }
 
+  // TASK-135 (Milestone 26 §9): the thread-first quick-start entry — Main
+  // side of teskra:task:send-message (Task from first line + first Run with
+  // the TASK-134 defaults and a pre-built worktree).
+  const sendTaskMessageService = createSendTaskMessageService({
+    tasks: taskManager,
+    defaults: defaultSelectionService,
+    worktreeManager,
+    agents: agentManager,
+  })
+
   let disposed = false
   const runtime: TeskraRuntime = {
     events,
@@ -1018,6 +1037,7 @@ export async function composeTeskraRuntime(
       delete: ({ id }) => taskManager.delete(id),
       get: ({ id }) => taskManager.get(id),
       list: (request) => taskManager.list(request),
+      sendMessage: (request) => sendTaskMessageService.sendMessage(request),
     },
     criteria: {
       listSets: (request) => criteriaManager.listSets(request),
@@ -1170,6 +1190,7 @@ export async function composeTeskraRuntime(
       iterate: (request) => iterationController.iterate(request),
       startFullWorkflow: (request) => fullWorkflow.start(request),
       runSummary: (request) => fullWorkflow.summary(request),
+      fullLaunchDefaults: (request) => workflowLaunchDefaults.resolve(request.workspaceId),
     },
     recovery: {
       list: (request) => recoveryCenter.list(request),

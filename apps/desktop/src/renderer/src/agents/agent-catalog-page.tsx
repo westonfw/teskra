@@ -10,6 +10,7 @@ import {
   Select,
   Space,
   Spin,
+  Tabs,
   Tag,
   Typography,
 } from 'antd'
@@ -37,6 +38,8 @@ import { AgentPicker } from './agent-picker'
 import { AgentRunTerminal } from './agent-run-terminal'
 import { restartAgentRunRequest, shortDuration } from './agent-watchdog'
 import { RateLimitAlert } from './rate-limit-alert'
+import { RunActivityPanel, useRunDetailTab } from './run-activity-panel'
+import { RunProgressPanel } from './run-progress-panel'
 
 type Translate = (key: TranslationKey, params?: TranslationParams) => string
 
@@ -483,6 +486,8 @@ function RunDetail({
 }: RunDetailProps) {
   const { t } = useTranslation()
   const workspace = useWorkspaceStore((state) => state.current)
+  // TASK-125: exec runs with a structured stream land on the Activity tab.
+  const detailTab = useRunDetailTab(run)
   return (
     <div className="run-detail">
       {run.executionMode === 'attended' && run.worktreeId === undefined && (
@@ -553,7 +558,40 @@ function RunDetail({
         </Card>
       )}
       {workspace !== undefined && <RunWorktreePanel run={run} workspace={workspace} />}
-      <AgentRunTerminal key={run.id} run={run} initialData={output} />
+      <Tabs
+        className="run-detail-tabs"
+        activeKey={detailTab.activeTab}
+        onChange={detailTab.onTabChange}
+        items={[
+          {
+            key: 'output',
+            label: t('runs.tab.terminal'),
+            children: (
+              <div className="run-detail-tab">
+                <AgentRunTerminal key={run.id} run={run} initialData={output} />
+              </div>
+            ),
+          },
+          {
+            key: 'activity',
+            label: t('runs.tab.activity'),
+            children: (
+              <div className="run-detail-tab">
+                <RunActivityPanel runId={run.id} />
+              </div>
+            ),
+          },
+          {
+            key: 'progress',
+            label: t('runs.tab.progress'),
+            children: (
+              <div className="run-detail-tab">
+                <RunProgressPanel runId={run.id} />
+              </div>
+            ),
+          },
+        ]}
+      />
       {ACTIVE_STATUSES.has(run.status) && (
         <Button danger onClick={onCancel}>
           {t('runs.interruptRun')}

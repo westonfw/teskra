@@ -128,6 +128,8 @@ import type {
   ScanRunArtifactsRequest,
   SelectWorkspaceDirectoryRequest,
   SendAgentRunInputRequest,
+  SendTaskMessageRequest,
+  SendTaskMessageResult,
   SetAgentExecutableOverrideRequest,
   SetCredentialRequest,
   SetDefaultAccountProfileRequest,
@@ -135,6 +137,8 @@ import type {
   StartAccountLoginRequest,
   StartFullWorkflowRequest,
   StartReviewPanelRequest,
+  FullWorkflowLaunchDefaults,
+  FullWorkflowLaunchDefaultsRequest,
   FullWorkflowRunSummary,
   FullWorkflowStartResult,
   SystemHealth,
@@ -343,6 +347,8 @@ export interface TaskPort {
   delete(request: TaskIdRequest): IpcResult<boolean>
   get(request: TaskIdRequest): IpcResult<Task | null>
   list(request: ListTasksRequest): IpcResult<readonly Task[]>
+  /** TASK-135 (Milestone 26 §9): thread-first quick-start — send a message, start the Run. */
+  sendMessage(request: SendTaskMessageRequest): Promise<IpcResult<SendTaskMessageResult>>
 }
 
 export interface CriteriaPort {
@@ -530,6 +536,14 @@ export interface WorkflowPort {
    */
   startFullWorkflow(request: StartFullWorkflowRequest): Promise<IpcResult<FullWorkflowStartResult>>
   runSummary(request: WorkflowRunIdRequest): Promise<IpcResult<FullWorkflowRunSummary>>
+  /**
+   * TASK-137 (Milestone 26 §10): the launch dialog's default-state summary —
+   * DefaultSelectionService implementer / reviewers plus the testCommand of the
+   * repo-local `full` definition (trusted workspaces only, TASK-118).
+   */
+  fullLaunchDefaults(
+    request: FullWorkflowLaunchDefaultsRequest,
+  ): Promise<IpcResult<FullWorkflowLaunchDefaults>>
 }
 
 export type FutureRuntimePort = object
